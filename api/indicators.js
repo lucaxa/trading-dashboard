@@ -1,8 +1,8 @@
 /*
 TradeMind Pro
-V6 Technical Indicator API
+V9 Historical Data + Technical Indicator API
 
-INDstocks → Vercel → Indicators
+INDstocks → Vercel → Historical Candles → Indicators → V9 Backtest
 
 Indicators:
 - EMA 9
@@ -15,31 +15,42 @@ Indicators:
 - Latest Candle
 - Previous Candle
 
-Paper analysis only.
-No orders are placed.
+V9:
+- Full historical candle array exposed
+- Designed for historical backtesting
+- Paper analysis only
+- NO REAL ORDERS
 */
 
 
-// =========================
+// ======================================================
 // EMA
-// =========================
+// ======================================================
 
 function ema(values, period) {
 
-    if (values.length < period) {
+    if (
+        !Array.isArray(values) ||
+        values.length < period
+    ) {
+
         return null;
+
     }
 
     const multiplier =
         2 / (period + 1);
 
+
     let emaValue =
         values
             .slice(0, period)
             .reduce(
-                (sum, value) => sum + value,
+                (sum, value) =>
+                    sum + value,
                 0
             ) / period;
+
 
     for (
         let i = period;
@@ -49,19 +60,22 @@ function ema(values, period) {
 
         emaValue =
             (
-                values[i] - emaValue
+                values[i] -
+                emaValue
             ) * multiplier +
             emaValue;
 
     }
 
+
     return emaValue;
+
 }
 
 
-// =========================
+// ======================================================
 // RSI
-// =========================
+// ======================================================
 
 function rsi(
     values,
@@ -69,16 +83,19 @@ function rsi(
 ) {
 
     if (
-        values.length <
-        period + 1
+        !Array.isArray(values) ||
+        values.length < period + 1
     ) {
 
         return null;
 
     }
 
+
     let gains = 0;
+
     let losses = 0;
+
 
     for (
         let i = 1;
@@ -90,11 +107,14 @@ function rsi(
             values[i] -
             values[i - 1];
 
+
         if (change > 0) {
 
             gains += change;
 
-        } else {
+        }
+
+        else {
 
             losses +=
                 Math.abs(change);
@@ -103,11 +123,14 @@ function rsi(
 
     }
 
+
     let averageGain =
         gains / period;
 
+
     let averageLoss =
         losses / period;
+
 
     for (
         let i = period + 1;
@@ -119,11 +142,20 @@ function rsi(
             values[i] -
             values[i - 1];
 
+
         const gain =
-            Math.max(change, 0);
+            Math.max(
+                change,
+                0
+            );
+
 
         const loss =
-            Math.max(-change, 0);
+            Math.max(
+                -change,
+                0
+            );
+
 
         averageGain =
             (
@@ -131,6 +163,7 @@ function rsi(
                 (period - 1) +
                 gain
             ) / period;
+
 
         averageLoss =
             (
@@ -141,15 +174,20 @@ function rsi(
 
     }
 
-    if (averageLoss === 0) {
+
+    if (
+        averageLoss === 0
+    ) {
 
         return 100;
 
     }
 
+
     const rs =
         averageGain /
         averageLoss;
+
 
     return (
         100 -
@@ -159,9 +197,36 @@ function rsi(
 }
 
 
-// =========================
+// ======================================================
+// IST DATE
+// ======================================================
+
+function istDate(ts) {
+
+    const date =
+        new Date(
+            Number(ts) * 1000
+        );
+
+
+    return new Date(
+        date.getTime() +
+        (
+            5.5 *
+            60 *
+            60 *
+            1000
+        )
+    )
+        .toISOString()
+        .slice(0, 10);
+
+}
+
+
+// ======================================================
 // VWAP
-// =========================
+// ======================================================
 
 function vwap(candles) {
 
@@ -171,38 +236,6 @@ function vwap(candles) {
     ) {
 
         return null;
-
-    }
-
-
-    /*
-    Use the most recent
-    trading session.
-
-    Candle timestamps are
-    Unix seconds.
-
-    Convert to IST.
-    */
-
-    function istDate(ts) {
-
-        const date =
-            new Date(
-                Number(ts) * 1000
-            );
-
-        return new Date(
-            date.getTime() +
-            (
-                5.5 *
-                60 *
-                60 *
-                1000
-            )
-        )
-        .toISOString()
-        .slice(0, 10);
 
     }
 
@@ -218,11 +251,6 @@ function vwap(candles) {
             latestCandle.ts
         );
 
-
-    /*
-    Keep only candles
-    from latest session.
-    */
 
     const sessionCandles =
         candles.filter(
@@ -244,11 +272,14 @@ function vwap(candles) {
         const high =
             Number(candle.h);
 
+
         const low =
             Number(candle.l);
 
+
         const close =
             Number(candle.c);
+
 
         const volume =
             Number(candle.v);
@@ -307,9 +338,9 @@ function vwap(candles) {
 }
 
 
-// =========================
+// ======================================================
 // TRUE RANGE
-// =========================
+// ======================================================
 
 function trueRange(
     current,
@@ -319,11 +350,13 @@ function trueRange(
     const high =
         Number(current.h);
 
+
     const low =
         Number(current.l);
 
+
     const previousClose =
-        Number(previous.c);
+        Number(previous?.c);
 
 
     if (
@@ -339,16 +372,8 @@ function trueRange(
     }
 
 
-    /*
-    First candle or missing
-    previous close.
-
-    */
-
     if (
-        !Number.isFinite(
-            previousClose
-        )
+        !Number.isFinite(previousClose)
     ) {
 
         return (
@@ -378,21 +403,17 @@ function trueRange(
 
 
     return Math.max(
-
         range1,
-
         range2,
-
         range3
-
     );
 
 }
 
 
-// =========================
+// ======================================================
 // ATR
-// =========================
+// ======================================================
 
 function atr(
     candles,
@@ -450,12 +471,6 @@ function atr(
     }
 
 
-    /*
-    Initial ATR:
-    Simple average of the
-    first 14 True Ranges.
-    */
-
     let atrValue =
         trueRanges
             .slice(0, period)
@@ -465,10 +480,6 @@ function atr(
                 0
             ) / period;
 
-
-    /*
-    Wilder smoothing.
-    */
 
     for (
         let i = period;
@@ -493,9 +504,9 @@ function atr(
 }
 
 
-// =========================
+// ======================================================
 // SWING HIGH
-// =========================
+// ======================================================
 
 function findSwingHigh(
     candles,
@@ -515,14 +526,6 @@ function findSwingHigh(
 
     }
 
-
-    /*
-    Look at recent candles
-    and find the highest high.
-
-    This is intentionally simple
-    for the first V6 version.
-    */
 
     const recent =
         candles.slice(
@@ -554,6 +557,7 @@ function findSwingHigh(
             highest =
                 high;
 
+
             swingCandle =
                 candle;
 
@@ -573,7 +577,8 @@ function findSwingHigh(
 
     return {
 
-        price: highest,
+        price:
+            highest,
 
         ts:
             swingCandle?.ts ??
@@ -584,9 +589,9 @@ function findSwingHigh(
 }
 
 
-// =========================
+// ======================================================
 // SWING LOW
-// =========================
+// ======================================================
 
 function findSwingLow(
     candles,
@@ -606,11 +611,6 @@ function findSwingLow(
 
     }
 
-
-    /*
-    Look at recent candles
-    and find the lowest low.
-    */
 
     const recent =
         candles.slice(
@@ -642,6 +642,7 @@ function findSwingLow(
             lowest =
                 low;
 
+
             swingCandle =
                 candle;
 
@@ -661,7 +662,8 @@ function findSwingLow(
 
     return {
 
-        price: lowest,
+        price:
+            lowest,
 
         ts:
             swingCandle?.ts ??
@@ -672,25 +674,155 @@ function findSwingLow(
 }
 
 
-// =========================
-// INDICATOR CALCULATION
-// =========================
+// ======================================================
+// NORMALIZE CANDLES
+// ======================================================
 
-function calculateIndicators(
-    candles
-) {
+function normalizeCandles(candles) {
 
     if (
+        !Array.isArray(candles)
+    ) {
 
-        !Array.isArray(candles) ||
+        return [];
 
+    }
+
+
+    const normalized =
+        candles
+            .map(candle => {
+
+                if (
+                    !candle ||
+                    typeof candle !== "object"
+                ) {
+
+                    return null;
+
+                }
+
+
+                const ts =
+                    Number(
+                        candle.ts
+                    );
+
+
+                const o =
+                    Number(
+                        candle.o
+                    );
+
+
+                const h =
+                    Number(
+                        candle.h
+                    );
+
+
+                const l =
+                    Number(
+                        candle.l
+                    );
+
+
+                const c =
+                    Number(
+                        candle.c
+                    );
+
+
+                const v =
+                    Number(
+                        candle.v
+                    );
+
+
+                if (
+
+                    !Number.isFinite(ts) ||
+
+                    !Number.isFinite(o) ||
+
+                    !Number.isFinite(h) ||
+
+                    !Number.isFinite(l) ||
+
+                    !Number.isFinite(c)
+
+                ) {
+
+                    return null;
+
+                }
+
+
+                return {
+
+                    ts,
+                    o,
+                    h,
+                    l,
+                    c,
+
+                    v:
+                        Number.isFinite(v)
+                            ? v
+                            : 0
+
+                };
+
+            })
+
+
+            .filter(
+                candle =>
+                    candle !== null
+            );
+
+
+    /*
+    Ensure chronological order.
+
+    This is VERY important for
+    historical backtesting.
+    */
+
+    normalized.sort(
+        (a, b) =>
+            a.ts - b.ts
+    );
+
+
+    return normalized;
+
+}
+
+
+// ======================================================
+// INDICATOR CALCULATION
+// ======================================================
+
+function calculateIndicators(
+    rawCandles
+) {
+
+    const candles =
+        normalizeCandles(
+            rawCandles
+        );
+
+
+    if (
         candles.length === 0
-
     ) {
 
         return {
 
             candleCount: 0,
+
+            candles: [],
 
             ema9: null,
 
@@ -715,9 +847,9 @@ function calculateIndicators(
     }
 
 
-    // ---------------------------------
+    // ==================================================
     // CLOSES
-    // ---------------------------------
+    // ==================================================
 
     const closes =
         candles.map(
@@ -726,15 +858,19 @@ function calculateIndicators(
         );
 
 
-    // ---------------------------------
-    // LAST CANDLES
-    // ---------------------------------
+    // ==================================================
+    // LAST CANDLE
+    // ==================================================
 
     const lastCandle =
         candles[
             candles.length - 1
         ];
 
+
+    // ==================================================
+    // PREVIOUS CANDLE
+    // ==================================================
 
     const previousCandle =
         candles.length >= 2
@@ -746,9 +882,9 @@ function calculateIndicators(
             : null;
 
 
-    // ---------------------------------
-    // CALCULATIONS
-    // ---------------------------------
+    // ==================================================
+    // INDICATORS
+    // ==================================================
 
     const ema9Value =
         ema(
@@ -798,11 +934,25 @@ function calculateIndicators(
         );
 
 
-    // ---------------------------------
+    // ==================================================
     // RESPONSE
-    // ---------------------------------
+    // ==================================================
 
     return {
+
+        /*
+        ==================================================
+        IMPORTANT V9 ADDITION
+        ==================================================
+
+        The FULL historical candle
+        array is now exposed.
+
+        V9 backtest can replay these
+        candles chronologically.
+        */
+
+        candles,
 
         candleCount:
             candles.length,
@@ -835,9 +985,9 @@ function calculateIndicators(
 }
 
 
-// =========================
+// ======================================================
 // API HANDLER
-// =========================
+// ======================================================
 
 export default async function handler(
     req,
@@ -845,6 +995,10 @@ export default async function handler(
 ) {
 
     try {
+
+        // ==================================================
+        // TOKEN
+        // ==================================================
 
         const token =
             process.env.INDSTOCKS_TOKEN;
@@ -864,9 +1018,9 @@ export default async function handler(
         }
 
 
-        // =========================
+        // ==================================================
         // INTERVAL
-        // =========================
+        // ==================================================
 
         const interval =
             req.query.interval ||
@@ -905,11 +1059,9 @@ export default async function handler(
 
 
         if (
-
             !allowedIntervals.includes(
                 interval
             )
-
         ) {
 
             return res.status(400).json({
@@ -924,9 +1076,9 @@ export default async function handler(
         }
 
 
-        // =========================
-        // INSTRUMENTS
-        // =========================
+        // ==================================================
+        // INSTRUMENT IDS
+        // ==================================================
 
         const NIFTY_ID =
             "40000001";
@@ -937,22 +1089,25 @@ export default async function handler(
 
 
         const scripCodes =
-
             `NIDX_${NIFTY_ID},NIDX_${BANKNIFTY_ID}`;
 
 
-        // =========================
+        // ==================================================
         // TIME RANGE
-        // =========================
+        // ==================================================
 
         const endTime =
             Date.now();
 
 
+        /*
+        Seven days gives us enough
+        recent 5-minute candles for
+        the V9 historical simulation.
+        */
+
         const startTime =
-
             endTime -
-
             (
                 7 *
                 24 *
@@ -962,12 +1117,11 @@ export default async function handler(
             );
 
 
-        // =========================
-        // INDSTOCKS REQUEST
-        // =========================
+        // ==================================================
+        // INDSTOCKS URL
+        // ==================================================
 
         const url =
-
             "https://api.indstocks.com" +
 
             `/market/historical/${interval}` +
@@ -982,20 +1136,31 @@ export default async function handler(
 
 
         console.log(
-            "TradeMind historical request:",
+            "================================"
+        );
+
+
+        console.log(
+            "TradeMind V9 historical request:"
+        );
+
+
+        console.log(
             url
         );
 
 
+        // ==================================================
+        // REQUEST INDSTOCKS
+        // ==================================================
+
         const response =
-
             await fetch(
-
                 url,
-
                 {
 
-                    method: "GET",
+                    method:
+                        "GET",
 
                     headers: {
 
@@ -1005,7 +1170,6 @@ export default async function handler(
                     }
 
                 }
-
             );
 
 
@@ -1013,7 +1177,13 @@ export default async function handler(
             await response.json();
 
 
-        if (!response.ok) {
+        // ==================================================
+        // API ERROR
+        // ==================================================
+
+        if (
+            !response.ok
+        ) {
 
             console.error(
                 "INDstocks historical error:",
@@ -1027,59 +1197,76 @@ export default async function handler(
 
                 success: false,
 
-                error: result
+                error:
+                    result
 
             });
 
         }
 
 
+        // ==================================================
+        // RAW DATA
+        // ==================================================
+
         const rawData =
             result.data;
 
 
-        // =========================
-        // EXTRACT NIFTY
-        // =========================
+        // ==================================================
+        // NIFTY
+        // ==================================================
 
         const niftyData =
             rawData?.NIDX_40000001;
 
 
-        // =========================
-        // EXTRACT BANKNIFTY
-        // =========================
+        // ==================================================
+        // BANKNIFTY
+        // ==================================================
 
         const bankNiftyData =
             rawData?.NIDX_40000003;
 
 
-        const niftyCandles =
-
+        const rawNiftyCandles =
             Array.isArray(
                 niftyData?.candles
             )
-
                 ? niftyData.candles
-
                 : [];
 
 
-        const bankNiftyCandles =
-
+        const rawBankNiftyCandles =
             Array.isArray(
                 bankNiftyData?.candles
             )
-
                 ? bankNiftyData.candles
-
                 : [];
 
 
+        // ==================================================
+        // NORMALIZE
+        // ==================================================
+
+        const niftyCandles =
+            normalizeCandles(
+                rawNiftyCandles
+            );
+
+
+        const bankNiftyCandles =
+            normalizeCandles(
+                rawBankNiftyCandles
+            );
+
+
+        // ==================================================
+        // LOG COUNTS
+        // ==================================================
+
         console.log(
-
-            "TradeMind candle counts:",
-
+            "TradeMind V9 candle counts:",
             {
 
                 nifty:
@@ -1089,13 +1276,12 @@ export default async function handler(
                     bankNiftyCandles.length
 
             }
-
         );
 
 
-        // =========================
+        // ==================================================
         // CALCULATE
-        // =========================
+        // ==================================================
 
         const nifty =
             calculateIndicators(
@@ -1109,22 +1295,51 @@ export default async function handler(
             );
 
 
-        // =========================
-        // RESPONSE
-        // =========================
+        // ==================================================
+        // V9 DATA VALIDATION
+        // ==================================================
+
+        const validation = {
+
+            niftyCandles:
+                nifty.candles.length,
+
+            bankniftyCandles:
+                banknifty.candles.length,
+
+            niftyReady:
+                nifty.candles.length >= 50,
+
+            bankniftyReady:
+                banknifty.candles.length >= 50
+
+        };
+
+
+        console.log(
+            "TradeMind V9 validation:",
+            validation
+        );
+
+
+        // ==================================================
+        // FINAL RESPONSE
+        // ==================================================
 
         return res.status(200).json({
 
             success: true,
 
             version:
-                "V6",
+                "V9",
 
             interval,
 
             startTime,
 
             endTime,
+
+            validation,
 
             nifty,
 
@@ -1138,11 +1353,8 @@ export default async function handler(
     catch (error) {
 
         console.error(
-
-            "Indicator API error:",
-
+            "TradeMind V9 Indicator API error:",
             error
-
         );
 
 
@@ -1151,7 +1363,11 @@ export default async function handler(
             success: false,
 
             error:
-                "Failed to calculate indicators"
+                "Failed to fetch historical market data",
+
+            details:
+                error?.message ||
+                "Unknown error"
 
         });
 
