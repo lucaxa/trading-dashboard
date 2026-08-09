@@ -2466,7 +2466,6 @@ console.log(
         const rawCandles =
             result
                 ?.data
-                ?.NIDX_40000001
                 ?.candles;
 console.log(
     "V10 raw candle count:",
@@ -2479,12 +2478,6 @@ console.log(
             normalizeCandles(
                 rawCandles
             );
-
-
-        console.log(
-            "V10 normalized candles:",
-            candles.length
-        );
 
 console.log(
     "V10 normalized candle count:",
