@@ -166,6 +166,66 @@ async function fetchMarketData() {
   }
 
 }
+/*
+Fetch REAL technical indicators
+from our Vercel backend.
+*/
+
+async function fetchIndicatorData() {
+
+  try {
+
+    const response =
+      await fetch(
+        "/api/indicators?interval=5minute",
+        {
+          cache: "no-store"
+        }
+      );
+
+    const result =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !result.success
+    ) {
+
+      throw new Error(
+        result.error ||
+        "Indicator API failed"
+      );
+
+    }
+
+    state.indicators =
+      result.nifty;
+
+    state.indicatorConnected =
+      true;
+
+    analyzeMarket();
+
+    console.log(
+      "REAL NIFTY INDICATORS:",
+      state.indicators
+    );
+
+  }
+
+  catch (error) {
+
+    console.error(
+      "Indicator data error:",
+      error
+    );
+
+    state.indicatorConnected =
+      false;
+
+  }
+
+}
 
 
 /*
