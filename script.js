@@ -50,161 +50,104 @@ from our Vercel backend.
 */
 
 async function fetchMarketData() {
+    try {
+        const response = await fetch(
+            "/api/quotes",
+            {
+                cache: "no-store"
+            }
+        );
 
-  try {
+        const result = await response.json();
 
-    const response =
-      await fetch(
-        "/api/indicators?interval=5minute",
-        {
-          cache: "no-store"
+        console.log("REAL QUOTE RESPONSE:", result);
+
+        if (!response.ok || !result.success) {
+            throw new Error(
+                result.error || "Market API failed"
+            );
         }
-      );
 
-    const result =
-      await response.json();
+        const quotes = extractQuotes(result.data);
 
-    if (
-      !response.ok ||
-      !result.success
-    ) {
+        console.log("EXTRACTED QUOTES:", quotes);
 
-      throw new Error(
-        result.error ||
-        "Indicator API failed"
-      );
+        if (!quotes.length) {
+            throw new Error(
+                "No quote data received"
+            );
+        }
 
-    }
+        const niftyQuote =
+            findQuote(
+                quotes,
+                "nifty"
+            );
 
-    /*
-      REAL NIFTY DATA
-    */
+        const bankQuote =
+            findQuote(
+                quotes,
+                "banknifty"
+            );
 
-    if (
-      result.nifty &&
-      result.nifty.lastCandle
-    ) {
-
-      const niftyPrice =
-        Number(
-          result.nifty.lastCandle.c
+        console.log(
+            "NIFTY QUOTE:",
+            niftyQuote
         );
 
-      if (
-        Number.isFinite(niftyPrice)
-      ) {
-
-        updateInstrument(
-          market.nifty,
-          niftyPrice
+        console.log(
+            "BANKNIFTY QUOTE:",
+            bankQuote
         );
 
-      }
+        if (niftyQuote) {
+            updateInstrument(
+                market.nifty,
+                niftyQuote
+            );
+        }
 
-    }
+        if (bankQuote) {
+            updateInstrument(
+                market.banknifty,
+                bankQuote
+            );
+        }
 
-    /*
-      REAL BANKNIFTY DATA
-    */
+        state.apiConnected = true;
 
-    if (
-      result.banknifty &&
-      result.banknifty.lastCandle
-    ) {
-
-      const bankniftyPrice =
-        Number(
-          result.banknifty.lastCandle.c
+        setText(
+            "analysisStatus",
+            "LIVE"
         );
 
-      if (
-        Number.isFinite(bankniftyPrice)
-      ) {
+        renderMarket();
 
-        updateInstrument(
-          market.banknifty,
-          bankniftyPrice
+        analyzeMarket();
+
+        updateTime();
+
+    } catch (error) {
+
+        console.error(
+            "Market data error:",
+            error
         );
 
-      }
+        state.apiConnected = false;
 
+        setText(
+            "analysisStatus",
+            "OFFLINE"
+        );
+
+        setText(
+            "lastUpdate",
+            "API ERROR"
+        );
     }
-
-    /*
-      REAL TECHNICAL INDICATORS
-    */
-
-    if (result.nifty) {
-
-      state.indicators =
-        result.nifty;
-
-      state.indicatorConnected =
-        true;
-
-    }
-
-    state.apiConnected = true;
-
-    setText(
-      "analysisStatus",
-      "LIVE"
-    );
-
-    renderMarket();
-
-    analyzeMarket();
-
-    updateTime();
-
-    console.log(
-      "REAL MARKET DATA:",
-      {
-        nifty:
-          result.nifty?.lastCandle?.c,
-
-        banknifty:
-          result.banknifty?.lastCandle?.c,
-
-        ema9:
-          result.nifty?.ema9,
-
-        ema21:
-          result.nifty?.ema21,
-
-        rsi14:
-          result.nifty?.rsi14,
-
-        vwap:
-          result.nifty?.vwap
-      }
-    );
-
-  }
-
-  catch (error) {
-
-    console.error(
-      "Market data error:",
-      error
-    );
-
-    state.apiConnected =
-      false;
-
-    setText(
-      "analysisStatus",
-      "OFFLINE"
-    );
-
-    setText(
-      "lastUpdate",
-      "API ERROR"
-    );
-
-  }
-
 }
+
 /*
 Fetch REAL technical indicators
 from our Vercel backend.
