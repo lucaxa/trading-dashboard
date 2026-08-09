@@ -734,6 +734,76 @@ async function fetchIndicatorData() {
             result;
 
 
+        // ====================================
+        // FALLBACK PRICE FROM LATEST CANDLE
+        // ====================================
+
+        const niftyData =
+            result.nifty || {};
+
+
+        const latestCandle =
+
+            niftyData.lastCandle ||
+
+            result.lastCandle ||
+
+            result.data?.nifty?.lastCandle ||
+
+            result.data?.lastCandle ||
+
+            null;
+
+
+        if (latestCandle) {
+
+            const candlePrice =
+
+                Number(
+
+                    latestCandle.c ??
+                    latestCandle.close
+
+                );
+
+
+            if (
+
+                Number.isFinite(candlePrice) &&
+
+                candlePrice > 0
+
+            ) {
+
+                state.nifty = {
+
+                    price: candlePrice,
+
+                    previous:
+
+                        state.nifty?.price ??
+
+                        candlePrice
+
+                };
+
+
+                console.log(
+
+                    "TradeMind fallback NIFTY price:",
+
+                    candlePrice
+
+                );
+
+
+                renderMarket();
+
+            }
+
+        }
+
+
         console.log(
 
             "TradeMind indicators:",
@@ -750,8 +820,11 @@ async function fetchIndicatorData() {
 
 
         setText(
+
             "analysisStatus",
+
             "LIVE"
+
         );
 
     }
@@ -945,6 +1018,10 @@ function renderIndicators() {
                         : "AT VWAP";
 
 
+            // Use existing HTML ID.
+            // We can rename the label in
+            // index.html later.
+
             setText(
 
                 "volatility",
@@ -1058,7 +1135,17 @@ function calculateStrategy() {
             signal: "WAIT",
 
             reason:
-                "Insufficient indicator data"
+                "Insufficient indicator data",
+
+            price,
+
+            ema9,
+
+            ema21,
+
+            rsi,
+
+            vwap
 
         };
 
@@ -1353,11 +1440,11 @@ function updateTradeSetup(strategy) {
     // Stop = 0.10%
     // Target = 0.20%
     //
-    // This is intentionally simple for
-    // the first paper-testing stage.
+    // This is only for initial paper
+    // testing.
     //
     // Later we will replace this with
-    // ATR/market-structure based risk.
+    // ATR + market structure.
     // ------------------------------------
 
     const risk =
@@ -1405,7 +1492,7 @@ function updateTradeSetup(strategy) {
 
 
     // ------------------------------------
-    // RENDER TRADE SETUP
+    // RENDER
     // ------------------------------------
 
     setText(
@@ -1512,8 +1599,11 @@ function updateTime() {
 
 
     setText(
+
         "lastUpdate",
+
         text
+
     );
 
 }
@@ -1566,19 +1656,23 @@ function setupPaperTradeButton() {
 
 
             const entry =
-                $("entry")?.textContent || "--";
+                $("entry")?.textContent ||
+                "--";
 
 
             const stoploss =
-                $("stoploss")?.textContent || "--";
+                $("stoploss")?.textContent ||
+                "--";
 
 
             const target =
-                $("target")?.textContent || "--";
+                $("target")?.textContent ||
+                "--";
 
 
             const riskReward =
-                $("riskReward")?.textContent || "--";
+                $("riskReward")?.textContent ||
+                "--";
 
 
             alert(
@@ -1673,7 +1767,7 @@ async function initialize() {
 
 
 // ========================================
-// REFRESH MARKET DATA
+// MARKET REFRESH
 // Every 5 seconds
 // ========================================
 
@@ -1687,7 +1781,7 @@ setInterval(
 
 
 // ========================================
-// REFRESH INDICATORS
+// INDICATOR REFRESH
 // Every 30 seconds
 // ========================================
 
