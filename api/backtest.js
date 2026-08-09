@@ -608,116 +608,109 @@ function vwap(
 // NORMALIZE CANDLES
 // ======================================================
 
-function normalizeCandles(
-    candles
-) {
+function normalizeCandles(candles) {
 
-    if (
-        !Array.isArray(candles)
-    ) {
-
+    if (!Array.isArray(candles)) {
         return [];
-
     }
-
 
     return candles
 
-        .map(
-            candle => {
+        .map(candle => {
 
-                if (
-                    !candle ||
-                    typeof candle !== "object"
-                ) {
+            // INDstocks format:
+            // [timestamp, open, high, low, close, volume]
 
-                    return null;
-
-                }
-
+            if (Array.isArray(candle)) {
 
                 const normalized = {
 
-                    ts:
-                        Number(
-                            candle.ts
-                        ),
+                    ts: Number(candle[0]),
 
-                    o:
-                        Number(
-                            candle.o
-                        ),
+                    o: Number(candle[1]),
 
-                    h:
-                        Number(
-                            candle.h
-                        ),
+                    h: Number(candle[2]),
 
-                    l:
-                        Number(
-                            candle.l
-                        ),
+                    l: Number(candle[3]),
 
-                    c:
-                        Number(
-                            candle.c
-                        ),
+                    c: Number(candle[4]),
 
-                    v:
-                        Number(
-                            candle.v ?? 0
-                        )
+                    v: Number(candle[5] ?? 0)
 
                 };
 
-
                 if (
-                    !Number.isFinite(
-                        normalized.ts
-                    ) ||
-                    !Number.isFinite(
-                        normalized.o
-                    ) ||
-                    !Number.isFinite(
-                        normalized.h
-                    ) ||
-                    !Number.isFinite(
-                        normalized.l
-                    ) ||
-                    !Number.isFinite(
-                        normalized.c
-                    )
+                    !Number.isFinite(normalized.ts) ||
+                    !Number.isFinite(normalized.o) ||
+                    !Number.isFinite(normalized.h) ||
+                    !Number.isFinite(normalized.l) ||
+                    !Number.isFinite(normalized.c)
                 ) {
-
                     return null;
-
                 }
 
-
-                if (
-                    normalized.h <
-                    normalized.l
-                ) {
-
+                if (normalized.h < normalized.l) {
                     return null;
-
                 }
-
 
                 return normalized;
-
             }
-        )
+
+
+            // Also support object format
+            // in case your API returns that format.
+
+            if (
+                candle &&
+                typeof candle === "object"
+            ) {
+
+                const normalized = {
+
+                    ts: Number(candle.ts),
+
+                    o: Number(candle.o),
+
+                    h: Number(candle.h),
+
+                    l: Number(candle.l),
+
+                    c: Number(candle.c),
+
+                    v: Number(candle.v ?? 0)
+
+                };
+
+                if (
+                    !Number.isFinite(normalized.ts) ||
+                    !Number.isFinite(normalized.o) ||
+                    !Number.isFinite(normalized.h) ||
+                    !Number.isFinite(normalized.l) ||
+                    !Number.isFinite(normalized.c)
+                ) {
+                    return null;
+                }
+
+                if (normalized.h < normalized.l) {
+                    return null;
+                }
+
+                return normalized;
+            }
+
+            return null;
+
+        })
 
         .filter(Boolean)
 
         .sort(
             (a, b) =>
-                a.ts -
-                b.ts
+                a.ts - b.ts
         );
-
 }
+
+
 
 
 // ======================================================
