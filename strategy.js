@@ -111,4 +111,20 @@ function generateSignal(candle, indicators) {
         }
     };
 }
-}
+const testCandle = {
+    c: 24580
+};
+
+const testIndicators = {
+    ema9: 24570,
+    ema21: 24550,
+    rsi14: 58,
+    vwap: 24560
+};
+
+console.log(
+    generateSignal(
+        testCandle,
+        testIndicators
+    )
+);
