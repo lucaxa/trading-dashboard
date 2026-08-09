@@ -37,6 +37,10 @@ const state = {
 
   apiConnected: false
 
+  indicators: null,
+  
+  indicatorConnected: false,
+
 };
 
 
