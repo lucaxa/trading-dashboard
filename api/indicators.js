@@ -389,15 +389,26 @@ export default async function handler(
     if (
       candles.length === 0
     ) {
+return res.status(200).json({
 
-      return res.status(200).json({
+  success: true,
 
-        success: false,
+  interval,
 
-        error:
-          "No candles found"
+  candleCount:
+    candles.length,
 
-      });
+  sampleCandles:
+    candles.slice(0, 3),
+
+  firstCandle:
+    candles[0],
+
+  lastCandle:
+    candles[candles.length - 1]
+
+});
+      
 
     }
 
