@@ -275,40 +275,63 @@ function extractQuotes(data) {
 Find a specific instrument.
 */
 
-function findQuote(
-  quotes,
-  instrument
-) {
+function findQuote(quotes, instrument) {
 
   if (!Array.isArray(quotes)) {
     return null;
   }
 
-  /*
-  api/quotes.js requests:
-  NIFTY first
-  BANKNIFTY second
-  */
+  const target = String(instrument || "").toLowerCase();
 
-  if (
-    instrument === "nifty"
-  ) {
+  const quoteText = (quote) => {
+    if (!quote || typeof quote !== "object") {
+      return "";
+    }
 
-    return quotes[0] || null;
+    return [
+      quote.scripCode,
+      quote.symbol,
+      quote.Symbol,
+      quote.tradingSymbol,
+      quote.tradingsymbol,
+      quote.name,
+      quote.instrument,
+      quote.displayName
+    ]
+      .filter(Boolean)
+      .map(value => String(value).toLowerCase())
+      .join(" ");
+  };
 
+  const matched = quotes.find((quote) => {
+    const text = quoteText(quote);
+
+    if (target === "nifty") {
+      return text.includes("nifty") && !text.includes("bank");
+    }
+
+    if (target === "banknifty") {
+      return text.includes("bank") && text.includes("nifty");
+    }
+
+    return text.includes(target);
+  });
+
+  if (matched) {
+    return matched;
   }
 
-  if (
-    instrument === "banknifty"
-  ) {
+  // Safe fallback if the API does not expose names cleanly.
+  if (target === "nifty") {
+    return quotes[0] || null;
+  }
 
+  if (target === "banknifty") {
     return quotes[1] || null;
-
   }
 
   return null;
 }
-
 
 /*
 Update one instrument.
