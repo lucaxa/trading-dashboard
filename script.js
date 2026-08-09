@@ -9,12 +9,23 @@ No real orders.
 
 "use strict";
 
+
+// ========================================
+// GLOBAL STATE
+// ========================================
+
 const state = {
+
     nifty: null,
+
     banknifty: null,
+
     indicators: null,
+
     connected: false,
+
     lastUpdate: null
+
 };
 
 
@@ -23,16 +34,22 @@ const state = {
 // ========================================
 
 function $(id) {
+
     return document.getElementById(id);
+
 }
 
 
 function setText(id, value) {
+
     const el = $(id);
 
     if (el) {
+
         el.textContent = value;
+
     }
+
 }
 
 
@@ -45,13 +62,19 @@ function formatPrice(value) {
     const number = Number(value);
 
     if (!Number.isFinite(number)) {
+
         return "--";
+
     }
 
     return number.toLocaleString("en-IN", {
+
         minimumFractionDigits: 2,
+
         maximumFractionDigits: 2
+
     });
+
 }
 
 
@@ -60,10 +83,13 @@ function formatIndicator(value) {
     const number = Number(value);
 
     if (!Number.isFinite(number)) {
+
         return "--";
+
     }
 
     return number.toFixed(2);
+
 }
 
 
@@ -74,34 +100,55 @@ function formatIndicator(value) {
 function extractPrice(quote) {
 
     if (typeof quote === "number") {
+
         return quote;
+
     }
 
     if (!quote || typeof quote !== "object") {
+
         return null;
+
     }
 
     const possibleFields = [
+
         "ltp",
+
         "last_price",
+
         "lastPrice",
+
         "price",
+
         "close",
+
         "lp",
+
         "last_traded_price",
+
         "lastTradedPrice"
+
     ];
+
 
     for (const field of possibleFields) {
 
         const value = Number(quote[field]);
 
-        if (Number.isFinite(value) && value > 0) {
+        if (
+            Number.isFinite(value) &&
+            value > 0
+        ) {
+
             return value;
+
         }
+
     }
 
     return null;
+
 }
 
 
@@ -112,35 +159,53 @@ function extractPrice(quote) {
 function extractQuotes(data) {
 
     if (Array.isArray(data)) {
+
         return data;
+
     }
 
     if (!data || typeof data !== "object") {
+
         return [];
+
     }
 
     if (Array.isArray(data.data)) {
+
         return data.data;
+
     }
 
     if (Array.isArray(data.quotes)) {
+
         return data.quotes;
+
     }
 
     if (Array.isArray(data.results)) {
+
         return data.results;
+
     }
 
     if (Array.isArray(data.items)) {
+
         return data.items;
+
     }
 
     return Object.values(data).filter(
+
         value =>
+
             value &&
+
             typeof value === "object" &&
+
             !Array.isArray(value)
+
     );
+
 }
 
 
@@ -150,37 +215,59 @@ function extractQuotes(data) {
 
 function findInstrument(quotes, instrument) {
 
-    const wanted = instrument.toLowerCase();
+    const wanted =
+        instrument.toLowerCase();
+
 
     return quotes.find(quote => {
 
-        if (!quote || typeof quote !== "object") {
+        if (
+            !quote ||
+            typeof quote !== "object"
+        ) {
+
             return false;
+
         }
 
-        const text = JSON.stringify(quote).toLowerCase();
+        const text =
+            JSON.stringify(quote)
+                .toLowerCase();
+
 
         if (wanted === "nifty") {
 
             return (
+
                 text.includes("40000001") ||
+
                 (
                     text.includes("nifty") &&
                     !text.includes("banknifty")
                 )
+
             );
+
         }
+
 
         if (wanted === "banknifty") {
 
             return (
+
                 text.includes("40000003") ||
+
                 text.includes("banknifty")
+
             );
+
         }
 
+
         return false;
+
     }) || null;
+
 }
 
 
@@ -190,60 +277,113 @@ function findInstrument(quotes, instrument) {
 
 async function apiFetch(url) {
 
-    console.log("TradeMind API request:", url);
-
-    const response = await fetch(
-        url,
-        {
-            method: "GET",
-            cache: "no-store",
-            headers: {
-                "Accept": "application/json"
-            }
-        }
+    console.log(
+        "TradeMind API request:",
+        url
     );
 
-    const text = await response.text();
+
+    const response =
+        await fetch(
+
+            url,
+
+            {
+
+                method: "GET",
+
+                cache: "no-store",
+
+                headers: {
+
+                    "Accept":
+                        "application/json"
+
+                }
+
+            }
+
+        );
+
+
+    const text =
+        await response.text();
+
 
     let data;
 
-    try {
-        data = JSON.parse(text);
-    } catch {
 
-        throw new Error(
-            `Invalid API response (${response.status})`
-        );
+    try {
+
+        data =
+            JSON.parse(text);
+
     }
 
+    catch {
+
+        throw new Error(
+
+            `Invalid API response (${response.status})`
+
+        );
+
+    }
+
+
     console.log(
+
         "TradeMind API response:",
+
         url,
+
         data
+
     );
+
 
     if (!response.ok) {
 
         const message =
+
             typeof data.error === "string"
+
                 ? data.error
-                : JSON.stringify(data.error || data);
+
+                : JSON.stringify(
+                    data.error || data
+                );
+
 
         throw new Error(
-            message || `API error ${response.status}`
+
+            message ||
+            `API error ${response.status}`
+
         );
+
     }
+
 
     if (data.success === false) {
 
         throw new Error(
+
             typeof data.error === "string"
+
                 ? data.error
-                : JSON.stringify(data.error)
+
+                : JSON.stringify(
+                    data.error
+                )
+
         );
+
     }
 
+
     return data;
+
 }
 
 
@@ -260,21 +400,30 @@ async function fetchMarketData() {
             "CONNECTING"
         );
 
+
         setText(
             "analysisStatus",
             "CONNECTING"
         );
 
+
         const result =
-            await apiFetch("/api/quotes");
+            await apiFetch(
+                "/api/quotes"
+            );
+
 
         const quotes =
-            extractQuotes(result.data ?? result);
+            extractQuotes(
+                result.data ?? result
+            );
+
 
         console.log(
             "TradeMind extracted quotes:",
             quotes
         );
+
 
         const niftyQuote =
             findInstrument(
@@ -282,94 +431,138 @@ async function fetchMarketData() {
                 "nifty"
             );
 
+
         const bankQuote =
             findInstrument(
                 quotes,
                 "banknifty"
             );
 
+
         const niftyPrice =
-            extractPrice(niftyQuote);
+            extractPrice(
+                niftyQuote
+            );
+
 
         const bankPrice =
-            extractPrice(bankQuote);
+            extractPrice(
+                bankQuote
+            );
+
+
+        // --------------------------------
+        // NIFTY
+        // --------------------------------
 
         if (niftyPrice !== null) {
 
             state.nifty = {
+
                 price: niftyPrice,
+
                 previous:
-                    state.nifty?.price ?? niftyPrice
+                    state.nifty?.price ??
+                    niftyPrice
+
             };
 
         }
+
+
+        // --------------------------------
+        // BANK NIFTY
+        // --------------------------------
 
         if (bankPrice !== null) {
 
             state.banknifty = {
+
                 price: bankPrice,
+
                 previous:
-                    state.banknifty?.price ?? bankPrice
+                    state.banknifty?.price ??
+                    bankPrice
+
             };
 
         }
 
+
         renderMarket();
 
+
         state.connected = true;
+
 
         setText(
             "marketStatus",
             "LIVE"
         );
 
+
         setText(
             "analysisStatus",
             "LIVE"
         );
+
 
         setText(
             "dataStatus",
             "INDSTOCKS"
         );
 
+
         updateStatusDot(true);
+
 
         updateTime();
 
     }
 
+
     catch (error) {
 
         console.error(
+
             "TradeMind market data error:",
+
             error
+
         );
 
+
         state.connected = false;
+
 
         setText(
             "marketStatus",
             "OFFLINE"
         );
 
+
         setText(
             "analysisStatus",
             "API ERROR"
         );
+
 
         setText(
             "dataStatus",
             "API ERROR"
         );
 
+
         updateStatusDot(false);
+
 
         setText(
             "lastUpdate",
             error.message
         );
+
     }
+
 }
 
 
@@ -379,42 +572,63 @@ async function fetchMarketData() {
 
 function renderMarket() {
 
+
     if (state.nifty) {
 
         setText(
+
             "niftyPrice",
+
             formatPrice(
                 state.nifty.price
             )
+
         );
 
+
         renderChange(
+
             "niftyChange",
+
             state.nifty.price,
+
             state.nifty.previous
+
         );
+
     }
+
 
     if (state.banknifty) {
 
         setText(
+
             "bankPrice",
+
             formatPrice(
                 state.banknifty.price
             )
+
         );
 
+
         renderChange(
+
             "bankChange",
+
             state.banknifty.price,
+
             state.banknifty.previous
+
         );
+
     }
+
 }
 
 
 // ========================================
-// CHANGE
+// PRICE CHANGE
 // ========================================
 
 function renderChange(
@@ -423,14 +637,20 @@ function renderChange(
     previous
 ) {
 
-    const el = $(elementId);
+    const el =
+        $(elementId);
+
 
     if (!el) {
+
         return;
+
     }
+
 
     const difference =
         current - previous;
+
 
     if (
         !Number.isFinite(difference) ||
@@ -440,32 +660,50 @@ function renderChange(
         el.textContent =
             "No change";
 
+
         el.className =
             "change";
 
+
         return;
+
     }
 
+
     const percent =
+
         previous !== 0
+
             ? (
                 difference /
                 previous
             ) * 100
+
             : 0;
 
+
     const direction =
+
         difference > 0
+
             ? "▲"
+
             : "▼";
 
+
     el.textContent =
+
         `${direction} ${Math.abs(difference).toFixed(2)} (${Math.abs(percent).toFixed(2)}%)`;
 
+
     el.className =
+
         difference > 0
+
             ? "change up"
+
             : "change down";
+
 }
 
 
@@ -482,42 +720,73 @@ async function fetchIndicatorData() {
             "CALCULATING"
         );
 
+
         const result =
+
             await apiFetch(
+
                 "/api/indicators?interval=5minute"
+
             );
+
 
         state.indicators =
             result;
 
+
         console.log(
+
             "TradeMind indicators:",
+
             result
+
         );
+
 
         renderIndicators();
 
+
         analyzeMarket();
 
+
+        setText(
+            "analysisStatus",
+            "LIVE"
+        );
+
     }
+
 
     catch (error) {
 
         console.error(
+
             "TradeMind indicator error:",
+
             error
+
         );
 
+
         setText(
+
             "analysisStatus",
+
             "INDICATOR ERROR"
+
         );
 
+
         setText(
+
             "lastUpdate",
+
             error.message
+
         );
+
     }
+
 }
 
 
@@ -530,112 +799,409 @@ function renderIndicators() {
     const data =
         state.indicators;
 
+
     if (!data) {
+
         return;
+
     }
+
 
     const nifty =
         data.nifty || {};
 
+
     const bank =
         data.banknifty || {};
+
 
     console.log(
         "NIFTY indicators:",
         nifty
     );
 
+
     console.log(
         "BANKNIFTY indicators:",
         bank
     );
 
-    /*
-    Use NIFTY as the primary analysis instrument.
-    */
+
+    // ------------------------------------
+    // PRIMARY ANALYSIS = NIFTY
+    // ------------------------------------
 
     const ema9 =
         Number(nifty.ema9);
 
+
     const ema21 =
         Number(nifty.ema21);
+
 
     const rsi =
         Number(nifty.rsi14);
 
+
     const vwap =
         Number(nifty.vwap);
 
+
+    // ------------------------------------
+    // TREND
+    // ------------------------------------
+
     if (
+
         Number.isFinite(ema9) &&
+
         Number.isFinite(ema21)
+
     ) {
 
         const trend =
+
             ema9 > ema21
+
                 ? "BULLISH"
+
                 : ema9 < ema21
+
                     ? "BEARISH"
+
                     : "SIDEWAYS";
+
 
         setText(
             "trend",
             trend
         );
 
+
         setText(
             "niftyTrend",
             trend
         );
+
     }
+
+
+    // ------------------------------------
+    // MOMENTUM
+    // ------------------------------------
 
     if (Number.isFinite(rsi)) {
 
         const momentum =
+
             rsi >= 60
+
                 ? "STRONG"
+
                 : rsi >= 50
+
                     ? "POSITIVE"
+
                     : rsi >= 40
+
                         ? "NEGATIVE"
+
                         : "WEAK";
 
+
         setText(
+
             "momentum",
+
             `${momentum} (${rsi.toFixed(1)})`
+
         );
+
     }
+
+
+    // ------------------------------------
+    // VWAP POSITION
+    // ------------------------------------
 
     if (Number.isFinite(vwap)) {
 
         const price =
             state.nifty?.price;
 
+
         if (Number.isFinite(price)) {
 
-            setText(
-                "volatility",
+            const vwapPosition =
+
                 price > vwap
+
                     ? "ABOVE VWAP"
-                    : "BELOW VWAP"
+
+                    : price < vwap
+
+                        ? "BELOW VWAP"
+
+                        : "AT VWAP";
+
+
+            setText(
+
+                "volatility",
+
+                vwapPosition
+
             );
+
         }
+
     }
+
+
+    // ------------------------------------
+    // CANDLE COUNT
+    // ------------------------------------
 
     const candleCount =
         nifty.candleCount;
 
+
     if (
+
         Number.isFinite(
             Number(candleCount)
         )
+
     ) {
 
         setText(
+
             "candleStatus",
+
             `${candleCount} CANDLES`
+
         );
+
     }
+
+}
+
+
+// ========================================
+// UNIFIED STRATEGY ENGINE
+// ========================================
+
+function calculateStrategy() {
+
+    const nifty =
+        state.indicators?.nifty;
+
+
+    if (!nifty) {
+
+        return {
+
+            signal: "WAIT",
+
+            reason:
+                "Indicators unavailable"
+
+        };
+
+    }
+
+
+    // ------------------------------------
+    // REAL INDICATOR VALUES
+    // ------------------------------------
+
+    const ema9 =
+        Number(nifty.ema9);
+
+
+    const ema21 =
+        Number(nifty.ema21);
+
+
+    const rsi =
+        Number(nifty.rsi14);
+
+
+    const vwap =
+        Number(nifty.vwap);
+
+
+    const price =
+        Number(
+            state.nifty?.price
+        );
+
+
+    // ------------------------------------
+    // VALIDATION
+    // ------------------------------------
+
+    if (
+
+        !Number.isFinite(price) ||
+
+        !Number.isFinite(ema9) ||
+
+        !Number.isFinite(ema21) ||
+
+        !Number.isFinite(rsi)
+
+    ) {
+
+        return {
+
+            signal: "WAIT",
+
+            reason:
+                "Insufficient indicator data"
+
+        };
+
+    }
+
+
+    // ------------------------------------
+    // TREND
+    // ------------------------------------
+
+    const bullishTrend =
+        ema9 > ema21;
+
+
+    const bearishTrend =
+        ema9 < ema21;
+
+
+    // ------------------------------------
+    // MOMENTUM
+    // ------------------------------------
+
+    const bullishMomentum =
+        rsi >= 55;
+
+
+    const bearishMomentum =
+        rsi <= 45;
+
+
+    // ------------------------------------
+    // VWAP CONFIRMATION
+    // ------------------------------------
+
+    const aboveVWAP =
+
+        !Number.isFinite(vwap) ||
+
+        price > vwap;
+
+
+    const belowVWAP =
+
+        !Number.isFinite(vwap) ||
+
+        price < vwap;
+
+
+    // ------------------------------------
+    // BUY SIGNAL
+    // ------------------------------------
+
+    if (
+
+        bullishTrend &&
+
+        bullishMomentum &&
+
+        aboveVWAP
+
+    ) {
+
+        return {
+
+            signal: "BUY",
+
+            reason:
+                "Bullish trend + positive RSI + above VWAP",
+
+            price,
+
+            ema9,
+
+            ema21,
+
+            rsi,
+
+            vwap
+
+        };
+
+    }
+
+
+    // ------------------------------------
+    // SELL SIGNAL
+    // ------------------------------------
+
+    if (
+
+        bearishTrend &&
+
+        bearishMomentum &&
+
+        belowVWAP
+
+    ) {
+
+        return {
+
+            signal: "SELL",
+
+            reason:
+                "Bearish trend + negative RSI + below VWAP",
+
+            price,
+
+            ema9,
+
+            ema21,
+
+            rsi,
+
+            vwap
+
+        };
+
+    }
+
+
+    // ------------------------------------
+    // WAIT
+    // ------------------------------------
+
+    return {
+
+        signal: "WAIT",
+
+        reason:
+            "Conditions not fully confirmed",
+
+        price,
+
+        ema9,
+
+        ema21,
+
+        rsi,
+
+        vwap
+
+    };
+
 }
 
 
@@ -645,81 +1211,84 @@ function renderIndicators() {
 
 function analyzeMarket() {
 
-    const nifty =
-        state.indicators?.nifty;
+    const strategy =
+        calculateStrategy();
 
-    if (!nifty) {
-        return;
-    }
 
-    const ema9 =
-        Number(nifty.ema9);
+    console.log(
+        "================================"
+    );
 
-    const ema21 =
-        Number(nifty.ema21);
 
-    const rsi =
-        Number(nifty.rsi14);
+    console.log(
+        "TradeMind Strategy Result:",
+        strategy
+    );
 
-    const vwap =
-        Number(nifty.vwap);
 
-    const price =
-        state.nifty?.price;
+    console.log(
+        "================================"
+    );
 
-    if (
-        !Number.isFinite(ema9) ||
-        !Number.isFinite(ema21) ||
-        !Number.isFinite(rsi)
-    ) {
 
-        setText(
-            "signal",
-            "WAIT"
-        );
-
-        return;
-    }
-
-    let signal =
-        "WAIT";
-
-    const bullish =
-        ema9 > ema21 &&
-        rsi >= 55 &&
-        (
-            !Number.isFinite(vwap) ||
-            price > vwap
-        );
-
-    const bearish =
-        ema9 < ema21 &&
-        rsi <= 45 &&
-        (
-            !Number.isFinite(vwap) ||
-            price < vwap
-        );
-
-    if (bullish) {
-
-        signal =
-            "BUY BIAS";
-
-    } else if (bearish) {
-
-        signal =
-            "SELL BIAS";
-    }
+    // ------------------------------------
+    // SIGNAL
+    // ------------------------------------
 
     setText(
+
         "signal",
-        signal
+
+        strategy.signal
+
     );
 
+
+    // ------------------------------------
+    // SIGNAL REASON
+    // ------------------------------------
+
+    const reasonElement =
+        $("signalReason");
+
+
+    if (reasonElement) {
+
+        reasonElement.textContent =
+            strategy.reason;
+
+    }
+
+
+    // ------------------------------------
+    // STRATEGY STATUS
+    // ------------------------------------
+
+    const strategyStatus =
+        $("strategyStatus");
+
+
+    if (strategyStatus) {
+
+        strategyStatus.textContent =
+
+            strategy.signal === "WAIT"
+
+                ? "WAITING FOR CONFIRMATION"
+
+                : "ACTIVE";
+
+    }
+
+
+    // ------------------------------------
+    // TRADE SETUP
+    // ------------------------------------
+
     updateTradeSetup(
-        price,
-        signal
+        strategy
     );
+
 }
 
 
@@ -727,14 +1296,26 @@ function analyzeMarket() {
 // PAPER TRADE SETUP
 // ========================================
 
-function updateTradeSetup(
-    price,
-    signal
-) {
+function updateTradeSetup(strategy) {
+
+    const price =
+        Number(strategy.price);
+
+
+    const signal =
+        strategy.signal;
+
+
+    // ------------------------------------
+    // NO TRADE
+    // ------------------------------------
 
     if (
+
         !Number.isFinite(price) ||
+
         signal === "WAIT"
+
     ) {
 
         setText(
@@ -742,59 +1323,126 @@ function updateTradeSetup(
             "--"
         );
 
+
         setText(
             "stoploss",
             "--"
         );
+
 
         setText(
             "target",
             "--"
         );
 
+
         setText(
             "riskReward",
             "--"
         );
 
+
         return;
+
     }
+
+
+    // ------------------------------------
+    // TEMPORARY RISK MODEL
+    //
+    // Stop = 0.10%
+    // Target = 0.20%
+    //
+    // This is intentionally simple for
+    // the first paper-testing stage.
+    //
+    // Later we will replace this with
+    // ATR/market-structure based risk.
+    // ------------------------------------
 
     const risk =
         price * 0.001;
 
+
     const reward =
         risk * 2;
 
-    const stop =
-        signal === "BUY BIAS"
-            ? price - risk
-            : price + risk;
 
-    const target =
-        signal === "BUY BIAS"
-            ? price + reward
-            : price - reward;
+    let stop;
+    let target;
+
+
+    // ------------------------------------
+    // BUY
+    // ------------------------------------
+
+    if (signal === "BUY") {
+
+        stop =
+            price - risk;
+
+
+        target =
+            price + reward;
+
+    }
+
+
+    // ------------------------------------
+    // SELL
+    // ------------------------------------
+
+    else if (signal === "SELL") {
+
+        stop =
+            price + risk;
+
+
+        target =
+            price - reward;
+
+    }
+
+
+    // ------------------------------------
+    // RENDER TRADE SETUP
+    // ------------------------------------
 
     setText(
+
         "entry",
+
         formatPrice(price)
+
     );
 
+
     setText(
+
         "stoploss",
+
         formatPrice(stop)
+
     );
 
+
     setText(
+
         "target",
+
         formatPrice(target)
+
     );
 
+
     setText(
+
         "riskReward",
+
         "1 : 2"
+
     );
+
 }
 
 
@@ -807,9 +1455,13 @@ function updateStatusDot(connected) {
     const dot =
         $("statusDot");
 
+
     if (!dot) {
+
         return;
+
     }
+
 
     if (connected) {
 
@@ -817,12 +1469,16 @@ function updateStatusDot(connected) {
             "closed"
         );
 
-    } else {
+    }
+
+    else {
 
         dot.classList.add(
             "closed"
         );
+
     }
+
 }
 
 
@@ -835,20 +1491,31 @@ function updateTime() {
     const now =
         new Date();
 
+
     const text =
+
         now.toLocaleTimeString(
+
             "en-IN",
+
             {
+
                 hour: "2-digit",
+
                 minute: "2-digit",
+
                 second: "2-digit"
+
             }
+
         );
+
 
     setText(
         "lastUpdate",
         text
     );
+
 }
 
 
@@ -861,34 +1528,81 @@ function setupPaperTradeButton() {
     const button =
         $("paperTradeBtn");
 
+
     if (!button) {
+
         return;
+
     }
 
+
     button.addEventListener(
+
         "click",
+
         () => {
 
             const signal =
                 $("signal")?.textContent;
 
+
             if (
+
                 !signal ||
+
                 signal === "WAIT"
+
             ) {
 
                 alert(
+
                     "No valid paper trade signal yet."
+
                 );
 
                 return;
+
             }
 
+
+            const entry =
+                $("entry")?.textContent || "--";
+
+
+            const stoploss =
+                $("stoploss")?.textContent || "--";
+
+
+            const target =
+                $("target")?.textContent || "--";
+
+
+            const riskReward =
+                $("riskReward")?.textContent || "--";
+
+
             alert(
-                `PAPER TRADE ONLY\n\nSignal: ${signal}\n\nNo real order has been placed.`
+
+                `PAPER TRADE ONLY\n\n` +
+
+                `Signal: ${signal}\n\n` +
+
+                `Entry: ${entry}\n` +
+
+                `Stop Loss: ${stoploss}\n` +
+
+                `Target: ${target}\n` +
+
+                `Risk / Reward: ${riskReward}\n\n` +
+
+                `No real order has been placed.`
+
             );
+
         }
+
     );
+
 }
 
 
@@ -902,70 +1616,113 @@ async function initialize() {
         "================================"
     );
 
+
     console.log(
         "TradeMind Pro frontend started"
     );
+
+
+    console.log(
+        "Paper Trading Only"
+    );
+
 
     console.log(
         "================================"
     );
 
-    setText(
-        "marketStatus",
-        "CONNECTING"
-    );
 
     setText(
-        "analysisStatus",
+
+        "marketStatus",
+
         "CONNECTING"
+
     );
+
+
+    setText(
+
+        "analysisStatus",
+
+        "CONNECTING"
+
+    );
+
 
     setupPaperTradeButton();
 
-    /*
-    IMPORTANT:
-    These are deliberately called immediately.
-    This is what creates the Vercel request.
-    */
+
+    // ------------------------------------
+    // INITIAL MARKET DATA
+    // ------------------------------------
 
     await fetchMarketData();
 
+
+    // ------------------------------------
+    // INITIAL INDICATORS
+    // ------------------------------------
+
     await fetchIndicatorData();
 
+
     updateTime();
+
 }
 
 
 // ========================================
-// REFRESH
+// REFRESH MARKET DATA
+// Every 5 seconds
 // ========================================
 
 setInterval(
+
     fetchMarketData,
-    5000
-);
 
-setInterval(
-    fetchIndicatorData,
-    30000
+    5000
+
 );
 
 
 // ========================================
-// START
+// REFRESH INDICATORS
+// Every 30 seconds
+// ========================================
+
+setInterval(
+
+    fetchIndicatorData,
+
+    30000
+
+);
+
+
+// ========================================
+// START APPLICATION
 // ========================================
 
 if (
+
     document.readyState ===
     "loading"
+
 ) {
 
     document.addEventListener(
+
         "DOMContentLoaded",
+
         initialize
+
     );
 
-} else {
+}
+
+else {
 
     initialize();
+
 }
