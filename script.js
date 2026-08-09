@@ -1,12 +1,13 @@
 /*
 TradeMind Pro
-V6 Frontend Controller
+V7 Frontend Controller
 
 INDstocks → Vercel → Dashboard
 
 Features:
 - Live NIFTY 50
 - Live BANKNIFTY
+- Historical candle fallback
 - EMA 9
 - EMA 21
 - RSI 14
@@ -21,12 +22,11 @@ Features:
 NO REAL ORDERS.
 */
 
-
 "use strict";
 
 
 // ======================================================
-// GLOBAL STATE
+// STATE
 // ======================================================
 
 const state = {
@@ -69,7 +69,7 @@ function setText(id, value) {
 
 
 // ======================================================
-// NUMBER FORMAT
+// FORMAT
 // ======================================================
 
 function formatPrice(value) {
@@ -180,11 +180,13 @@ function extractQuotes(data) {
 
     }
 
+
     if (Array.isArray(data.data)) {
 
         return data.data;
 
     }
+
 
     if (Array.isArray(data.quotes)) {
 
@@ -192,11 +194,13 @@ function extractQuotes(data) {
 
     }
 
+
     if (Array.isArray(data.results)) {
 
         return data.results;
 
     }
+
 
     if (Array.isArray(data.items)) {
 
@@ -254,9 +258,7 @@ function findInstrument(
 
                 return (
 
-                    text.includes(
-                        "40000001"
-                    ) ||
+                    text.includes("40000001") ||
 
                     (
                         text.includes("nifty") &&
@@ -272,13 +274,9 @@ function findInstrument(
 
                 return (
 
-                    text.includes(
-                        "40000003"
-                    ) ||
+                    text.includes("40000003") ||
 
-                    text.includes(
-                        "banknifty"
-                    )
+                    text.includes("banknifty")
 
                 );
 
@@ -295,7 +293,7 @@ function findInstrument(
 
 
 // ======================================================
-// API REQUEST
+// API FETCH
 // ======================================================
 
 async function apiFetch(url) {
@@ -398,18 +396,6 @@ async function fetchMarketData() {
 
     try {
 
-        setText(
-            "marketStatus",
-            "CONNECTING"
-        );
-
-
-        setText(
-            "analysisStatus",
-            "CONNECTING"
-        );
-
-
         const result =
             await apiFetch(
                 "/api/quotes"
@@ -455,13 +441,26 @@ async function fetchMarketData() {
             );
 
 
+        console.log(
+            "NIFTY quote price:",
+            niftyPrice
+        );
+
+
+        console.log(
+            "BANKNIFTY quote price:",
+            bankPrice
+        );
+
+
         if (
-            niftyPrice !== null
+            Number.isFinite(niftyPrice)
         ) {
 
             state.nifty = {
 
-                price: niftyPrice,
+                price:
+                    niftyPrice,
 
                 previous:
                     state.nifty?.price ??
@@ -473,12 +472,13 @@ async function fetchMarketData() {
 
 
         if (
-            bankPrice !== null
+            Number.isFinite(bankPrice)
         ) {
 
             state.banknifty = {
 
-                price: bankPrice,
+                price:
+                    bankPrice,
 
                 previous:
                     state.banknifty?.price ??
@@ -503,12 +503,6 @@ async function fetchMarketData() {
 
 
         setText(
-            "analysisStatus",
-            "LIVE"
-        );
-
-
-        setText(
             "dataStatus",
             "INDSTOCKS"
         );
@@ -519,10 +513,10 @@ async function fetchMarketData() {
         );
 
 
-        updateTime();
-
-
         updateBankTrend();
+
+
+        updateTime();
 
 
     }
@@ -530,41 +524,38 @@ async function fetchMarketData() {
     catch (error) {
 
         console.error(
-            "TradeMind market data error:",
+            "TradeMind quote error:",
             error
         );
 
 
-        state.connected =
-            false;
+        /*
+        IMPORTANT:
+
+        Do NOT destroy existing
+        indicator data when the
+        quote endpoint fails.
+
+        The indicator endpoint
+        can provide a candle-close
+        fallback.
+        */
 
 
         setText(
             "marketStatus",
-            "OFFLINE"
-        );
-
-
-        setText(
-            "analysisStatus",
-            "API ERROR"
+            "INDICATORS LIVE"
         );
 
 
         setText(
             "dataStatus",
-            "API ERROR"
+            "INDSTOCKS / FALLBACK"
         );
 
 
         updateStatusDot(
-            false
-        );
-
-
-        setText(
-            "lastUpdate",
-            error.message
+            true
         );
 
     }
@@ -647,24 +638,33 @@ function renderChange(
     }
 
 
-    const difference =
-        current - previous;
-
-
     if (
-        !Number.isFinite(
-            difference
-        ) ||
-        difference === 0
+        !Number.isFinite(current) ||
+        !Number.isFinite(previous)
     ) {
 
         element.textContent =
-            "No change";
-
+            "Waiting for data";
 
         element.className =
             "change";
 
+        return;
+
+    }
+
+
+    const difference =
+        current - previous;
+
+
+    if (difference === 0) {
+
+        element.textContent =
+            "No change";
+
+        element.className =
+            "change";
 
         return;
 
@@ -699,62 +699,6 @@ function renderChange(
 
 
 // ======================================================
-// BANKNIFTY TREND
-// ======================================================
-
-function updateBankTrend() {
-
-    const bank =
-        state.indicators?.banknifty;
-
-
-    if (!bank) {
-
-        return;
-
-    }
-
-
-    const ema9 =
-        Number(bank.ema9);
-
-
-    const ema21 =
-        Number(bank.ema21);
-
-
-    if (
-        !Number.isFinite(ema9) ||
-        !Number.isFinite(ema21)
-    ) {
-
-        setText(
-            "bankTrend",
-            "--"
-        );
-
-        return;
-
-    }
-
-
-    const trend =
-        ema9 > ema21
-            ? "BULLISH"
-            : ema9 < ema21
-                ? "BEARISH"
-                : "SIDEWAYS";
-
-
-    setText(
-        "bankTrend",
-        trend
-    );
-
-}
-
-
-// ======================================================
 // INDICATOR DATA
 // ======================================================
 
@@ -782,6 +726,111 @@ async function fetchIndicatorData() {
             "TradeMind indicators:",
             result
         );
+
+
+        /*
+        ==================================================
+        IMPORTANT V7 FALLBACK
+        ==================================================
+
+        If live quote is unavailable,
+        use latest candle close.
+
+        This fixes:
+
+        Current Price --
+        BUY SCORE --
+        SELL SCORE --
+        Confidence --
+        Trade Setup --
+        */
+
+
+        const nifty =
+            result.nifty || {};
+
+
+        const bank =
+            result.banknifty || {};
+
+
+        const niftyCandle =
+            nifty.lastCandle;
+
+
+        const bankCandle =
+            bank.lastCandle;
+
+
+        const niftyFallback =
+            Number(
+                niftyCandle?.c
+            );
+
+
+        const bankFallback =
+            Number(
+                bankCandle?.c
+            );
+
+
+        if (
+            !Number.isFinite(
+                state.nifty?.price
+            ) &&
+            Number.isFinite(
+                niftyFallback
+            )
+        ) {
+
+            state.nifty = {
+
+                price:
+                    niftyFallback,
+
+                previous:
+                    niftyFallback
+
+            };
+
+
+            console.log(
+                "Using NIFTY candle close fallback:",
+                niftyFallback
+            );
+
+        }
+
+
+        if (
+            !Number.isFinite(
+                state.banknifty?.price
+            ) &&
+            Number.isFinite(
+                bankFallback
+            )
+        ) {
+
+            state.banknifty = {
+
+                price:
+                    bankFallback,
+
+                previous:
+                    bankFallback
+
+            };
+
+
+            console.log(
+                "Using BANKNIFTY candle close fallback:",
+                bankFallback
+            );
+
+        }
+
+
+        renderMarket();
 
 
         renderIndicators();
@@ -850,37 +899,33 @@ function renderIndicators() {
         data.banknifty || {};
 
 
-    console.log(
-        "NIFTY indicators:",
-        nifty
-    );
-
-
-    console.log(
-        "BANKNIFTY indicators:",
-        bank
-    );
-
-
     const ema9 =
-        Number(nifty.ema9);
+        Number(
+            nifty.ema9
+        );
 
 
     const ema21 =
-        Number(nifty.ema21);
+        Number(
+            nifty.ema21
+        );
 
 
     const rsi =
-        Number(nifty.rsi14);
+        Number(
+            nifty.rsi14
+        );
 
 
     const vwap =
-        Number(nifty.vwap);
+        Number(
+            nifty.vwap
+        );
 
 
-    // -------------------------
-    // TREND
-    // -------------------------
+    // ==================================================
+    // NIFTY TREND
+    // ==================================================
 
     if (
         Number.isFinite(ema9) &&
@@ -909,9 +954,9 @@ function renderIndicators() {
     }
 
 
-    // -------------------------
+    // ==================================================
     // RSI
-    // -------------------------
+    // ==================================================
 
     if (
         Number.isFinite(rsi)
@@ -935,39 +980,38 @@ function renderIndicators() {
     }
 
 
-    // -------------------------
+    // ==================================================
     // VWAP
-    // -------------------------
+    // ==================================================
+
+    const price =
+        state.nifty?.price;
+
 
     if (
-        Number.isFinite(vwap)
+        Number.isFinite(
+            price
+        ) &&
+        Number.isFinite(
+            vwap
+        )
     ) {
 
-        const price =
-            state.nifty?.price;
+        setText(
+            "volatility",
 
+            price > vwap
+                ? "ABOVE VWAP"
+                : "BELOW VWAP"
 
-        if (
-            Number.isFinite(price)
-        ) {
-
-            setText(
-                "volatility",
-
-                price > vwap
-                    ? "ABOVE VWAP"
-                    : "BELOW VWAP"
-
-            );
-
-        }
+        );
 
     }
 
 
-    // -------------------------
-    // CANDLE COUNT
-    // -------------------------
+    // ==================================================
+    // CANDLES
+    // ==================================================
 
     const candleCount =
         nifty.candleCount;
@@ -993,7 +1037,67 @@ function renderIndicators() {
 
 
 // ======================================================
-// MARKET ANALYSIS
+// BANKNIFTY TREND
+// ======================================================
+
+function updateBankTrend() {
+
+    const bank =
+        state.indicators?.banknifty;
+
+
+    if (!bank) {
+
+        return;
+
+    }
+
+
+    const ema9 =
+        Number(
+            bank.ema9
+        );
+
+
+    const ema21 =
+        Number(
+            bank.ema21
+        );
+
+
+    if (
+        !Number.isFinite(ema9) ||
+        !Number.isFinite(ema21)
+    ) {
+
+        setText(
+            "bankTrend",
+            "--"
+        );
+
+        return;
+
+    }
+
+
+    const trend =
+        ema9 > ema21
+            ? "BULLISH"
+            : ema9 < ema21
+                ? "BEARISH"
+                : "SIDEWAYS";
+
+
+    setText(
+        "bankTrend",
+        trend
+    );
+
+}
+
+
+// ======================================================
+// STRATEGY ENGINE
 // ======================================================
 
 function analyzeMarket() {
@@ -1010,30 +1114,52 @@ function analyzeMarket() {
 
 
     const ema9 =
-        Number(nifty.ema9);
+        Number(
+            nifty.ema9
+        );
 
 
     const ema21 =
-        Number(nifty.ema21);
+        Number(
+            nifty.ema21
+        );
 
 
     const rsi =
-        Number(nifty.rsi14);
+        Number(
+            nifty.rsi14
+        );
 
 
     const vwap =
-        Number(nifty.vwap);
+        Number(
+            nifty.vwap
+        );
 
 
     const price =
-        state.nifty?.price;
+        Number(
+            state.nifty?.price
+        );
+
+
+    console.log(
+        "Strategy inputs:",
+        {
+            price,
+            ema9,
+            ema21,
+            rsi,
+            vwap
+        }
+    );
 
 
     if (
+        !Number.isFinite(price) ||
         !Number.isFinite(ema9) ||
         !Number.isFinite(ema21) ||
-        !Number.isFinite(rsi) ||
-        !Number.isFinite(price)
+        !Number.isFinite(rsi)
     ) {
 
         setText(
@@ -1042,25 +1168,19 @@ function analyzeMarket() {
         );
 
 
+        setText(
+            "strategyStatus",
+            "WAITING FOR DATA"
+        );
+
+
         return;
 
     }
 
 
-    const aboveVWAP =
-        Number.isFinite(vwap)
-            ? price > vwap
-            : null;
-
-
-    const belowVWAP =
-        Number.isFinite(vwap)
-            ? price < vwap
-            : null;
-
-
     // ==================================================
-    // V6 SCORE
+    // SCORE
     // ==================================================
 
     let buyScore = 0;
@@ -1076,7 +1196,7 @@ function analyzeMarket() {
     }
 
 
-    if (ema9 < ema21) {
+    else if (ema9 < ema21) {
 
         sellScore++;
 
@@ -1091,7 +1211,7 @@ function analyzeMarket() {
     }
 
 
-    if (rsi <= 45) {
+    else if (rsi <= 45) {
 
         sellScore++;
 
@@ -1099,16 +1219,22 @@ function analyzeMarket() {
 
 
     // VWAP
-    if (aboveVWAP === true) {
+    if (
+        Number.isFinite(vwap)
+    ) {
 
-        buyScore++;
+        if (price > vwap) {
 
-    }
+            buyScore++;
+
+        }
 
 
-    if (belowVWAP === true) {
+        else if (price < vwap) {
 
-        sellScore++;
+            sellScore++;
+
+        }
 
     }
 
@@ -1127,9 +1253,9 @@ function analyzeMarket() {
     ) {
 
         signal =
-            buyScore >= 4
-                ? "STRONG BUY"
-                : "BUY BIAS";
+            buyScore === 3
+                ? "BUY BIAS"
+                : "STRONG BUY";
 
     }
 
@@ -1140,9 +1266,9 @@ function analyzeMarket() {
     ) {
 
         signal =
-            sellScore >= 4
-                ? "STRONG SELL"
-                : "SELL BIAS";
+            sellScore === 3
+                ? "SELL BIAS"
+                : "STRONG SELL";
 
     }
 
@@ -1153,6 +1279,10 @@ function analyzeMarket() {
     );
 
 
+    // ==================================================
+    // PAPER TRADE
+    // ==================================================
+
     updateTradeSetup(
         price,
         signal
@@ -1160,7 +1290,7 @@ function analyzeMarket() {
 
 
     // ==================================================
-    // LIVE DIAGNOSTIC SCORES
+    // SCORE DISPLAY
     // ==================================================
 
     setText(
@@ -1175,32 +1305,39 @@ function analyzeMarket() {
     );
 
 
-    const total =
-        buyScore +
-        sellScore;
+    // ==================================================
+    // CONFIDENCE
+    // ==================================================
+
+    const maximumScore =
+        Math.max(
+            buyScore,
+            sellScore
+        );
 
 
-    let confidence = 0;
+    let confidence =
+        Math.round(
+            (
+                maximumScore /
+                3
+            ) * 100
+        );
 
 
-    if (total > 0) {
+    confidence =
+        Math.min(
+            confidence,
+            100
+        );
 
-        confidence =
-            Math.round(
-                (
-                    Math.max(
-                        buyScore,
-                        sellScore
-                    ) /
-                    4
-                ) * 100
-            );
 
-        confidence =
-            Math.min(
-                confidence,
-                100
-            );
+    if (
+        buyScore === 0 &&
+        sellScore === 0
+    ) {
+
+        confidence = 0;
 
     }
 
@@ -1224,7 +1361,7 @@ function analyzeMarket() {
 
 
     // ==================================================
-    // REASON
+    // ENGINE REASON
     // ==================================================
 
     const reasons = [];
@@ -1233,7 +1370,7 @@ function analyzeMarket() {
     if (ema9 > ema21) {
 
         reasons.push(
-            "EMA 9 above EMA 21"
+            "EMA bullish"
         );
 
     }
@@ -1242,7 +1379,7 @@ function analyzeMarket() {
     if (ema9 < ema21) {
 
         reasons.push(
-            "EMA 9 below EMA 21"
+            "EMA bearish"
         );
 
     }
@@ -1266,20 +1403,26 @@ function analyzeMarket() {
     }
 
 
-    if (aboveVWAP === true) {
+    if (
+        Number.isFinite(vwap)
+    ) {
 
-        reasons.push(
-            "Price above VWAP"
-        );
+        if (price > vwap) {
 
-    }
+            reasons.push(
+                "Price above VWAP"
+            );
+
+        }
 
 
-    if (belowVWAP === true) {
+        if (price < vwap) {
 
-        reasons.push(
-            "Price below VWAP"
-        );
+            reasons.push(
+                "Price below VWAP"
+            );
+
+        }
 
     }
 
@@ -1294,9 +1437,11 @@ function analyzeMarket() {
 
     setText(
         "strategyStatus",
+
         signal === "WAIT"
             ? "WAITING FOR CONFIRMATION"
             : "ACTIVE — PAPER ANALYSIS"
+
     );
 
 }
@@ -1323,9 +1468,13 @@ function renderV6Diagnostics() {
         state.nifty?.price;
 
 
-    // ----------------------------------
-    // EMA
-    // ----------------------------------
+    setText(
+        "diagPrice",
+        formatPrice(
+            price
+        )
+    );
+
 
     setText(
         "diagEma9",
@@ -1343,10 +1492,6 @@ function renderV6Diagnostics() {
     );
 
 
-    // ----------------------------------
-    // RSI
-    // ----------------------------------
-
     setText(
         "diagRsi",
         formatIndicator(
@@ -1355,10 +1500,6 @@ function renderV6Diagnostics() {
     );
 
 
-    // ----------------------------------
-    // VWAP
-    // ----------------------------------
-
     setText(
         "diagVwap",
         formatPrice(
@@ -1366,10 +1507,6 @@ function renderV6Diagnostics() {
         )
     );
 
-
-    // ----------------------------------
-    // ATR
-    // ----------------------------------
 
     const atr =
         nifty.atr14 ??
@@ -1385,10 +1522,6 @@ function renderV6Diagnostics() {
     );
 
 
-    // ----------------------------------
-    // SWING HIGH
-    // ----------------------------------
-
     const swingHigh =
         nifty.swingHigh ??
         nifty.swing_high ??
@@ -1403,10 +1536,6 @@ function renderV6Diagnostics() {
     );
 
 
-    // ----------------------------------
-    // SWING LOW
-    // ----------------------------------
-
     const swingLow =
         nifty.swingLow ??
         nifty.swing_low ??
@@ -1417,18 +1546,6 @@ function renderV6Diagnostics() {
         "diagSwingLow",
         formatPrice(
             swingLow
-        )
-    );
-
-
-    // ----------------------------------
-    // PRICE
-    // ----------------------------------
-
-    setText(
-        "diagPrice",
-        formatPrice(
-            price
         )
     );
 
@@ -1483,10 +1600,6 @@ function updateTradeSetup(
         {};
 
 
-    // ==================================================
-    // USE V6 ATR IF AVAILABLE
-    // ==================================================
-
     const atr =
         Number(
             nifty.atr14 ??
@@ -1502,25 +1615,12 @@ function updateTradeSetup(
         atr > 0
     ) {
 
-        /*
-        V6 risk model:
-
-        Stop distance = 1.5 ATR
-        Target distance = 3 ATR
-
-        Risk / Reward = 1 : 2
-        */
-
         risk =
             atr * 1.5;
 
     }
 
     else {
-
-        /*
-        Safe fallback
-        */
 
         risk =
             price * 0.001;
@@ -1532,21 +1632,20 @@ function updateTradeSetup(
         risk * 2;
 
 
+    const bullish =
+        signal === "BUY BIAS" ||
+        signal === "STRONG BUY";
+
+
     const stop =
-        signal === "STRONG BUY" ||
-        signal === "BUY BIAS"
-
+        bullish
             ? price - risk
-
             : price + risk;
 
 
     const target =
-        signal === "STRONG BUY" ||
-        signal === "BUY BIAS"
-
+        bullish
             ? price + reward
-
             : price - reward;
 
 
@@ -1577,7 +1676,7 @@ function updateTradeSetup(
 
 
 // ======================================================
-// STATUS DOT
+// STATUS
 // ======================================================
 
 function updateStatusDot(
@@ -1737,7 +1836,7 @@ async function initialize() {
 
 
     console.log(
-        "TradeMind Pro V6 started"
+        "TradeMind Pro V7 started"
     );
 
 
@@ -1766,14 +1865,24 @@ async function initialize() {
     setupPaperTradeButton();
 
 
-    // ------------------------------
-    // FIRST DATA LOAD
-    // ------------------------------
+    /*
+    Load indicators FIRST.
 
-    await fetchMarketData();
+    This guarantees that the
+    latest candle can become the
+    fallback price.
+    */
 
 
     await fetchIndicatorData();
+
+
+    /*
+    Then attempt live quotes.
+    */
+
+
+    await fetchMarketData();
 
 
     updateTime();
@@ -1782,10 +1891,10 @@ async function initialize() {
 
 
 // ======================================================
-// LIVE REFRESH
+// REFRESH
 // ======================================================
 
-// Market prices every 5 seconds
+// Live quotes
 
 setInterval(
     fetchMarketData,
@@ -1793,7 +1902,7 @@ setInterval(
 );
 
 
-// Indicators every 30 seconds
+// Indicators
 
 setInterval(
     fetchIndicatorData,
@@ -1801,7 +1910,7 @@ setInterval(
 );
 
 
-// Clock every second
+// Clock
 
 setInterval(
     updateTime,
