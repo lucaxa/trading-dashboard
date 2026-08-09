@@ -153,22 +153,33 @@ function formatPercent(value) {
 
 
 // ======================================================
-// API
+// API FETCH
 // ======================================================
 
 async function apiFetch(url) {
+
+    console.log(
+        "================================"
+    );
 
     console.log(
         "TradeMind API request:",
         url
     );
 
+    console.log(
+        "================================"
+    );
+
+
     const response =
         await fetch(
             url,
             {
                 method: "GET",
+
                 cache: "no-store",
+
                 headers: {
                     "Accept":
                         "application/json"
@@ -181,6 +192,18 @@ async function apiFetch(url) {
         await response.text();
 
 
+    console.log(
+        "TradeMind API HTTP status:",
+        response.status
+    );
+
+
+    console.log(
+        "TradeMind API raw text:",
+        text.slice(0, 5000)
+    );
+
+
     let data;
 
 
@@ -191,7 +214,12 @@ async function apiFetch(url) {
 
     }
 
-    catch {
+    catch (error) {
+
+        console.error(
+            "TradeMind API JSON parse error:",
+            error
+        );
 
         throw new Error(
             `Invalid API response (${response.status})`
@@ -201,7 +229,7 @@ async function apiFetch(url) {
 
 
     console.log(
-        "TradeMind API response:",
+        "TradeMind API parsed response:",
         data
     );
 
@@ -209,11 +237,15 @@ async function apiFetch(url) {
     if (!response.ok) {
 
         const message =
-            typeof data.error === "string"
+            typeof data?.error === "string"
+
                 ? data.error
+
                 : JSON.stringify(
-                    data.error || data
+                    data?.error ||
+                    data
                 );
+
 
         throw new Error(
             message ||
@@ -223,16 +255,25 @@ async function apiFetch(url) {
     }
 
 
-    if (data.success === false) {
+    if (
+        data &&
+        data.success === false
+    ) {
+
+        const message =
+            typeof data.error === "string"
+
+                ? data.error
+
+                : JSON.stringify(
+                    data.error ||
+                    data
+                );
+
 
         throw new Error(
-
-            typeof data.error === "string"
-                ? data.error
-                : JSON.stringify(
-                    data.error || data
-                )
-
+            message ||
+            "API returned success=false"
         );
 
     }
@@ -271,12 +312,19 @@ function extractPrice(quote) {
     const fields = [
 
         "ltp",
+
         "last_price",
+
         "lastPrice",
+
         "price",
+
         "close",
+
         "lp",
+
         "last_traded_price",
+
         "lastTradedPrice"
 
     ];
@@ -487,9 +535,15 @@ async function fetchMarketData() {
 
         const quotes =
             extractQuotes(
-                result.data ??
+                result?.data ??
                 result
             );
+
+
+        console.log(
+            "TradeMind extracted quotes:",
+            quotes
+        );
 
 
         const niftyQuote =
@@ -595,7 +649,6 @@ async function fetchMarketData() {
 
 
         updateTime();
-
 
         updateBankTrend();
 
@@ -739,10 +792,12 @@ function renderChange(
 
     const percent =
         previous !== 0
+
             ? (
                 difference /
                 previous
             ) * 100
+
             : 0;
 
 
@@ -795,11 +850,11 @@ async function fetchIndicatorData() {
 
 
         const nifty =
-            result.nifty || {};
+            result?.nifty || {};
 
 
         const bank =
-            result.banknifty || {};
+            result?.banknifty || {};
 
 
         const niftyClose =
@@ -1088,7 +1143,7 @@ function updateBankTrend() {
 
 
 // ======================================================
-// V8 STRATEGY
+// V8 LIVE STRATEGY
 // ======================================================
 
 function analyzeMarket() {
@@ -1105,37 +1160,67 @@ function analyzeMarket() {
 
 
     const ema9 =
-        Number(nifty.ema9);
+        Number(
+            nifty.ema9
+        );
+
 
     const ema21 =
-        Number(nifty.ema21);
+        Number(
+            nifty.ema21
+        );
+
 
     const rsi =
-        Number(nifty.rsi14);
+        Number(
+            nifty.rsi14
+        );
+
 
     const vwap =
-        Number(nifty.vwap);
+        Number(
+            nifty.vwap
+        );
+
 
     const atr =
-        Number(nifty.atr14);
+        Number(
+            nifty.atr14
+        );
+
 
     const price =
-        Number(state.nifty?.price);
+        Number(
+            state.nifty?.price
+        );
+
 
     const candle =
         nifty.lastCandle || {};
 
+
     const open =
-        Number(candle.o);
+        Number(
+            candle.o
+        );
+
 
     const high =
-        Number(candle.h);
+        Number(
+            candle.h
+        );
+
 
     const low =
-        Number(candle.l);
+        Number(
+            candle.l
+        );
+
 
     const close =
-        Number(candle.c);
+        Number(
+            candle.c
+        );
 
 
     if (
@@ -1151,25 +1236,30 @@ function analyzeMarket() {
             "WAIT"
         );
 
+
         setText(
             "strategyStatus",
             "WAITING FOR DATA"
         );
+
 
         setText(
             "buyScore",
             "--"
         );
 
+
         setText(
             "sellScore",
             "--"
         );
 
+
         setText(
             "confidence",
             "--"
         );
+
 
         return;
 
@@ -1183,7 +1273,10 @@ function analyzeMarket() {
     const reasons = [];
 
 
+    // ==================================================
     // EMA
+    // ==================================================
+
     if (
         ema9 > ema21
     ) {
@@ -1209,7 +1302,10 @@ function analyzeMarket() {
     }
 
 
+    // ==================================================
     // RSI
+    // ==================================================
+
     if (
         rsi >= 55 &&
         rsi < 70
@@ -1237,7 +1333,10 @@ function analyzeMarket() {
     }
 
 
+    // ==================================================
     // VWAP
+    // ==================================================
+
     if (
         price > vwap
     ) {
@@ -1263,7 +1362,10 @@ function analyzeMarket() {
     }
 
 
-    // Candle
+    // ==================================================
+    // CANDLE
+    // ==================================================
+
     let candleStrong =
         false;
 
@@ -1301,11 +1403,14 @@ function analyzeMarket() {
 
 
         const range =
-            high - low;
+            high -
+            low;
+
 
         const body =
             Math.abs(
-                close - open
+                close -
+                open
             );
 
 
@@ -1316,7 +1421,10 @@ function analyzeMarket() {
     }
 
 
-    // Signal
+    // ==================================================
+    // SIGNAL
+    // ==================================================
+
     let signal =
         "WAIT";
 
@@ -1366,14 +1474,22 @@ function analyzeMarket() {
     }
 
 
-    // Confidence
+    // ==================================================
+    // CONFIDENCE
+    // ==================================================
+
     const confidenceMap = {
 
         0: 0,
+
         1: 20,
+
         2: 40,
+
         3: 60,
+
         4: 75,
+
         5: 90
 
     };
@@ -1462,7 +1578,9 @@ function analyzeMarket() {
         "signalReason",
 
         signal === "WAIT"
+
             ? "Waiting for stronger confirmation"
+
             : reasons.join(" + ")
 
     );
@@ -1473,7 +1591,9 @@ function analyzeMarket() {
         "strategyStatus",
 
         signal === "WAIT"
+
             ? "WAITING FOR CONFIRMATION"
+
             : "ACTIVE — PAPER ANALYSIS"
 
     );
@@ -1503,13 +1623,29 @@ function updateTradeSetup(
         signal === "WAIT"
     ) {
 
-        setText("entry", "--");
+        setText(
+            "entry",
+            "--"
+        );
 
-        setText("stoploss", "--");
 
-        setText("target", "--");
+        setText(
+            "stoploss",
+            "--"
+        );
 
-        setText("riskReward", "--");
+
+        setText(
+            "target",
+            "--"
+        );
+
+
+        setText(
+            "riskReward",
+            "--"
+        );
+
 
         return;
 
@@ -1692,10 +1828,22 @@ async function runV10Backtest() {
         true;
 
 
-  const button =
-    $("runBacktestBtn") ||
-    $("runV9Backtest") ||
-    $("runV10Backtest");  
+    // ==================================================
+    // FIND BUTTON
+    // ==================================================
+
+    const button =
+        $("runBacktestBtn") ||
+        $("runV10Backtest") ||
+        $("runV9Backtest");
+
+
+    console.log(
+        "V10 backtest button:",
+        button
+            ? button.id
+            : "NOT FOUND"
+    );
 
 
     if (
@@ -1731,6 +1879,11 @@ async function runV10Backtest() {
         );
 
         console.log(
+            "Requesting:",
+            "/api/backtest?interval=5minute"
+        );
+
+        console.log(
             "================================"
         );
 
@@ -1742,8 +1895,19 @@ async function runV10Backtest() {
 
 
         console.log(
-            "V10 BACKTEST RESULT:",
+            "================================"
+        );
+
+        console.log(
+            "V10 BACKTEST RESULT"
+        );
+
+        console.log(
             result
+        );
+
+        console.log(
+            "================================"
         );
 
 
@@ -1761,8 +1925,19 @@ async function runV10Backtest() {
     catch (error) {
 
         console.error(
-            "V10 backtest error:",
+            "================================"
+        );
+
+        console.error(
+            "V10 BACKTEST ERROR"
+        );
+
+        console.error(
             error
+        );
+
+        console.error(
+            "================================"
         );
 
 
@@ -1805,16 +1980,27 @@ function resetBacktestDisplay() {
     const fields = [
 
         "candlesTested",
+
         "totalTrades",
+
         "buyTrades",
+
         "sellTrades",
+
         "winningTrades",
+
         "losingTrades",
+
         "winRate",
+
         "totalPoints",
+
         "averageWin",
+
         "averageLoss",
+
         "profitFactor",
+
         "maxDrawdown"
 
     ];
@@ -1831,6 +2017,47 @@ function resetBacktestDisplay() {
 
     }
 
+
+    const tradeContainer =
+        $("tradeHistory") ||
+        $("tradeHistoryTable") ||
+        $("tradeList");
+
+
+    if (
+        tradeContainer
+    ) {
+
+        if (
+            tradeContainer.tagName === "TABLE"
+        ) {
+
+            const tbody =
+                tradeContainer.querySelector(
+                    "tbody"
+                );
+
+
+            if (
+                tbody
+            ) {
+
+                tbody.innerHTML =
+                    "";
+
+            }
+
+        }
+
+        else {
+
+            tradeContainer.innerHTML =
+                "";
+
+        }
+
+    }
+
 }
 
 
@@ -1841,11 +2068,6 @@ function resetBacktestDisplay() {
 function safeStatistic(
     value
 ) {
-
-    /*
-    Prevent [object Object]
-    from ever reaching the UI.
-    */
 
     if (
         value === null ||
@@ -1884,14 +2106,29 @@ function renderBacktest(
         !result
     ) {
 
+        console.warn(
+            "renderBacktest called without result."
+        );
+
         return;
 
     }
 
 
     console.log(
-        "Rendering V10 backtest:",
+        "================================"
+    );
+
+    console.log(
+        "Rendering V10 backtest:"
+    );
+
+    console.log(
         result
+    );
+
+    console.log(
+        "================================"
     );
 
 
@@ -2073,10 +2310,13 @@ function renderBacktest(
     else {
 
         setText(
+
             "profitFactor",
 
             Number.isFinite(pf)
+
                 ? pf.toFixed(2)
+
                 : "--"
 
         );
@@ -2106,6 +2346,7 @@ function renderBacktest(
     ) {
 
         setText(
+
             "backtestStatus",
 
             `Insufficient historical data — ${candles ?? 0} candles`
@@ -2114,9 +2355,24 @@ function renderBacktest(
 
     }
 
+    else if (
+        result.success === false
+    ) {
+
+        setText(
+
+            "backtestStatus",
+
+            `Backtest failed — ${result.error || "Unknown error"}`
+
+        );
+
+    }
+
     else {
 
         setText(
+
             "backtestStatus",
 
             `V10 BACKTEST COMPLETE — ${totalTrades ?? 0} trades simulated`
@@ -2145,6 +2401,11 @@ function renderBacktest(
             result.trades
         )
     ) {
+
+        state.backtest =
+            state.backtest ||
+            result;
+
 
         state.backtest.trades =
             result.trades;
@@ -2185,17 +2446,14 @@ function renderTradeHistory(
         !Array.isArray(trades)
     ) {
 
+        console.log(
+            "No trade history array returned."
+        );
+
         return;
 
     }
 
-
-    /*
-    We support several possible
-    HTML element IDs so the UI
-    doesn't break if the table
-    is named differently.
-    */
 
     const container =
         $("tradeHistory") ||
@@ -2208,7 +2466,7 @@ function renderTradeHistory(
     ) {
 
         console.log(
-            "Trade history container not found. Trades remain available in state.backtest.trades."
+            "Trade history container not found."
         );
 
         return;
@@ -2216,10 +2474,9 @@ function renderTradeHistory(
     }
 
 
-    /*
-    If the element is a table,
-    create a proper tbody.
-    */
+    // ==================================================
+    // TABLE
+    // ==================================================
 
     if (
         container.tagName === "TABLE"
@@ -2231,12 +2488,15 @@ function renderTradeHistory(
             );
 
 
-        if (!tbody) {
+        if (
+            !tbody
+        ) {
 
             tbody =
                 document.createElement(
                     "tbody"
                 );
+
 
             container.appendChild(
                 tbody
@@ -2245,10 +2505,12 @@ function renderTradeHistory(
         }
 
 
-        tbody.innerHTML = "";
+        tbody.innerHTML =
+            "";
 
 
         trades.forEach(
+
             (trade, index) => {
 
                 const row =
@@ -2285,6 +2547,7 @@ function renderTradeHistory(
                 );
 
             }
+
         );
 
 
@@ -2293,16 +2556,16 @@ function renderTradeHistory(
     }
 
 
-    /*
-    If it is a normal DIV,
-    display a compact readable
-    trade-history list.
-    */
+    // ==================================================
+    // DIV / CONTAINER
+    // ==================================================
 
-    container.innerHTML = "";
+    container.innerHTML =
+        "";
 
 
     trades.forEach(
+
         (trade, index) => {
 
             const row =
@@ -2337,6 +2600,7 @@ function renderTradeHistory(
             );
 
         }
+
     );
 
 }
@@ -2348,7 +2612,19 @@ function renderTradeHistory(
 
 function setupBacktestButton() {
 
+    /*
+    Support all versions of the button ID.
+
+    Preferred:
+    runV10Backtest
+
+    Also supported:
+    runBacktestBtn
+    runV9Backtest
+    */
+
     const button =
+        $("runV10Backtest") ||
         $("runBacktestBtn") ||
         $("runV9Backtest");
 
@@ -2361,13 +2637,26 @@ function setupBacktestButton() {
             "V10 backtest button not found."
         );
 
+
+        console.warn(
+            "Expected one of:",
+            [
+                "runV10Backtest",
+                "runBacktestBtn",
+                "runV9Backtest"
+            ]
+        );
+
+
         return;
 
     }
 
 
     /*
-    Prevent duplicate listeners.
+    Use onclick instead of addEventListener
+    so duplicate listeners are not created
+    if initialization happens again.
     */
 
     button.onclick =
@@ -2375,7 +2664,23 @@ function setupBacktestButton() {
 
 
     console.log(
-        "V10 backtest button connected."
+        "================================"
+    );
+
+
+    console.log(
+        "V10 backtest button connected:"
+    );
+
+
+    console.log(
+        "Button ID:",
+        button.id
+    );
+
+
+    console.log(
+        "================================"
     );
 
 }
@@ -2400,8 +2705,7 @@ function setupPaperTradeButton() {
     }
 
 
-    button.addEventListener(
-        "click",
+    button.onclick =
         () => {
 
             const signal =
@@ -2460,9 +2764,7 @@ function setupPaperTradeButton() {
 
             );
 
-        }
-
-    );
+        };
 
 }
 
@@ -2479,7 +2781,9 @@ function updateStatusDot(
         $("statusDot");
 
 
-    if (!dot) {
+    if (
+        !dot
+    ) {
 
         return;
 
@@ -2555,17 +2859,21 @@ async function initialize() {
         "================================"
     );
 
+
     console.log(
         "TradeMind Pro V10 started"
     );
+
 
     console.log(
         "V10 Historical Backtest Engine Ready"
     );
 
+
     console.log(
         "Paper Trading Only"
     );
+
 
     console.log(
         "================================"
@@ -2602,8 +2910,7 @@ async function initialize() {
 
 
     /*
-    Load historical indicators
-    first.
+    Load historical indicators first.
     */
 
     await fetchIndicatorData();
