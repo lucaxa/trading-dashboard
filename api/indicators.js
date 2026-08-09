@@ -1,398 +1,547 @@
 /*
 TradeMind Pro
-V4 Technical Indicator Engine
+V5 Technical Indicator API
 
-REAL historical candles
-EMA 9
-EMA 21
-RSI 14
-VWAP
+INDstocks → Vercel → Indicators
 
-PAPER ANALYSIS ONLY.
+Indicators:
+- EMA 9
+- EMA 21
+- RSI 14
+- VWAP
+
+Paper analysis only.
 No orders are placed.
 */
 
+
+// =========================
+// EMA
+// =========================
+
 function ema(values, period) {
 
-  if (values.length < period) {
-    return null;
-  }
-
-  const multiplier =
-    2 / (period + 1);
-
-  let emaValue =
-    values
-      .slice(0, period)
-      .reduce(
-        (sum, value) => sum + value,
-        0
-      ) / period;
-
-  for (
-    let i = period;
-    i < values.length;
-    i++
-  ) {
-
-    emaValue =
-      (
-        values[i] - emaValue
-      ) *
-      multiplier +
-      emaValue;
-
-  }
-
-  return emaValue;
-}
-
-
-function rsi(
-  values,
-  period = 14
-) {
-
-  if (
-    values.length <
-    period + 1
-  ) {
-    return null;
-  }
-
-  let gains = 0;
-  let losses = 0;
-
-  for (
-    let i = 1;
-    i <= period;
-    i++
-  ) {
-
-    const change =
-      values[i] -
-      values[i - 1];
-
-    if (change > 0) {
-      gains += change;
-    } else {
-      losses += Math.abs(change);
+    if (values.length < period) {
+        return null;
     }
 
-  }
+    const multiplier =
+        2 / (period + 1);
 
-  let averageGain =
-    gains / period;
+    let emaValue =
+        values
+            .slice(0, period)
+            .reduce(
+                (sum, value) => sum + value,
+                0
+            ) / period;
 
-  let averageLoss =
-    losses / period;
+    for (
+        let i = period;
+        i < values.length;
+        i++
+    ) {
 
-  for (
-    let i = period + 1;
-    i < values.length;
-    i++
-  ) {
+        emaValue =
+            (
+                values[i] - emaValue
+            ) * multiplier +
+            emaValue;
 
-    const change =
-      values[i] -
-      values[i - 1];
+    }
 
-    const gain =
-      Math.max(change, 0);
-
-    const loss =
-      Math.max(-change, 0);
-
-    averageGain =
-      (
-        averageGain *
-        (period - 1) +
-        gain
-      ) / period;
-
-    averageLoss =
-      (
-        averageLoss *
-        (period - 1) +
-        loss
-      ) / period;
-
-  }
-
-  if (averageLoss === 0) {
-    return 100;
-  }
-
-  const rs =
-    averageGain /
-    averageLoss;
-
-  return (
-    100 -
-    100 / (1 + rs)
-  );
+    return emaValue;
 }
 
+
+// =========================
+// RSI
+// =========================
+
+function rsi(
+    values,
+    period = 14
+) {
+
+    if (
+        values.length <
+        period + 1
+    ) {
+
+        return null;
+
+    }
+
+    let gains = 0;
+    let losses = 0;
+
+    for (
+        let i = 1;
+        i <= period;
+        i++
+    ) {
+
+        const change =
+            values[i] -
+            values[i - 1];
+
+        if (change > 0) {
+
+            gains += change;
+
+        } else {
+
+            losses +=
+                Math.abs(change);
+
+        }
+
+    }
+
+    let averageGain =
+        gains / period;
+
+    let averageLoss =
+        losses / period;
+
+    for (
+        let i = period + 1;
+        i < values.length;
+        i++
+    ) {
+
+        const change =
+            values[i] -
+            values[i - 1];
+
+        const gain =
+            Math.max(change, 0);
+
+        const loss =
+            Math.max(-change, 0);
+
+        averageGain =
+            (
+                averageGain *
+                (period - 1) +
+                gain
+            ) / period;
+
+        averageLoss =
+            (
+                averageLoss *
+                (period - 1) +
+                loss
+            ) / period;
+
+    }
+
+    if (averageLoss === 0) {
+
+        return 100;
+
+    }
+
+    const rs =
+        averageGain /
+        averageLoss;
+
+    return (
+        100 -
+        100 / (1 + rs)
+    );
+
+}
+
+
+// =========================
+// VWAP
+// =========================
 
 function vwap(candles) {
 
-  let cumulativeTPV = 0;
-  let cumulativeVolume = 0;
-
-  for (
-    const candle of candles
-  ) {
-
-    const high =
-      Number(candle[2]);
-
-    const low =
-      Number(candle[3]);
-
-    const close =
-      Number(candle[4]);
-
-    const volume =
-      Number(candle[5]);
-
     if (
-      !Number.isFinite(high) ||
-      !Number.isFinite(low) ||
-      !Number.isFinite(close) ||
-      !Number.isFinite(volume)
+        !Array.isArray(candles) ||
+        candles.length === 0
     ) {
-      continue;
+
+        return null;
+
     }
 
-    const typicalPrice =
-      (
-        high +
-        low +
-        close
-      ) / 3;
-
-    cumulativeTPV +=
-      typicalPrice *
-      volume;
-
-    cumulativeVolume +=
-      volume;
-  }
-
-  if (cumulativeVolume === 0) {
-    return null;
-  }
-
-  return (
-    cumulativeTPV /
-    cumulativeVolume
-  );
-}
-
-
-function extractCandles(data) {
-
-  if (!data) {
-    return [];
-  }
-
-  if (Array.isArray(data)) {
-    return data;
-  }
-
-  if (
-    Array.isArray(data.candles)
-  ) {
-    return data.candles;
-  }
-
-  if (
-    typeof data === "object"
-  ) {
+    let cumulativeTPV = 0;
+    let cumulativeVolume = 0;
 
     for (
-      const value of
-      Object.values(data)
+        const candle of candles
     ) {
 
-      if (Array.isArray(value)) {
-        return value;
-      }
+        const high =
+            Number(candle.h);
 
-      if (
-        value &&
-        Array.isArray(
-          value.candles
-        )
-      ) {
+        const low =
+            Number(candle.l);
 
-        return value.candles;
-      }
+        const close =
+            Number(candle.c);
+
+        const volume =
+            Number(candle.v);
+
+        if (
+            !Number.isFinite(high) ||
+            !Number.isFinite(low) ||
+            !Number.isFinite(close) ||
+            !Number.isFinite(volume)
+        ) {
+
+            continue;
+
+        }
+
+        const typicalPrice =
+            (
+                high +
+                low +
+                close
+            ) / 3;
+
+        cumulativeTPV +=
+            typicalPrice *
+            volume;
+
+        cumulativeVolume +=
+            volume;
 
     }
-  }
 
-  return [];
+    if (
+        cumulativeVolume === 0
+    ) {
+
+        return null;
+
+    }
+
+    return (
+        cumulativeTPV /
+        cumulativeVolume
+    );
+
 }
 
 
-export default async function handler(
-  req,
-  res
+// =========================
+// INDICATOR CALCULATION
+// =========================
+
+function calculateIndicators(
+    candles
 ) {
 
-  try {
-
-    const token =
-      process.env.INDSTOCKS_TOKEN;
-
-    if (!token) {
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "INDSTOCKS_TOKEN is not configured"
-      });
-
-    }
-
-    const interval =
-      req.query.interval ||
-      "5minute";
-
-    /*
-    Same IDs already working
-    with your quote endpoint.
-    */
-
-    const NIFTY_ID =
-      "40000001";
-
-    const BANKNIFTY_ID =
-      "40000003";
-
-    const scripCodes =
-      `NIDX_${NIFTY_ID},NIDX_${BANKNIFTY_ID}`;
-
-    const endTime =
-      Date.now();
-
-    const startTime =
-      endTime -
-      (
-        7 *
-        24 *
-        60 *
-        60 *
-        1000
-      );
-
-    const url =
-      "https://api.indstocks.com" +
-      `/market/historical/${interval}` +
-      `?scrip-codes=${encodeURIComponent(
-        scripCodes
-      )}` +
-      `&start_time=${startTime}` +
-      `&end_time=${endTime}`;
-
-    const response =
-      await fetch(
-        url,
-        {
-          method: "GET",
-          headers: {
-            Authorization: token
-          }
-        }
-      );
-
-    const result =
-      await response.json();
-
-    if (!response.ok) {
-
-      return res.status(
-        response.status
-      ).json({
-        success: false,
-        error: result
-      });
-
-    }
-
-    const rawData =
-      result.data;
-
-    const candles =
-      extractCandles(rawData);
-
     if (
-      candles.length === 0
+        !Array.isArray(candles) ||
+        candles.length === 0
     ) {
 
-      return res.status(200).json({
+        return {
 
-        success: false,
+            candleCount: 0,
 
-        error:
-          "No candles found",
+            ema9: null,
+            ema21: null,
+            rsi14: null,
+            vwap: null,
 
-        rawData
+            lastCandle: null
 
-      });
+        };
 
     }
 
-    /*
-    TEMPORARY DEBUG RESPONSE
+    const closes =
+        candles.map(
+            candle =>
+                Number(candle.c)
+        );
 
-    We want to see the EXACT
-    candle structure returned
-    by INDstocks.
-
-    */
-
-    return res.status(200).json({
-
-      success: true,
-
-      interval,
-
-      candleCount:
-        candles.length,
-
-      sampleCandles:
-        candles.slice(0, 3),
-
-      firstCandle:
-        candles[0],
-
-      lastCandle:
+    const lastCandle =
         candles[
-          candles.length - 1
-        ]
+            candles.length - 1
+        ];
 
-    });
+    return {
 
-  }
+        candleCount:
+            candles.length,
 
-  catch (error) {
+        ema9:
+            ema(
+                closes,
+                9
+            ),
 
-    console.error(
-      "Indicator engine error:",
-      error
-    );
+        ema21:
+            ema(
+                closes,
+                21
+            ),
 
-    return res.status(500).json({
+        rsi14:
+            rsi(
+                closes,
+                14
+            ),
 
-      success: false,
+        vwap:
+            vwap(candles),
 
-      error:
-        "Failed to calculate indicators"
+        lastCandle
 
-    });
+    };
 
-  }
+}
+
+
+// =========================
+// API HANDLER
+// =========================
+
+export default async function handler(
+    req,
+    res
+) {
+
+    try {
+
+        const token =
+            process.env.INDSTOCKS_TOKEN;
+
+        if (!token) {
+
+            return res.status(500).json({
+
+                success: false,
+
+                error:
+                    "INDSTOCKS_TOKEN is not configured"
+
+            });
+
+        }
+
+
+        const interval =
+            req.query.interval ||
+            "5minute";
+
+
+        const allowedIntervals = [
+
+            "1minute",
+            "2minute",
+            "3minute",
+            "4minute",
+            "5minute",
+            "10minute",
+            "15minute",
+            "30minute",
+            "60minute",
+            "120minute",
+            "180minute",
+            "240minute",
+            "1day"
+
+        ];
+
+
+        if (
+            !allowedIntervals.includes(
+                interval
+            )
+        ) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                error:
+                    "Invalid candle interval"
+
+            });
+
+        }
+
+
+        // =========================
+        // INSTRUMENTS
+        // =========================
+
+        const NIFTY_ID =
+            "40000001";
+
+        const BANKNIFTY_ID =
+            "40000003";
+
+
+        const scripCodes =
+            `NIDX_${NIFTY_ID},NIDX_${BANKNIFTY_ID}`;
+
+
+        // =========================
+        // TIME RANGE
+        // =========================
+
+        const endTime =
+            Date.now();
+
+        const startTime =
+            endTime -
+            (
+                7 *
+                24 *
+                60 *
+                60 *
+                1000
+            );
+
+
+        // =========================
+        // INDSTOCKS REQUEST
+        // =========================
+
+        const url =
+            "https://api.indstocks.com" +
+            `/market/historical/${interval}` +
+            `?scrip-codes=${encodeURIComponent(
+                scripCodes
+            )}` +
+            `&start_time=${startTime}` +
+            `&end_time=${endTime}`;
+
+
+        const response =
+            await fetch(
+                url,
+                {
+
+                    method: "GET",
+
+                    headers: {
+
+                        Authorization:
+                            token
+
+                    }
+
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (!response.ok) {
+
+            return res.status(
+                response.status
+            ).json({
+
+                success: false,
+
+                error: result
+
+            });
+
+        }
+
+
+        const rawData =
+            result.data;
+
+
+        // =========================
+        // EXTRACT BOTH INSTRUMENTS
+        // =========================
+
+        const niftyData =
+            rawData?.NIDX_40000001;
+
+        const bankNiftyData =
+            rawData?.NIDX_40000003;
+
+
+        const niftyCandles =
+            Array.isArray(
+                niftyData?.candles
+            )
+                ? niftyData.candles
+                : [];
+
+
+        const bankNiftyCandles =
+            Array.isArray(
+                bankNiftyData?.candles
+            )
+                ? bankNiftyData.candles
+                : [];
+
+
+        // =========================
+        // CALCULATE
+        // =========================
+
+        const nifty =
+            calculateIndicators(
+                niftyCandles
+            );
+
+
+        const banknifty =
+            calculateIndicators(
+                bankNiftyCandles
+            );
+
+
+        // =========================
+        // RESPONSE
+        // =========================
+
+        return res.status(200).json({
+
+            success: true,
+
+            interval,
+
+            startTime,
+
+            endTime,
+
+            nifty,
+
+            banknifty
+
+        });
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "Indicator API error:",
+            error
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                "Failed to calculate indicators"
+
+        });
+
+    }
 
 }
