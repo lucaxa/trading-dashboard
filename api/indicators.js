@@ -157,23 +157,65 @@ function rsi(
 // =========================
 // VWAP
 // =========================
-
 function vwap(candles) {
 
     if (
         !Array.isArray(candles) ||
         candles.length === 0
     ) {
-
         return null;
+    }
+
+    /*
+    Use the most recent trading session.
+
+    Candle timestamps are Unix seconds.
+    Convert them to IST (UTC + 5:30).
+    */
+
+    function istDate(ts) {
+
+        const date =
+            new Date(
+                Number(ts) * 1000
+            );
+
+        return new Date(
+            date.getTime() +
+            (5.5 * 60 * 60 * 1000)
+        )
+        .toISOString()
+        .slice(0, 10);
 
     }
+
+    const latestCandle =
+        candles[
+            candles.length - 1
+        ];
+
+    const sessionDate =
+        istDate(
+            latestCandle.ts
+        );
+
+    /*
+    Keep only candles
+    from the latest session.
+    */
+
+    const sessionCandles =
+        candles.filter(
+            candle =>
+                istDate(candle.ts) ===
+                sessionDate
+        );
 
     let cumulativeTPV = 0;
     let cumulativeVolume = 0;
 
     for (
-        const candle of candles
+        const candle of sessionCandles
     ) {
 
         const high =
@@ -194,9 +236,7 @@ function vwap(candles) {
             !Number.isFinite(close) ||
             !Number.isFinite(volume)
         ) {
-
             continue;
-
         }
 
         const typicalPrice =
@@ -218,9 +258,7 @@ function vwap(candles) {
     if (
         cumulativeVolume === 0
     ) {
-
         return null;
-
     }
 
     return (
@@ -229,6 +267,7 @@ function vwap(candles) {
     );
 
 }
+
 
 
 // =========================
