@@ -1,31 +1,31 @@
 /*
-  TradeMind Pro
-  V2 Market Data Engine
+TradeMind Pro
+V3 Real Market Data Engine
 
-  IMPORTANT:
-  This is currently a DEMO market feed.
+CONNECTED TO:
+INDstocks API → Vercel → Dashboard
 
-  No real trades are placed.
-  No broker is connected.
+IMPORTANT:
+- Real market data
+- PAPER TRADING ONLY
+- NO LIVE ORDERS
 */
-
 
 const market = {
 
   nifty: {
-    price: 24750,
-    previous: 24720,
+    price: 0,
+    previous: 0,
     history: []
   },
 
   banknifty: {
-    price: 55900,
-    previous: 55840,
+    price: 0,
+    previous: 0,
     history: []
   }
 
 };
-
 
 const state = {
 
@@ -33,120 +33,439 @@ const state = {
 
   paperTrades: [],
 
-  lastUpdate: null
+  lastUpdate: null,
+
+  apiConnected: false
 
 };
 
 
 /*
-  Generate realistic-looking price movement
+Fetch REAL market data
+from our Vercel backend.
 */
 
-function randomMovement(price) {
+async function fetchMarketData() {
 
-  const movement =
-    (Math.random() - 0.48)
-    * price
-    * 0.0007;
+  try {
 
-  return price + movement;
+    const response =
+      await fetch(
+        "/api/quotes",
+        {
+          cache: "no-store"
+        }
+      );
+
+    const result =
+      await response.json();
+
+    if (!response.ok || !result.success) {
+
+      throw new Error(
+        result.error ||
+        "Market API failed"
+      );
+
+    }
+
+    /*
+    INDstocks response structure
+    can vary slightly depending
+    on the quote response.
+
+    We therefore search the
+    returned object safely.
+    */
+
+    const quotes =
+      extractQuotes(result.data);
+
+    if (!quotes.length) {
+
+      throw new Error(
+        "No quote data received"
+      );
+
+    }
+
+    /*
+    Find NIFTY and BANKNIFTY
+    using the security IDs
+    configured in the backend.
+    */
+
+    const niftyQuote =
+      findQuote(
+        quotes,
+        "nifty"
+      );
+
+    const bankQuote =
+      findQuote(
+        quotes,
+        "banknifty"
+      );
+
+    if (niftyQuote) {
+
+      updateInstrument(
+        market.nifty,
+        niftyQuote
+      );
+
+    }
+
+    if (bankQuote) {
+
+      updateInstrument(
+        market.banknifty,
+        bankQuote
+      );
+
+    }
+
+    state.apiConnected = true;
+
+    setText(
+      "analysisStatus",
+      "LIVE"
+    );
+
+    renderMarket();
+
+    analyzeMarket();
+
+    updateTime();
+
+  }
+
+  catch (error) {
+
+    console.error(
+      "Market data error:",
+      error
+    );
+
+    state.apiConnected = false;
+
+    setText(
+      "analysisStatus",
+      "OFFLINE"
+    );
+
+    setText(
+      "lastUpdate",
+      "API ERROR"
+    );
+
+  }
 
 }
 
 
 /*
-  Update market prices
+Extract possible quote arrays
+from INDstocks response.
 */
 
-function updateMarket() {
+function extractQuotes(data) {
 
-  market.nifty.previous =
-    market.nifty.price;
+  if (!data) {
+    return [];
+  }
 
-  market.banknifty.previous =
-    market.banknifty.price;
+  if (Array.isArray(data)) {
+    return data;
+  }
 
+  if (Array.isArray(data.data)) {
+    return data.data;
+  }
 
-  market.nifty.price =
-    randomMovement(
-      market.nifty.price
-    );
+  if (Array.isArray(data.quotes)) {
+    return data.quotes;
+  }
 
-
-  market.banknifty.price =
-    randomMovement(
-      market.banknifty.price
-    );
-
-
-  market.nifty.history.push(
-    market.nifty.price
-  );
-
-
-  market.banknifty.history.push(
-    market.banknifty.price
-  );
-
+  if (Array.isArray(data.result)) {
+    return data.result;
+  }
 
   /*
-    Keep last 30 observations
+  Some APIs return an object
+  keyed by security ID.
+
+  Convert it into an array.
   */
 
   if (
-    market.nifty.history.length > 30
+    typeof data === "object"
   ) {
 
-    market.nifty.history.shift();
+    const values =
+      Object.values(data);
+
+    if (
+      values.length &&
+      values.every(
+        item =>
+          typeof item === "object"
+      )
+    ) {
+
+      return values;
+
+    }
 
   }
 
+  return [];
+}
+
+
+/*
+Find a specific instrument.
+*/
+
+function findQuote(
+  quotes,
+  instrument
+) {
+
+  const text =
+    JSON.stringify(
+      quotes
+    ).toUpperCase();
+
+  /*
+  First attempt:
+  identify using instrument
+  names returned by API.
+  */
+
+  for (
+    const quote of quotes
+  ) {
+
+    const quoteText =
+      JSON.stringify(
+        quote
+      ).toUpperCase();
+
+    if (
+      instrument === "nifty" &&
+      (
+        quoteText.includes(
+          "NIFTY 50"
+        ) ||
+        quoteText.includes(
+          "NIFTY50"
+        )
+      )
+    ) {
+
+      return quote;
+
+    }
+
+    if (
+      instrument === "banknifty" &&
+      (
+        quoteText.includes(
+          "BANK NIFTY"
+        ) ||
+        quoteText.includes(
+          "BANKNIFTY"
+        )
+      )
+    ) {
+
+      return quote;
+
+    }
+
+  }
+
+  /*
+  If the API response doesn't
+  contain names, use position.
+
+  Our backend requests:
+  NIFTY first,
+  BANKNIFTY second.
+  */
 
   if (
-    market.banknifty.history.length > 30
+    instrument === "nifty"
   ) {
 
-    market.banknifty.history.shift();
+    return quotes[0] || null;
 
   }
 
+  if (
+    instrument === "banknifty"
+  ) {
 
-  renderMarket();
+    return quotes[1] || null;
 
-  analyzeMarket();
+  }
 
-  updateTime();
+  return null;
 
 }
 
 
 /*
-  Display market data
+Update one instrument.
+*/
+
+function updateInstrument(
+  instrument,
+  quote
+) {
+
+  const newPrice =
+    extractPrice(
+      quote
+    );
+
+  if (
+    !Number.isFinite(
+      newPrice
+    ) ||
+    newPrice <= 0
+  ) {
+
+    return;
+
+  }
+
+  instrument.previous =
+    instrument.price || newPrice;
+
+  instrument.price =
+    newPrice;
+
+  instrument.history.push(
+    newPrice
+  );
+
+  /*
+  Keep latest 100 observations.
+  */
+
+  if (
+    instrument.history.length > 100
+  ) {
+
+    instrument.history.shift();
+
+  }
+
+}
+
+
+/*
+Find the price field safely.
+*/
+
+function extractPrice(
+  quote
+) {
+
+  if (
+    typeof quote === "number"
+  ) {
+
+    return quote;
+
+  }
+
+  if (!quote) {
+    return NaN;
+  }
+
+  const possibleFields = [
+
+    "ltp",
+    "LTP",
+
+    "lastPrice",
+    "last_price",
+
+    "lastTradedPrice",
+    "last_traded_price",
+
+    "close",
+    "Close",
+
+    "price"
+
+  ];
+
+  for (
+    const field
+    of possibleFields
+  ) {
+
+    const value =
+      quote[field];
+
+    const number =
+      Number(value);
+
+    if (
+      Number.isFinite(number) &&
+      number > 0
+    ) {
+
+      return number;
+
+    }
+
+  }
+
+  return NaN;
+
+}
+
+
+/*
+Display market data.
 */
 
 function renderMarket() {
 
-  const niftyChange =
-    market.nifty.price
-    - market.nifty.previous;
+  if (
+    market.nifty.price <= 0
+  ) {
 
+    return;
+
+  }
+
+  const niftyChange =
+    market.nifty.price -
+    market.nifty.previous;
 
   const bankChange =
-    market.banknifty.price
-    - market.banknifty.previous;
-
+    market.banknifty.price -
+    market.banknifty.previous;
 
   setText(
     "niftyPrice",
-    formatPrice(market.nifty.price)
+    formatPrice(
+      market.nifty.price
+    )
   );
-
 
   setText(
     "bankPrice",
-    formatPrice(market.banknifty.price)
+    formatPrice(
+      market.banknifty.price
+    )
   );
-
 
   updateChange(
     "niftyChange",
@@ -154,31 +473,26 @@ function renderMarket() {
     market.nifty.previous
   );
 
-
   updateChange(
     "bankChange",
     bankChange,
     market.banknifty.previous
   );
 
-
   const niftyTrend =
     calculateTrend(
       market.nifty.history
     );
-
 
   const bankTrend =
     calculateTrend(
       market.banknifty.history
     );
 
-
   setText(
     "niftyTrend",
     niftyTrend
   );
-
 
   setText(
     "bankTrend",
@@ -189,7 +503,7 @@ function renderMarket() {
 
 
 /*
-  Change display
+Change display.
 */
 
 function updateChange(
@@ -199,43 +513,59 @@ function updateChange(
 ) {
 
   const element =
-    document.getElementById(id);
+    document.getElementById(
+      id
+    );
 
+  if (!element) {
+    return;
+  }
 
-  if (!element) return;
+  if (
+    !previous ||
+    previous <= 0
+  ) {
 
+    element.textContent =
+      "--";
+
+    return;
+
+  }
 
   const percentage =
-    (change / previous) * 100;
-
+    (
+      change /
+      previous
+    ) * 100;
 
   const sign =
     change >= 0
       ? "+"
       : "";
 
-
   element.textContent =
-    `${sign}${change.toFixed(2)}
-     (${sign}${percentage.toFixed(3)}%)`;
-
+    `${sign}${change.toFixed(2)} ` +
+    `(${sign}${percentage.toFixed(3)}%)`;
 
   element.classList.remove(
     "up",
     "down"
   );
 
-
   if (change > 0) {
 
-    element.classList.add("up");
+    element.classList.add(
+      "up"
+    );
 
   }
 
-
   if (change < 0) {
 
-    element.classList.add("down");
+    element.classList.add(
+      "down"
+    );
 
   }
 
@@ -243,56 +573,64 @@ function updateChange(
 
 
 /*
-  Trend engine
+Trend engine.
 
-  This is intentionally simple for V2.
-  We will replace it with real indicators
-  later.
+Temporary V3 logic.
+We will replace this with
+real indicators later.
 */
 
-function calculateTrend(history) {
+function calculateTrend(
+  history
+) {
 
-  if (history.length < 5) {
+  if (
+    history.length < 5
+  ) {
 
     return "BUILDING";
 
   }
 
-
   const recent =
     history.slice(-5);
-
 
   const first =
     recent[0];
 
-
   const last =
-    recent[recent.length - 1];
+    recent[
+      recent.length - 1
+    ];
 
+  if (!first) {
+    return "BUILDING";
+  }
 
   const difference =
     last - first;
 
-
   const percentage =
-    (difference / first)
-    * 100;
+    (
+      difference /
+      first
+    ) * 100;
 
-
-  if (percentage > 0.03) {
+  if (
+    percentage > 0.03
+  ) {
 
     return "BULLISH";
 
   }
 
-
-  if (percentage < -0.03) {
+  if (
+    percentage < -0.03
+  ) {
 
     return "BEARISH";
 
   }
-
 
   return "SIDEWAYS";
 
@@ -300,7 +638,7 @@ function calculateTrend(history) {
 
 
 /*
-  Market analysis
+Market analysis.
 */
 
 function analyzeMarket() {
@@ -310,49 +648,41 @@ function analyzeMarket() {
       market.nifty.history
     );
 
-
   const momentum =
     calculateMomentum(
       market.nifty.history
     );
-
 
   const volatility =
     calculateVolatility(
       market.nifty.history
     );
 
-
   setText(
     "trend",
     trend
   );
-
 
   setText(
     "momentum",
     momentum
   );
 
-
   setText(
     "volatility",
     volatility
   );
 
-
   /*
-    Temporary signal engine.
+  Temporary signal engine.
 
-    This will NOT be used for live trading.
+  PAPER ONLY.
   */
 
   let signal = "HOLD";
 
-
   if (
-    trend === "BULLISH"
-    &&
+    trend === "BULLISH" &&
     momentum === "POSITIVE"
   ) {
 
@@ -360,10 +690,8 @@ function analyzeMarket() {
 
   }
 
-
   if (
-    trend === "BEARISH"
-    &&
+    trend === "BEARISH" &&
     momentum === "NEGATIVE"
   ) {
 
@@ -371,22 +699,20 @@ function analyzeMarket() {
 
   }
 
-
   state.signal =
     signal;
-
 
   setText(
     "signal",
     signal
   );
 
-
   setText(
     "analysisStatus",
-    "ACTIVE"
+    state.apiConnected
+      ? "LIVE"
+      : "OFFLINE"
   );
-
 
   calculateTradeSetup(
     signal
@@ -396,43 +722,49 @@ function analyzeMarket() {
 
 
 /*
-  Momentum calculation
+Momentum calculation.
 */
 
-function calculateMomentum(history) {
+function calculateMomentum(
+  history
+) {
 
-  if (history.length < 6) {
+  if (
+    history.length < 6
+  ) {
 
     return "BUILDING";
 
   }
 
-
   const current =
-    history[history.length - 1];
-
+    history[
+      history.length - 1
+    ];
 
   const previous =
-    history[history.length - 6];
-
+    history[
+      history.length - 6
+    ];
 
   const movement =
     current - previous;
 
-
-  if (movement > 0) {
+  if (
+    movement > 0
+  ) {
 
     return "POSITIVE";
 
   }
 
-
-  if (movement < 0) {
+  if (
+    movement < 0
+  ) {
 
     return "NEGATIVE";
 
   }
-
 
   return "NEUTRAL";
 
@@ -440,51 +772,66 @@ function calculateMomentum(history) {
 
 
 /*
-  Volatility calculation
+Volatility calculation.
 */
 
-function calculateVolatility(history) {
+function calculateVolatility(
+  history
+) {
 
-  if (history.length < 10) {
+  if (
+    history.length < 10
+  ) {
 
     return "BUILDING";
 
   }
 
-
   const recent =
     history.slice(-10);
 
-
   const highest =
-    Math.max(...recent);
-
+    Math.max(
+      ...recent
+    );
 
   const lowest =
-    Math.min(...recent);
+    Math.min(
+      ...recent
+    );
 
+  if (
+    lowest <= 0
+  ) {
+
+    return "BUILDING";
+
+  }
 
   const range =
     highest - lowest;
 
-
   const percentage =
-    (range / lowest) * 100;
+    (
+      range /
+      lowest
+    ) * 100;
 
-
-  if (percentage > 0.12) {
+  if (
+    percentage > 0.12
+  ) {
 
     return "HIGH";
 
   }
 
-
-  if (percentage < 0.05) {
+  if (
+    percentage < 0.05
+  ) {
 
     return "LOW";
 
   }
-
 
   return "NORMAL";
 
@@ -492,112 +839,108 @@ function calculateVolatility(history) {
 
 
 /*
-  Trade setup
+Trade setup.
 
-  Again: PAPER ONLY.
+PAPER ONLY.
 */
 
-function calculateTradeSetup(signal) {
+function calculateTradeSetup(
+  signal
+) {
+
+  if (
+    market.nifty.price <= 0
+  ) {
+
+    return;
+
+  }
 
   const entry =
     market.nifty.price;
 
-
-  if (signal === "BUY") {
+  if (
+    signal === "BUY"
+  ) {
 
     const stoploss =
       entry * 0.9985;
 
-
     const target =
       entry * 1.003;
-
 
     setText(
       "entry",
       formatPrice(entry)
     );
 
-
     setText(
       "stoploss",
       formatPrice(stoploss)
     );
-
 
     setText(
       "target",
       formatPrice(target)
     );
 
-
     setText(
       "riskReward",
       "1 : 2"
     );
 
-
     return;
 
   }
 
-
-  if (signal === "SELL") {
+  if (
+    signal === "SELL"
+  ) {
 
     const stoploss =
       entry * 1.0015;
 
-
     const target =
       entry * 0.997;
-
 
     setText(
       "entry",
       formatPrice(entry)
     );
 
-
     setText(
       "stoploss",
       formatPrice(stoploss)
     );
-
 
     setText(
       "target",
       formatPrice(target)
     );
 
-
     setText(
       "riskReward",
       "1 : 2"
     );
 
-
     return;
 
   }
-
 
   setText(
     "entry",
     "--"
   );
 
-
   setText(
     "stoploss",
     "--"
   );
 
-
   setText(
     "target",
     "--"
   );
-
 
   setText(
     "riskReward",
@@ -608,14 +951,17 @@ function calculateTradeSetup(signal) {
 
 
 /*
-  Paper trade button
+Paper trade button.
 */
 
-document
-  .getElementById(
+const paperTradeButton =
+  document.getElementById(
     "paperTradeBtn"
-  )
-  .addEventListener(
+  );
+
+if (paperTradeButton) {
+
+  paperTradeButton.addEventListener(
     "click",
     function () {
 
@@ -624,17 +970,30 @@ document
       ) {
 
         alert(
-          "No trade available. Signal is HOLD."
+          "No trade available. " +
+          "Signal is HOLD."
         );
 
         return;
 
       }
 
+      if (
+        market.nifty.price <= 0
+      ) {
+
+        alert(
+          "Market data is not available."
+        );
+
+        return;
+
+      }
 
       const trade = {
 
-        type: state.signal,
+        type:
+          state.signal,
 
         price:
           market.nifty.price,
@@ -645,15 +1004,12 @@ document
 
       };
 
-
       state.paperTrades.push(
         trade
       );
 
-
       alert(
-        `PAPER ${state.signal}\n\n`
-        +
+        `PAPER ${state.signal}\n\n` +
         `Price: ₹${formatPrice(
           market.nifty.price
         )}`
@@ -662,13 +1018,15 @@ document
     }
   );
 
+}
+
 
 /*
-  Market status
+Market status.
 
-  Indian market:
-  Monday-Friday
-  09:15-15:30 IST
+Indian market:
+Monday-Friday
+09:15-15:30 IST
 */
 
 function updateMarketStatus() {
@@ -676,64 +1034,63 @@ function updateMarketStatus() {
   const now =
     new Date();
 
-
   const day =
     now.getDay();
-
 
   const hours =
     now.getHours();
 
-
   const minutes =
     now.getMinutes();
-
 
   const currentMinutes =
     hours * 60 + minutes;
 
-
   const marketOpen =
-    day >= 1
-    &&
-    day <= 5
-    &&
-    currentMinutes >= 555
-    &&
+    day >= 1 &&
+    day <= 5 &&
+    currentMinutes >= 555 &&
     currentMinutes <= 930;
-
 
   const status =
     document.getElementById(
       "marketStatus"
     );
 
-
   const dot =
     document.getElementById(
       "statusDot"
     );
 
+  if (!status) {
+    return;
+  }
 
   if (marketOpen) {
 
     status.textContent =
       "MARKET OPEN";
 
+    if (dot) {
 
-    dot.classList.remove(
-      "closed"
-    );
+      dot.classList.remove(
+        "closed"
+      );
+
+    }
 
   } else {
 
     status.textContent =
       "MARKET CLOSED";
 
+    if (dot) {
 
-    dot.classList.add(
-      "closed"
-    );
+      dot.classList.add(
+        "closed"
+      );
+
+    }
 
   }
 
@@ -741,14 +1098,13 @@ function updateMarketStatus() {
 
 
 /*
-  Timestamp
+Timestamp.
 */
 
 function updateTime() {
 
   const now =
     new Date();
-
 
   setText(
     "lastUpdate",
@@ -759,10 +1115,12 @@ function updateTime() {
 
 
 /*
-  Number formatting
+Number formatting.
 */
 
-function formatPrice(value) {
+function formatPrice(
+  value
+) {
 
   return Number(
     value
@@ -778,7 +1136,7 @@ function formatPrice(value) {
 
 
 /*
-  Helper
+Helper.
 */
 
 function setText(
@@ -787,8 +1145,9 @@ function setText(
 ) {
 
   const element =
-    document.getElementById(id);
-
+    document.getElementById(
+      id
+    );
 
   if (element) {
 
@@ -801,43 +1160,25 @@ function setText(
 
 
 /*
-  INITIALIZATION
+INITIALIZATION
 */
 
-function initialize() {
-
-  /*
-    Seed history
-  */
-
-  for (
-    let i = 0;
-    i < 15;
-    i++
-  ) {
-
-    market.nifty.history.push(
-      market.nifty.price
-    );
-
-
-    market.banknifty.history.push(
-      market.banknifty.price
-    );
-
-  }
-
+async function initialize() {
 
   updateMarketStatus();
 
-  updateMarket();
+  setText(
+    "analysisStatus",
+    "CONNECTING"
+  );
+
+  await fetchMarketData();
 
 }
 
 
 /*
-  Refresh market status
-  every minute.
+Refresh market status.
 */
 
 setInterval(
@@ -847,15 +1188,17 @@ setInterval(
 
 
 /*
-  Demo feed update
-  every 3 seconds.
+Refresh REAL market data.
 
-  Later this becomes real market data.
+5 seconds for now.
+
+Later we'll switch to
+WebSocket streaming.
 */
 
 setInterval(
-  updateMarket,
-  3000
+  fetchMarketData,
+  5000
 );
 
 
