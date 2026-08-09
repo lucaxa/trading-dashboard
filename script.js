@@ -10,24 +10,6 @@ INDstocks → Vercel
              ↓
        V10 Historical Backtest
 
-Features:
-- Live NIFTY 50
-- Live BANKNIFTY
-- Historical indicators
-- EMA 9
-- EMA 21
-- RSI 14
-- VWAP
-- ATR 14
-- Swing High / Swing Low
-- V8 confirmation strategy
-- Buy / Sell score
-- Strategy confidence
-- Dynamic Entry / Stop Loss / Target
-- V10 Historical Backtest
-- Backtest statistics
-- Trade history
-
 PAPER TRADING ONLY.
 NO REAL ORDERS.
 */
@@ -156,14 +138,17 @@ function formatPercent(value) {
 // API FETCH
 // ======================================================
 
-async function apiFetch(url) {
+async function apiFetch(
+    url,
+    timeoutMs = 15000
+) {
 
     console.log(
         "================================"
     );
 
     console.log(
-        "TradeMind API request:",
+        "TradeMind API REQUEST:",
         url
     );
 
@@ -172,114 +157,177 @@ async function apiFetch(url) {
     );
 
 
-    const response =
-        await fetch(
-            url,
-            {
-                method: "GET",
+    /*
+    AbortController prevents the UI
+    from being stuck forever.
+    */
 
-                cache: "no-store",
+    const controller =
+        new AbortController();
 
-                headers: {
-                    "Accept":
-                        "application/json"
-                }
-            }
+
+    const timeout =
+        setTimeout(
+            () => {
+
+                controller.abort();
+
+            },
+            timeoutMs
         );
-
-
-    const text =
-        await response.text();
-
-
-    console.log(
-        "TradeMind API HTTP status:",
-        response.status
-    );
-
-
-    console.log(
-        "TradeMind API raw text:",
-        text.slice(0, 5000)
-    );
-
-
-    let data;
 
 
     try {
 
-        data =
-            JSON.parse(text);
+        const response =
+            await fetch(
+                url,
+                {
+                    method: "GET",
+
+                    cache: "no-store",
+
+                    headers: {
+                        "Accept":
+                            "application/json",
+
+                        "Cache-Control":
+                            "no-cache"
+                    },
+
+                    signal:
+                        controller.signal
+                }
+            );
+
+
+        const text =
+            await response.text();
+
+
+        console.log(
+            "TradeMind API HTTP status:",
+            response.status
+        );
+
+
+        console.log(
+            "TradeMind API raw text:",
+            text.slice(0, 3000)
+        );
+
+
+        let data;
+
+
+        try {
+
+            data =
+                JSON.parse(text);
+
+        }
+
+        catch (parseError) {
+
+            throw new Error(
+                `Invalid JSON response from ${url} (HTTP ${response.status})`
+            );
+
+        }
+
+
+        console.log(
+            "TradeMind API parsed response:",
+            data
+        );
+
+
+        if (!response.ok) {
+
+            let message;
+
+
+            if (
+                typeof data?.error === "string"
+            ) {
+
+                message =
+                    data.error;
+
+            }
+
+            else {
+
+                message =
+                    JSON.stringify(
+                        data?.error ||
+                        data
+                    );
+
+            }
+
+
+            throw new Error(
+                message ||
+                `API HTTP error ${response.status}`
+            );
+
+        }
+
+
+        if (
+            data &&
+            data.success === false
+        ) {
+
+            const message =
+                typeof data.error === "string"
+
+                    ? data.error
+
+                    : JSON.stringify(
+                        data.error ||
+                        data
+                    );
+
+
+            throw new Error(
+                message ||
+                "API returned success:false"
+            );
+
+        }
+
+
+        return data;
 
     }
 
     catch (error) {
 
-        console.error(
-            "TradeMind API JSON parse error:",
-            error
-        );
+        if (
+            error?.name ===
+            "AbortError"
+        ) {
 
-        throw new Error(
-            `Invalid API response (${response.status})`
-        );
+            throw new Error(
+                `API request timed out after ${timeoutMs / 1000} seconds`
+            );
 
-    }
-
-
-    console.log(
-        "TradeMind API parsed response:",
-        data
-    );
+        }
 
 
-    if (!response.ok) {
-
-        const message =
-            typeof data?.error === "string"
-
-                ? data.error
-
-                : JSON.stringify(
-                    data?.error ||
-                    data
-                );
-
-
-        throw new Error(
-            message ||
-            `API error ${response.status}`
-        );
+        throw error;
 
     }
 
+    finally {
 
-    if (
-        data &&
-        data.success === false
-    ) {
-
-        const message =
-            typeof data.error === "string"
-
-                ? data.error
-
-                : JSON.stringify(
-                    data.error ||
-                    data
-                );
-
-
-        throw new Error(
-            message ||
-            "API returned success=false"
+        clearTimeout(
+            timeout
         );
 
     }
-
-
-    return data;
 
 }
 
@@ -442,7 +490,9 @@ function findInstrument(
 ) {
 
     const wanted =
-        instrument.toLowerCase();
+        String(
+            instrument
+        ).toLowerCase();
 
 
     return quotes.find(
@@ -529,7 +579,8 @@ async function fetchMarketData() {
 
         const result =
             await apiFetch(
-                "/api/quotes"
+                "/api/quotes",
+                10000
             );
 
 
@@ -538,12 +589,6 @@ async function fetchMarketData() {
                 result?.data ??
                 result
             );
-
-
-        console.log(
-            "TradeMind extracted quotes:",
-            quotes
-        );
 
 
         const niftyQuote =
@@ -664,13 +709,18 @@ async function fetchMarketData() {
 
         setText(
             "marketStatus",
-            "INDICATORS LIVE"
+            "DATA ERROR"
         );
 
 
         setText(
             "dataStatus",
-            "INDSTOCKS / FALLBACK"
+            "INDSTOCKS ERROR"
+        );
+
+
+        updateStatusDot(
+            false
         );
 
     }
@@ -792,12 +842,10 @@ function renderChange(
 
     const percent =
         previous !== 0
-
             ? (
                 difference /
                 previous
             ) * 100
-
             : 0;
 
 
@@ -835,7 +883,8 @@ async function fetchIndicatorData() {
 
         const result =
             await apiFetch(
-                "/api/indicators?interval=5minute"
+                "/api/indicators?interval=5minute",
+                15000
             );
 
 
@@ -850,11 +899,13 @@ async function fetchIndicatorData() {
 
 
         const nifty =
-            result?.nifty || {};
+            result?.nifty ||
+            {};
 
 
         const bank =
-            result?.banknifty || {};
+            result?.banknifty ||
+            {};
 
 
         const niftyClose =
@@ -1143,7 +1194,7 @@ function updateBankTrend() {
 
 
 // ======================================================
-// V8 LIVE STRATEGY
+// STRATEGY
 // ======================================================
 
 function analyzeMarket() {
@@ -1160,67 +1211,38 @@ function analyzeMarket() {
 
 
     const ema9 =
-        Number(
-            nifty.ema9
-        );
-
+        Number(nifty.ema9);
 
     const ema21 =
-        Number(
-            nifty.ema21
-        );
-
+        Number(nifty.ema21);
 
     const rsi =
-        Number(
-            nifty.rsi14
-        );
-
+        Number(nifty.rsi14);
 
     const vwap =
-        Number(
-            nifty.vwap
-        );
-
+        Number(nifty.vwap);
 
     const atr =
-        Number(
-            nifty.atr14
-        );
-
+        Number(nifty.atr14);
 
     const price =
-        Number(
-            state.nifty?.price
-        );
-
+        Number(state.nifty?.price);
 
     const candle =
-        nifty.lastCandle || {};
-
+        nifty.lastCandle ||
+        {};
 
     const open =
-        Number(
-            candle.o
-        );
-
+        Number(candle.o);
 
     const high =
-        Number(
-            candle.h
-        );
-
+        Number(candle.h);
 
     const low =
-        Number(
-            candle.l
-        );
-
+        Number(candle.l);
 
     const close =
-        Number(
-            candle.c
-        );
+        Number(candle.c);
 
 
     if (
@@ -1231,35 +1253,18 @@ function analyzeMarket() {
         !Number.isFinite(vwap)
     ) {
 
-        setText(
-            "signal",
-            "WAIT"
-        );
-
+        setText("signal", "WAIT");
 
         setText(
             "strategyStatus",
             "WAITING FOR DATA"
         );
 
+        setText("buyScore", "--");
 
-        setText(
-            "buyScore",
-            "--"
-        );
+        setText("sellScore", "--");
 
-
-        setText(
-            "sellScore",
-            "--"
-        );
-
-
-        setText(
-            "confidence",
-            "--"
-        );
-
+        setText("confidence", "--");
 
         return;
 
@@ -1273,9 +1278,7 @@ function analyzeMarket() {
     const reasons = [];
 
 
-    // ==================================================
     // EMA
-    // ==================================================
 
     if (
         ema9 > ema21
@@ -1302,9 +1305,7 @@ function analyzeMarket() {
     }
 
 
-    // ==================================================
     // RSI
-    // ==================================================
 
     if (
         rsi >= 55 &&
@@ -1333,9 +1334,7 @@ function analyzeMarket() {
     }
 
 
-    // ==================================================
     // VWAP
-    // ==================================================
 
     if (
         price > vwap
@@ -1362,9 +1361,7 @@ function analyzeMarket() {
     }
 
 
-    // ==================================================
     // CANDLE
-    // ==================================================
 
     let candleStrong =
         false;
@@ -1416,14 +1413,13 @@ function analyzeMarket() {
 
         candleStrong =
             range > 0 &&
-            body / range >= 0.50;
+            (
+                body /
+                range
+            ) >= 0.50;
 
     }
 
-
-    // ==================================================
-    // SIGNAL
-    // ==================================================
 
     let signal =
         "WAIT";
@@ -1473,10 +1469,6 @@ function analyzeMarket() {
 
     }
 
-
-    // ==================================================
-    // CONFIDENCE
-    // ==================================================
 
     const confidenceMap = {
 
@@ -1574,7 +1566,6 @@ function analyzeMarket() {
 
 
     setText(
-
         "signalReason",
 
         signal === "WAIT"
@@ -1623,29 +1614,13 @@ function updateTradeSetup(
         signal === "WAIT"
     ) {
 
-        setText(
-            "entry",
-            "--"
-        );
+        setText("entry", "--");
 
+        setText("stoploss", "--");
 
-        setText(
-            "stoploss",
-            "--"
-        );
+        setText("target", "--");
 
-
-        setText(
-            "target",
-            "--"
-        );
-
-
-        setText(
-            "riskReward",
-            "--"
-        );
-
+        setText("riskReward", "--");
 
         return;
 
@@ -1661,20 +1636,23 @@ function updateTradeSetup(
     ) {
 
         risk =
-            atr * 1.5;
+            atr *
+            1.5;
 
     }
 
     else {
 
         risk =
-            price * 0.001;
+            price *
+            0.001;
 
     }
 
 
     const reward =
-        risk * 2;
+        risk *
+        2;
 
 
     const bullish =
@@ -1811,6 +1789,10 @@ function renderV10Diagnostics() {
 
 async function runV10Backtest() {
 
+    /*
+    Prevent duplicate requests.
+    */
+
     if (
         state.backtestRunning
     ) {
@@ -1828,22 +1810,15 @@ async function runV10Backtest() {
         true;
 
 
-    // ==================================================
-    // FIND BUTTON
-    // ==================================================
+    /*
+    Support every possible button ID
+    that exists in your current HTML.
+    */
 
     const button =
         $("runBacktestBtn") ||
         $("runV10Backtest") ||
         $("runV9Backtest");
-
-
-    console.log(
-        "V10 backtest button:",
-        button
-            ? button.id
-            : "NOT FOUND"
-    );
 
 
     if (
@@ -1868,29 +1843,43 @@ async function runV10Backtest() {
     );
 
 
+    console.log(
+        "================================"
+    );
+
+    console.log(
+        "TradeMind V10 BACKTEST START"
+    );
+
+    console.log(
+        "================================"
+    );
+
+
     try {
 
-        console.log(
-            "================================"
-        );
+        /*
+        IMPORTANT:
+
+        This is the exact API endpoint
+        that we have already verified
+        is returning valid V10 results.
+        */
+
+        const apiUrl =
+            "/api/backtest?interval=5minute";
+
 
         console.log(
-            "TradeMind V10 BACKTEST START"
-        );
-
-        console.log(
-            "Requesting:",
-            "/api/backtest?interval=5minute"
-        );
-
-        console.log(
-            "================================"
+            "Calling:",
+            apiUrl
         );
 
 
         const result =
             await apiFetch(
-                "/api/backtest?interval=5minute"
+                apiUrl,
+                15000
             );
 
 
@@ -1899,7 +1888,7 @@ async function runV10Backtest() {
         );
 
         console.log(
-            "V10 BACKTEST RESULT"
+            "V10 BACKTEST RESULT RECEIVED"
         );
 
         console.log(
@@ -1911,14 +1900,38 @@ async function runV10Backtest() {
         );
 
 
+        if (
+            !result ||
+            typeof result !== "object"
+        ) {
+
+            throw new Error(
+                "Backtest API returned an empty response"
+            );
+
+        }
+
+
         state.backtest =
             result;
 
+
+        /*
+        Render immediately.
+        */
 
         renderBacktest(
             result
         );
 
+
+        /*
+        Explicit completion message.
+        */
+
+        console.log(
+            "V10 backtest rendering complete."
+        );
 
     }
 
@@ -1941,14 +1954,37 @@ async function runV10Backtest() {
         );
 
 
+        const message =
+            error?.message ||
+            "Unknown backtest error";
+
+
         setText(
             "backtestStatus",
-            `Backtest Error: ${error.message}`
+            `Backtest Error: ${message}`
+        );
+
+
+        /*
+        Show a visible error in the
+        console as well.
+        */
+
+        setText(
+            "backtestEngine",
+            "V10 Historical Simulation — ERROR"
         );
 
     }
 
     finally {
+
+        /*
+        THIS IS CRITICAL.
+
+        The button is ALWAYS restored,
+        whether API succeeds or fails.
+        */
 
         state.backtestRunning =
             false;
@@ -1965,6 +2001,11 @@ async function runV10Backtest() {
                 "RUN V10 BACKTEST";
 
         }
+
+
+        console.log(
+            "V10 backtest request finished."
+        );
 
     }
 
@@ -2018,43 +2059,22 @@ function resetBacktestDisplay() {
     }
 
 
-    const tradeContainer =
+    /*
+    Clear old trade history.
+    */
+
+    const container =
         $("tradeHistory") ||
         $("tradeHistoryTable") ||
         $("tradeList");
 
 
     if (
-        tradeContainer
+        container &&
+        container.tagName !== "TABLE"
     ) {
 
-        if (
-            tradeContainer.tagName === "TABLE"
-        ) {
-
-            const tbody =
-                tradeContainer.querySelector(
-                    "tbody"
-                );
-
-
-            if (
-                tbody
-            ) {
-
-                tbody.innerHTML =
-                    "";
-
-            }
-
-        }
-
-        else {
-
-            tradeContainer.innerHTML =
-                "";
-
-        }
+        container.innerHTML = "";
 
     }
 
@@ -2062,7 +2082,7 @@ function resetBacktestDisplay() {
 
 
 // ======================================================
-// SAFE VALUE
+// SAFE STATISTIC
 // ======================================================
 
 function safeStatistic(
@@ -2106,29 +2126,14 @@ function renderBacktest(
         !result
     ) {
 
-        console.warn(
-            "renderBacktest called without result."
-        );
-
         return;
 
     }
 
 
     console.log(
-        "================================"
-    );
-
-    console.log(
-        "Rendering V10 backtest:"
-    );
-
-    console.log(
+        "Rendering V10 backtest:",
         result
-    );
-
-    console.log(
-        "================================"
     );
 
 
@@ -2165,7 +2170,7 @@ function renderBacktest(
 
 
     // ==================================================
-    // TRADE COUNT
+    // TRADE COUNTS
     // ==================================================
 
     const totalTrades =
@@ -2208,7 +2213,7 @@ function renderBacktest(
 
 
     // ==================================================
-    // RESULTS
+    // WINS / LOSSES
     // ==================================================
 
     const winningTrades =
@@ -2241,11 +2246,21 @@ function renderBacktest(
     // WIN RATE
     // ==================================================
 
+    const winRate =
+        Number(
+            result.winRate
+        );
+
+
     setText(
         "winRate",
-        formatPercent(
-            result.winRate
-        )
+
+        Number.isFinite(winRate)
+
+            ? `${winRate.toFixed(2)}%`
+
+            : "--"
+
     );
 
 
@@ -2307,25 +2322,29 @@ function renderBacktest(
 
     }
 
+    else if (
+        Number.isFinite(pf)
+    ) {
+
+        setText(
+            "profitFactor",
+            pf.toFixed(2)
+        );
+
+    }
+
     else {
 
         setText(
-
             "profitFactor",
-
-            Number.isFinite(pf)
-
-                ? pf.toFixed(2)
-
-                : "--"
-
+            "--"
         );
 
     }
 
 
     // ==================================================
-    // DRAWDOWN
+    // MAX DRAWDOWN
     // ==================================================
 
     setText(
@@ -2356,14 +2375,15 @@ function renderBacktest(
     }
 
     else if (
-        result.success === false
+        result.status ===
+        "COMPLETED"
     ) {
 
         setText(
 
             "backtestStatus",
 
-            `Backtest failed — ${result.error || "Unknown error"}`
+            `V10 BACKTEST COMPLETE — ${totalTrades ?? 0} trades simulated`
 
         );
 
@@ -2375,7 +2395,7 @@ function renderBacktest(
 
             "backtestStatus",
 
-            `V10 BACKTEST COMPLETE — ${totalTrades ?? 0} trades simulated`
+            `V10 BACKTEST RESULT — ${totalTrades ?? 0} trades`
 
         );
 
@@ -2393,7 +2413,7 @@ function renderBacktest(
 
 
     // ==================================================
-    // STORE TRADES
+    // TRADES
     // ==================================================
 
     if (
@@ -2402,9 +2422,11 @@ function renderBacktest(
         )
     ) {
 
-        state.backtest =
-            state.backtest ||
-            result;
+        if (!state.backtest) {
+
+            state.backtest = {};
+
+        }
 
 
         state.backtest.trades =
@@ -2420,15 +2442,67 @@ function renderBacktest(
             result.trades
         );
 
+
+        renderTradeHistory(
+            result.trades
+        );
+
+    }
+
+    else {
+
+        console.log(
+            "No trade array returned."
+        );
+
     }
 
 
-    // ==================================================
-    // TRADE HISTORY
-    // ==================================================
+    /*
+    Final diagnostic.
+    */
 
-    renderTradeHistory(
-        result.trades
+    console.log(
+        "V10 DISPLAY VALUES:",
+        {
+
+            candles:
+                result.candlesTested,
+
+            trades:
+                result.totalTrades,
+
+            buys:
+                result.buyTrades,
+
+            sells:
+                result.sellTrades,
+
+            wins:
+                result.winningTrades,
+
+            losses:
+                result.losingTrades,
+
+            winRate:
+                result.winRate,
+
+            points:
+                result.totalPoints,
+
+            averageWin:
+                result.averageWin,
+
+            averageLoss:
+                result.averageLoss,
+
+            profitFactor:
+                result.profitFactor,
+
+            maxDrawdown:
+                result.maxDrawdown
+
+        }
     );
 
 }
@@ -2445,10 +2519,6 @@ function renderTradeHistory(
     if (
         !Array.isArray(trades)
     ) {
-
-        console.log(
-            "No trade history array returned."
-        );
 
         return;
 
@@ -2488,15 +2558,12 @@ function renderTradeHistory(
             );
 
 
-        if (
-            !tbody
-        ) {
+        if (!tbody) {
 
             tbody =
                 document.createElement(
                     "tbody"
                 );
-
 
             container.appendChild(
                 tbody
@@ -2505,12 +2572,10 @@ function renderTradeHistory(
         }
 
 
-        tbody.innerHTML =
-            "";
+        tbody.innerHTML = "";
 
 
         trades.forEach(
-
             (trade, index) => {
 
                 const row =
@@ -2547,7 +2612,6 @@ function renderTradeHistory(
                 );
 
             }
-
         );
 
 
@@ -2560,12 +2624,10 @@ function renderTradeHistory(
     // DIV / CONTAINER
     // ==================================================
 
-    container.innerHTML =
-        "";
+    container.innerHTML = "";
 
 
     trades.forEach(
-
         (trade, index) => {
 
             const row =
@@ -2600,7 +2662,6 @@ function renderTradeHistory(
             );
 
         }
-
     );
 
 }
@@ -2613,19 +2674,13 @@ function renderTradeHistory(
 function setupBacktestButton() {
 
     /*
-    Support all versions of the button ID.
-
-    Preferred:
-    runV10Backtest
-
-    Also supported:
-    runBacktestBtn
-    runV9Backtest
+    Find the button regardless of which
+    ID your current HTML uses.
     */
 
     const button =
-        $("runV10Backtest") ||
         $("runBacktestBtn") ||
+        $("runV10Backtest") ||
         $("runV9Backtest");
 
 
@@ -2634,19 +2689,8 @@ function setupBacktestButton() {
     ) {
 
         console.warn(
-            "V10 backtest button not found."
+            "V10 backtest button NOT FOUND."
         );
-
-
-        console.warn(
-            "Expected one of:",
-            [
-                "runV10Backtest",
-                "runBacktestBtn",
-                "runV9Backtest"
-            ]
-        );
-
 
         return;
 
@@ -2654,9 +2698,8 @@ function setupBacktestButton() {
 
 
     /*
-    Use onclick instead of addEventListener
-    so duplicate listeners are not created
-    if initialization happens again.
+    Remove old inline/listener behavior
+    by replacing onclick directly.
     */
 
     button.onclick =
@@ -2664,23 +2707,8 @@ function setupBacktestButton() {
 
 
     console.log(
-        "================================"
-    );
-
-
-    console.log(
-        "V10 backtest button connected:"
-    );
-
-
-    console.log(
-        "Button ID:",
+        "V10 backtest button connected:",
         button.id
-    );
-
-
-    console.log(
-        "================================"
     );
 
 }
@@ -2859,21 +2887,17 @@ async function initialize() {
         "================================"
     );
 
-
     console.log(
         "TradeMind Pro V10 started"
     );
 
-
     console.log(
-        "V10 Historical Backtest Engine Ready"
+        "Frontend controller loaded"
     );
-
 
     console.log(
         "Paper Trading Only"
     );
-
 
     console.log(
         "================================"
@@ -2910,14 +2934,14 @@ async function initialize() {
 
 
     /*
-    Load historical indicators first.
+    Load indicators first.
     */
 
     await fetchIndicatorData();
 
 
     /*
-    Then live quotes.
+    Then live market data.
     */
 
     await fetchMarketData();
@@ -2929,11 +2953,11 @@ async function initialize() {
 
 
 // ======================================================
-// REFRESH
+// REFRESH TIMERS
 // ======================================================
 
 /*
-Live market prices:
+Live prices:
 every 5 seconds.
 */
 
