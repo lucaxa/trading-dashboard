@@ -9,15 +9,14 @@ export default async function handler(req, res) {
       });
     }
 
-    const { scripCodes } = req.query;
+    // Your INDstocks index security IDs
+    // Replace ONLY these two values with the IDs
+    // you already found.
+    const NIFTY_ID = "40000001";
+    const BANKNIFTY_ID = "40000003";
 
-    if (!scripCodes) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing scripCodes parameter",
-        example: "/api/quotes?scripCodes=NSE_3045"
-      });
-    }
+    const scripCodes =
+      `NIDX_${NIFTY_ID},NIDX_${BANKNIFTY_ID}`;
 
     const url =
       "https://api.indstocks.com/market/quotes/full?scrip-codes=" +
@@ -26,7 +25,8 @@ export default async function handler(req, res) {
     const response = await fetch(url, {
       method: "GET",
       headers: {
-        Authorization: token
+        Authorization: token,
+        "Content-Type": "application/json"
       }
     });
 
