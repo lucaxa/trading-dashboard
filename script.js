@@ -55,7 +55,7 @@ async function fetchMarketData() {
 
     const response =
       await fetch(
-        "/api/quotes",
+        "/api/indicators?interval=5minute",
         {
           cache: "no-store"
         }
@@ -64,68 +64,83 @@ async function fetchMarketData() {
     const result =
       await response.json();
 
-    if (!response.ok || !result.success) {
+    if (
+      !response.ok ||
+      !result.success
+    ) {
 
       throw new Error(
         result.error ||
-        "Market API failed"
+        "Indicator API failed"
       );
 
     }
 
     /*
-    INDstocks response structure
-    can vary slightly depending
-    on the quote response.
-
-    We therefore search the
-    returned object safely.
+      REAL NIFTY DATA
     */
 
-    const quotes =
-      extractQuotes(result.data);
+    if (
+      result.nifty &&
+      result.nifty.lastCandle
+    ) {
 
-    if (!quotes.length) {
+      const niftyPrice =
+        Number(
+          result.nifty.lastCandle.c
+        );
 
-      throw new Error(
-        "No quote data received"
-      );
+      if (
+        Number.isFinite(niftyPrice)
+      ) {
+
+        updateInstrument(
+          market.nifty,
+          niftyPrice
+        );
+
+      }
 
     }
 
     /*
-    Find NIFTY and BANKNIFTY
-    using the security IDs
-    configured in the backend.
+      REAL BANKNIFTY DATA
     */
 
-    const niftyQuote =
-      findQuote(
-        quotes,
-        "nifty"
-      );
+    if (
+      result.banknifty &&
+      result.banknifty.lastCandle
+    ) {
 
-    const bankQuote =
-      findQuote(
-        quotes,
-        "banknifty"
-      );
+      const bankniftyPrice =
+        Number(
+          result.banknifty.lastCandle.c
+        );
 
-    if (niftyQuote) {
+      if (
+        Number.isFinite(bankniftyPrice)
+      ) {
 
-      updateInstrument(
-        market.nifty,
-        niftyQuote
-      );
+        updateInstrument(
+          market.banknifty,
+          bankniftyPrice
+        );
+
+      }
 
     }
 
-    if (bankQuote) {
+    /*
+      REAL TECHNICAL INDICATORS
+    */
 
-      updateInstrument(
-        market.banknifty,
-        bankQuote
-      );
+    if (result.nifty) {
+
+      state.indicators =
+        result.nifty;
+
+      state.indicatorConnected =
+        true;
 
     }
 
@@ -142,6 +157,29 @@ async function fetchMarketData() {
 
     updateTime();
 
+    console.log(
+      "REAL MARKET DATA:",
+      {
+        nifty:
+          result.nifty?.lastCandle?.c,
+
+        banknifty:
+          result.banknifty?.lastCandle?.c,
+
+        ema9:
+          result.nifty?.ema9,
+
+        ema21:
+          result.nifty?.ema21,
+
+        rsi14:
+          result.nifty?.rsi14,
+
+        vwap:
+          result.nifty?.vwap
+      }
+    );
+
   }
 
   catch (error) {
@@ -151,7 +189,8 @@ async function fetchMarketData() {
       error
     );
 
-    state.apiConnected = false;
+    state.apiConnected =
+      false;
 
     setText(
       "analysisStatus",
