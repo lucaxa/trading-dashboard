@@ -1338,6 +1338,8 @@ async function initialize() {
 
   await fetchMarketData();
 
+  await fetchIndicatorData();
+
 }
 
 
