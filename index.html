@@ -90,7 +90,8 @@
 
     .market-grid,
     .analysis-grid,
-    .trade-grid {
+    .trade-grid,
+    .diagnostic-grid {
       display: grid;
       gap: 16px;
     }
@@ -105,10 +106,15 @@
       grid-template-columns: repeat(4, 1fr);
     }
 
+    .diagnostic-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
     .market-card,
     .signal-card,
     .trade-card,
-    .info-card {
+    .info-card,
+    .diagnostic-card {
       background: #111827;
       border: 1px solid #243244;
       border-radius: 16px;
@@ -180,7 +186,8 @@
     }
 
     .section-title h2,
-    .info-card h2 {
+    .info-card h2,
+    .diagnostic-card h2 {
       margin-bottom: 0;
       font-size: 18px;
     }
@@ -192,7 +199,8 @@
     }
 
     .analysis-grid > div,
-    .trade-grid > div {
+    .trade-grid > div,
+    .diagnostic-grid > div {
       padding: 16px;
       border-radius: 12px;
       background: #0b1220;
@@ -200,7 +208,8 @@
     }
 
     .analysis-grid span,
-    .trade-grid span {
+    .trade-grid span,
+    .diagnostic-grid span {
       display: block;
       margin-bottom: 8px;
       color: #94a3b8;
@@ -208,12 +217,93 @@
     }
 
     .analysis-grid strong,
-    .trade-grid strong {
+    .trade-grid strong,
+    .diagnostic-grid strong {
       font-size: 18px;
     }
 
     #signal {
       font-size: 22px;
+    }
+
+    .diagnostic-note {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 12px;
+      background: #0b1220;
+      border: 1px solid #1e293b;
+      color: #94a3b8;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .diagnostic-note strong {
+      color: #f8fafc;
+    }
+
+    .score-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .score-box {
+      padding: 16px;
+      border-radius: 12px;
+      background: #0b1220;
+      border: 1px solid #1e293b;
+    }
+
+    .score-box span {
+      display: block;
+      margin-bottom: 8px;
+      color: #94a3b8;
+      font-size: 12px;
+    }
+
+    .score-box strong {
+      font-size: 24px;
+    }
+
+    .confidence {
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 12px;
+      background: #0b1220;
+      border: 1px solid #1e293b;
+    }
+
+    .confidence-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .confidence-header span {
+      color: #94a3b8;
+      font-size: 12px;
+    }
+
+    .confidence-header strong {
+      font-size: 18px;
+    }
+
+    .confidence-bar {
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: #1e293b;
+      overflow: hidden;
+    }
+
+    .confidence-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: 999px;
+      background: #22c55e;
+      transition: width 0.3s ease;
     }
 
     button {
@@ -274,7 +364,12 @@
 
       .market-grid,
       .analysis-grid,
-      .trade-grid {
+      .trade-grid,
+      .diagnostic-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .score-row {
         grid-template-columns: 1fr;
       }
 
@@ -293,14 +388,24 @@
 
   <main class="container">
 
+    <!-- ================================= -->
+    <!-- HEADER -->
+    <!-- ================================= -->
+
     <header class="topbar">
 
       <div>
-        <h1>TradeMind Pro</h1>
+
+        <h1>
+          TradeMind Pro
+        </h1>
+
         <p class="subtitle">
           Indian Intraday Trading Dashboard
         </p>
+
       </div>
+
 
       <div class="market-status">
 
@@ -318,21 +423,28 @@
     </header>
 
 
+    <!-- ================================= -->
     <!-- MARKET DATA -->
+    <!-- ================================= -->
 
     <section class="market-grid">
+
+      <!-- NIFTY -->
 
       <div class="market-card">
 
         <div class="card-header">
 
-          <span>NIFTY 50</span>
+          <span>
+            NIFTY 50
+          </span>
 
           <span class="badge">
             INDEX
           </span>
 
         </div>
+
 
         <div
           id="niftyPrice"
@@ -341,6 +453,7 @@
           --
         </div>
 
+
         <div
           id="niftyChange"
           class="change"
@@ -348,9 +461,12 @@
           Waiting for data
         </div>
 
+
         <div class="mini-status">
 
-          <span>Trend</span>
+          <span>
+            Trend
+          </span>
 
           <strong id="niftyTrend">
             --
@@ -361,17 +477,22 @@
       </div>
 
 
+      <!-- BANKNIFTY -->
+
       <div class="market-card">
 
         <div class="card-header">
 
-          <span>BANKNIFTY</span>
+          <span>
+            BANKNIFTY
+          </span>
 
           <span class="badge">
             INDEX
           </span>
 
         </div>
+
 
         <div
           id="bankPrice"
@@ -380,6 +501,7 @@
           --
         </div>
 
+
         <div
           id="bankChange"
           class="change"
@@ -387,9 +509,12 @@
           Waiting for data
         </div>
 
+
         <div class="mini-status">
 
-          <span>Trend</span>
+          <span>
+            Trend
+          </span>
 
           <strong id="bankTrend">
             --
@@ -402,13 +527,17 @@
     </section>
 
 
+    <!-- ================================= -->
     <!-- MARKET ANALYSIS -->
+    <!-- ================================= -->
 
     <section class="signal-card">
 
       <div class="section-title">
 
-        <h2>Market Analysis</h2>
+        <h2>
+          Market Analysis
+        </h2>
 
         <span id="analysisStatus">
           CONNECTING
@@ -421,7 +550,9 @@
 
         <div>
 
-          <span>Trend</span>
+          <span>
+            Trend
+          </span>
 
           <strong id="trend">
             --
@@ -432,7 +563,9 @@
 
         <div>
 
-          <span>Momentum</span>
+          <span>
+            Momentum
+          </span>
 
           <strong id="momentum">
             --
@@ -443,7 +576,9 @@
 
         <div>
 
-          <span>Volatility</span>
+          <span>
+            Volatility / VWAP
+          </span>
 
           <strong id="volatility">
             --
@@ -454,7 +589,9 @@
 
         <div>
 
-          <span>Signal</span>
+          <span>
+            Signal
+          </span>
 
           <strong id="signal">
             WAIT
@@ -467,13 +604,17 @@
     </section>
 
 
+    <!-- ================================= -->
     <!-- TRADE SETUP -->
+    <!-- ================================= -->
 
     <section class="trade-card">
 
       <div class="section-title">
 
-        <h2>Trade Setup</h2>
+        <h2>
+          Trade Setup
+        </h2>
 
         <span class="paper">
           PAPER MODE
@@ -486,7 +627,9 @@
 
         <div>
 
-          <span>Entry</span>
+          <span>
+            Entry
+          </span>
 
           <strong id="entry">
             --
@@ -497,7 +640,9 @@
 
         <div>
 
-          <span>Stop Loss</span>
+          <span>
+            Stop Loss
+          </span>
 
           <strong id="stoploss">
             --
@@ -508,7 +653,9 @@
 
         <div>
 
-          <span>Target</span>
+          <span>
+            Target
+          </span>
 
           <strong id="target">
             --
@@ -519,7 +666,9 @@
 
         <div>
 
-          <span>Risk / Reward</span>
+          <span>
+            Risk / Reward
+          </span>
 
           <strong id="riskReward">
             --
@@ -537,7 +686,221 @@
     </section>
 
 
+    <!-- ================================= -->
+    <!-- V6 STRATEGY DIAGNOSTICS -->
+    <!-- ================================= -->
+
+    <section class="diagnostic-card">
+
+      <div class="section-title">
+
+        <h2>
+          V6 Strategy Diagnostics
+        </h2>
+
+        <span class="paper">
+          LIVE ENGINE
+        </span>
+
+      </div>
+
+
+      <div class="diagnostic-grid">
+
+        <div>
+
+          <span>
+            EMA 9
+          </span>
+
+          <strong id="diagEma9">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>
+            EMA 21
+          </span>
+
+          <strong id="diagEma21">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>
+            RSI 14
+          </span>
+
+          <strong id="diagRsi">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>
+            VWAP
+          </span>
+
+          <strong id="diagVwap">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>
+            ATR 14
+          </span>
+
+          <strong id="diagAtr">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>
+            Swing High
+          </span>
+
+          <strong id="diagSwingHigh">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>
+            Swing Low
+          </span>
+
+          <strong id="diagSwingLow">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>
+            Current Price
+          </span>
+
+          <strong id="diagPrice">
+            --
+          </strong>
+
+        </div>
+
+      </div>
+
+
+      <div class="score-row">
+
+        <div class="score-box">
+
+          <span>
+            BUY SCORE
+          </span>
+
+          <strong id="buyScore">
+            --
+          </strong>
+
+        </div>
+
+
+        <div class="score-box">
+
+          <span>
+            SELL SCORE
+          </span>
+
+          <strong id="sellScore">
+            --
+          </strong>
+
+        </div>
+
+      </div>
+
+
+      <div class="confidence">
+
+        <div class="confidence-header">
+
+          <span>
+            Strategy Confidence
+          </span>
+
+          <strong id="confidence">
+            --
+          </strong>
+
+        </div>
+
+
+        <div class="confidence-bar">
+
+          <div
+            id="confidenceFill"
+            class="confidence-fill"
+          ></div>
+
+        </div>
+
+      </div>
+
+
+      <div class="diagnostic-note">
+
+        <strong>
+          Engine Reason:
+        </strong>
+
+        <span id="signalReason">
+          Waiting for confirmation
+        </span>
+
+      </div>
+
+
+      <div class="diagnostic-note">
+
+        <strong>
+          Strategy Status:
+        </strong>
+
+        <span id="strategyStatus">
+          WAITING FOR DATA
+        </span>
+
+      </div>
+
+    </section>
+
+
+    <!-- ================================= -->
     <!-- SYSTEM STATUS -->
+    <!-- ================================= -->
 
     <section class="info-card">
 
@@ -548,7 +911,9 @@
 
       <div class="status-row">
 
-        <span>Market Data</span>
+        <span>
+          Market Data
+        </span>
 
         <strong id="dataStatus">
           INDSTOCKS
@@ -559,7 +924,9 @@
 
       <div class="status-row">
 
-        <span>Data Source</span>
+        <span>
+          Data Source
+        </span>
 
         <strong>
           INDmoney / INDstocks
@@ -570,7 +937,9 @@
 
       <div class="status-row">
 
-        <span>Strategy Engine</span>
+        <span>
+          Strategy Engine
+        </span>
 
         <strong>
           ACTIVE
@@ -581,7 +950,9 @@
 
       <div class="status-row">
 
-        <span>Historical Candles</span>
+        <span>
+          Historical Candles
+        </span>
 
         <strong id="candleStatus">
           5-MINUTE
@@ -592,7 +963,9 @@
 
       <div class="status-row">
 
-        <span>Live Trading</span>
+        <span>
+          Live Trading
+        </span>
 
         <strong class="disabled">
           DISABLED
@@ -613,17 +986,20 @@
     </section>
 
 
+    <!-- ================================= -->
+    <!-- FOOTER -->
+    <!-- ================================= -->
+
     <footer>
-      TradeMind Pro • V4 • Paper Trading Only
+      TradeMind Pro • V6 • Paper Trading Only
     </footer>
 
   </main>
 
 
-  <!--
-    IMPORTANT:
-    strategy.js must load before script.js.
-  -->
+  <!-- ================================= -->
+  <!-- SCRIPTS -->
+  <!-- ================================= -->
 
   <script src="./strategy.js"></script>
 
