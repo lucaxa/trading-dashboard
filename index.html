@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeMind Pro</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <header class="topbar">
+    <div>
+      <h1>TradeMind Pro</h1>
+      <p>Indian Intraday Trading Dashboard</p>
+    </div>
+
+    <div class="status">
+      <span class="dot"></span>
+      Market Monitor
+    </div>
+  </header>
+
+  <main>
+
+    <section class="market-grid">
+
+      <div class="market-card">
+        <div class="card-header">
+          <span>NIFTY 50</span>
+          <span class="badge">INDEX</span>
+        </div>
+
+        <div class="price">--</div>
+        <div class="change">Waiting for market data</div>
+      </div>
+
+      <div class="market-card">
+        <div class="card-header">
+          <span>BANKNIFTY</span>
+          <span class="badge">INDEX</span>
+        </div>
+
+        <div class="price">--</div>
+        <div class="change">Waiting for market data</div>
+      </div>
+
+    </section>
+
+    <section class="signal-card">
+
+      <div class="section-title">
+        <h2>Market Analysis</h2>
+        <span id="marketStatus">ANALYZING</span>
+      </div>
+
+      <div class="analysis-grid">
+
+        <div>
+          <span>Trend</span>
+          <strong id="trend">--</strong>
+        </div>
+
+        <div>
+          <span>Momentum</span>
+          <strong id="momentum">--</strong>
+        </div>
+
+        <div>
+          <span>Volatility</span>
+          <strong id="volatility">--</strong>
+        </div>
+
+        <div>
+          <span>Signal</span>
+          <strong id="signal">WAIT</strong>
+        </div>
+
+      </div>
+
+    </section>
+
+    <section class="trade-card">
+
+      <div class="section-title">
+        <h2>Trade Setup</h2>
+        <span class="paper">PAPER MODE</span>
+      </div>
+
+      <div class="trade-grid">
+
+        <div>
+          <span>Entry</span>
+          <strong id="entry">--</strong>
+        </div>
+
+        <div>
+          <span>Stop Loss</span>
+          <strong id="stoploss">--</strong>
+        </div>
+
+        <div>
+          <span>Target</span>
+          <strong id="target">--</strong>
+        </div>
+
+        <div>
+          <span>Risk / Reward</span>
+          <strong id="riskReward">--</strong>
+        </div>
+
+      </div>
+
+      <button id="paperTradeBtn">
+        PAPER TRADE
+      </button>
+
+    </section>
+
+    <section class="info-card">
+
+      <h2>System Status</h2>
+
+      <div class="status-row">
+        <span>Market Data</span>
+        <strong id="dataStatus">NOT CONNECTED</strong>
+      </div>
+
+      <div class="status-row">
+        <span>Strategy Engine</span>
+        <strong>READY</strong>
+      </div>
+
+      <div class="status-row">
+        <span>Dhan Connection</span>
+        <strong>NOT CONNECTED</strong>
+      </div>
+
+      <div class="status-row">
+        <span>Live Trading</span>
+        <strong class="disabled">DISABLED</strong>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer>
+    TradeMind Pro • V1 • Paper Trading Only
+  </footer>
+
+  <script src="script.js"></script>
+
+</body>
+</html>
