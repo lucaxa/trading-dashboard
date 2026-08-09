@@ -27,7 +27,7 @@ V9 FEATURES:
 
 
 // ======================================================
-// HELPERS
+// DOM HELPERS
 // ======================================================
 
 function bt$(id) {
@@ -43,7 +43,8 @@ function btSet(id, value) {
 
     if (element) {
 
-        element.textContent = value;
+        element.textContent =
+            String(value);
 
     }
 
@@ -56,7 +57,8 @@ function btSet(id, value) {
 
 function number(value) {
 
-    const n = Number(value);
+    const n =
+        Number(value);
 
     return Number.isFinite(n)
         ? n
@@ -67,7 +69,9 @@ function number(value) {
 
 function round(value) {
 
-    return Math.round(value * 100) / 100;
+    return Math.round(
+        value * 100
+    ) / 100;
 
 }
 
@@ -76,7 +80,10 @@ function round(value) {
 // EMA
 // ======================================================
 
-function calculateEMA(values, period) {
+function calculateEMA(
+    values,
+    period
+) {
 
     if (
         !Array.isArray(values) ||
@@ -111,7 +118,8 @@ function calculateEMA(values, period) {
             (
                 values[i] -
                 ema
-            ) * multiplier + ema;
+            ) * multiplier +
+            ema;
 
     }
 
@@ -125,7 +133,10 @@ function calculateEMA(values, period) {
 // RSI
 // ======================================================
 
-function calculateRSI(values, period = 14) {
+function calculateRSI(
+    values,
+    period = 14
+) {
 
     if (
         !Array.isArray(values) ||
@@ -153,7 +164,9 @@ function calculateRSI(values, period = 14) {
             values[i - 1];
 
 
-        if (change > 0) {
+        if (
+            change > 0
+        ) {
 
             gains += change;
 
@@ -161,7 +174,8 @@ function calculateRSI(values, period = 14) {
 
         else {
 
-            losses += Math.abs(change);
+            losses +=
+                Math.abs(change);
 
         }
 
@@ -217,7 +231,9 @@ function calculateRSI(values, period = 14) {
     }
 
 
-    if (averageLoss === 0) {
+    if (
+        averageLoss === 0
+    ) {
 
         return 100;
 
@@ -242,7 +258,9 @@ function calculateRSI(values, period = 14) {
 // VWAP
 // ======================================================
 
-function calculateVWAP(candles) {
+function calculateVWAP(
+    candles
+) {
 
     if (
         !Array.isArray(candles) ||
@@ -259,7 +277,9 @@ function calculateVWAP(candles) {
     let cumulativeVolume = 0;
 
 
-    for (const candle of candles) {
+    for (
+        const candle of candles
+    ) {
 
         const high =
             number(candle.h);
@@ -445,10 +465,12 @@ function calculateATR(
 
 
 // ======================================================
-// CANDLE DIRECTION
+// CANDLE CONFIRMATION
 // ======================================================
 
-function isBullishCandle(candle) {
+function isBullishCandle(
+    candle
+) {
 
     const open =
         number(candle.o);
@@ -467,7 +489,9 @@ function isBullishCandle(candle) {
 }
 
 
-function isBearishCandle(candle) {
+function isBearishCandle(
+    candle
+) {
 
     const open =
         number(candle.o);
@@ -487,7 +511,7 @@ function isBearishCandle(candle) {
 
 
 // ======================================================
-// STRATEGY SIGNAL
+// V9 SIGNAL
 // ======================================================
 
 function generateV9Signal(
@@ -503,7 +527,9 @@ function generateV9Signal(
         number(candle.c);
 
 
-    if (price == null) {
+    if (
+        price == null
+    ) {
 
         return {
             signal: "WAIT",
@@ -514,10 +540,12 @@ function generateV9Signal(
 
 
     /*
-    Only use candles up to the
-    CURRENT candle.
+    IMPORTANT:
 
-    This prevents future-data leakage.
+    Only candles up to the
+    current candle are used.
+
+    No future-data leakage.
     */
 
     const history =
@@ -529,7 +557,9 @@ function generateV9Signal(
 
     const closes =
         history
-            .map(c => number(c.c))
+            .map(
+                c => number(c.c)
+            )
             .filter(
                 v => v != null
             );
@@ -620,11 +650,15 @@ function generateV9Signal(
 
 
     const bullishCandle =
-        isBullishCandle(candle);
+        isBullishCandle(
+            candle
+        );
 
 
     const bearishCandle =
-        isBearishCandle(candle);
+        isBearishCandle(
+            candle
+        );
 
 
     // ==================================================
@@ -636,56 +670,72 @@ function generateV9Signal(
     let sellScore = 0;
 
 
-    if (bullishEMA) {
+    if (
+        bullishEMA
+    ) {
 
         buyScore++;
 
     }
 
 
-    if (bearishEMA) {
+    if (
+        bearishEMA
+    ) {
 
         sellScore++;
 
     }
 
 
-    if (bullishRSI) {
+    if (
+        bullishRSI
+    ) {
 
         buyScore++;
 
     }
 
 
-    if (bearishRSI) {
+    if (
+        bearishRSI
+    ) {
 
         sellScore++;
 
     }
 
 
-    if (aboveVWAP) {
+    if (
+        aboveVWAP
+    ) {
 
         buyScore++;
 
     }
 
 
-    if (belowVWAP) {
+    if (
+        belowVWAP
+    ) {
 
         sellScore++;
 
     }
 
 
-    if (bullishCandle) {
+    if (
+        bullishCandle
+    ) {
 
         buyScore++;
 
     }
 
 
-    if (bearishCandle) {
+    if (
+        bearishCandle
+    ) {
 
         sellScore++;
 
@@ -792,7 +842,18 @@ function simulateTrade(
 ) {
 
     const entry =
-        signalData.price;
+        number(
+            signalData.price
+        );
+
+
+    if (
+        entry == null
+    ) {
+
+        return null;
+
+    }
 
 
     const atr =
@@ -868,17 +929,16 @@ function simulateTrade(
         }
 
 
-        if (bullish) {
+        if (
+            bullish
+        ) {
 
             /*
-            Conservative assumption:
+            If both target and SL
+            are touched in the same
+            candle, assume SL first.
 
-            If both target and SL are
-            touched in the same candle,
-            assume SL happened first.
-
-            This avoids artificially
-            inflating results.
+            Conservative backtest.
             */
 
             if (
@@ -888,17 +948,20 @@ function simulateTrade(
 
                 return {
 
-                    result: "LOSS",
+                    result:
+                        "LOSS",
 
                     entry,
 
-                    exit: stopLoss,
+                    exit:
+                        stopLoss,
 
                     points:
                         -risk,
 
                     bars:
-                        i - entryIndex
+                        i -
+                        entryIndex
 
                 };
 
@@ -911,17 +974,20 @@ function simulateTrade(
 
                 return {
 
-                    result: "LOSS",
+                    result:
+                        "LOSS",
 
                     entry,
 
-                    exit: stopLoss,
+                    exit:
+                        stopLoss,
 
                     points:
                         -risk,
 
                     bars:
-                        i - entryIndex
+                        i -
+                        entryIndex
 
                 };
 
@@ -934,17 +1000,20 @@ function simulateTrade(
 
                 return {
 
-                    result: "WIN",
+                    result:
+                        "WIN",
 
                     entry,
 
-                    exit: target,
+                    exit:
+                        target,
 
                     points:
                         reward,
 
                     bars:
-                        i - entryIndex
+                        i -
+                        entryIndex
 
                 };
 
@@ -961,17 +1030,20 @@ function simulateTrade(
 
                 return {
 
-                    result: "LOSS",
+                    result:
+                        "LOSS",
 
                     entry,
 
-                    exit: stopLoss,
+                    exit:
+                        stopLoss,
 
                     points:
                         -risk,
 
                     bars:
-                        i - entryIndex
+                        i -
+                        entryIndex
 
                 };
 
@@ -984,17 +1056,20 @@ function simulateTrade(
 
                 return {
 
-                    result: "LOSS",
+                    result:
+                        "LOSS",
 
                     entry,
 
-                    exit: stopLoss,
+                    exit:
+                        stopLoss,
 
                     points:
                         -risk,
 
                     bars:
-                        i - entryIndex
+                        i -
+                        entryIndex
 
                 };
 
@@ -1007,17 +1082,20 @@ function simulateTrade(
 
                 return {
 
-                    result: "WIN",
+                    result:
+                        "WIN",
 
                     entry,
 
-                    exit: target,
+                    exit:
+                        target,
 
                     points:
                         reward,
 
                     bars:
-                        i - entryIndex
+                        i -
+                        entryIndex
 
                 };
 
@@ -1028,11 +1106,9 @@ function simulateTrade(
     }
 
 
-    /*
-    If neither target nor SL
-    was reached, close at the
-    final available candle.
-    */
+    // ==================================================
+    // FORCE CLOSE
+    // ==================================================
 
     const finalCandle =
         candles[
@@ -1046,7 +1122,9 @@ function simulateTrade(
         );
 
 
-    if (finalPrice == null) {
+    if (
+        finalPrice == null
+    ) {
 
         return null;
 
@@ -1055,7 +1133,9 @@ function simulateTrade(
 
     const points =
         bullish
+
             ? finalPrice - entry
+
             : entry - finalPrice;
 
 
@@ -1092,7 +1172,17 @@ function runV9Backtest(
 ) {
 
     if (
-        !Array.isArray(candles) ||
+        !Array.isArray(candles)
+    ) {
+
+        throw new Error(
+            "Historical candle data is not an array."
+        );
+
+    }
+
+
+    if (
         candles.length < 50
     ) {
 
@@ -1106,10 +1196,9 @@ function runV9Backtest(
     const trades = [];
 
 
-    /*
-    Start after enough candles
-    exist for EMA / RSI / ATR.
-    */
+    // ==================================================
+    // REPLAY CANDLES
+    // ==================================================
 
     for (
         let i = 30;
@@ -1176,95 +1265,131 @@ function runV9Backtest(
 
     const wins =
         trades.filter(
-            t =>
-                t.result === "WIN"
+            trade =>
+                trade.result === "WIN"
         );
 
 
     const losses =
         trades.filter(
-            t =>
-                t.result === "LOSS"
+            trade =>
+                trade.result === "LOSS"
         );
 
 
     const buyTrades =
         trades.filter(
-            t =>
-                t.signal === "BUY" ||
-                t.signal === "BUY BIAS"
+            trade =>
+                trade.signal === "BUY" ||
+                trade.signal === "BUY BIAS"
         );
 
 
     const sellTrades =
         trades.filter(
-            t =>
-                t.signal === "SELL" ||
-                t.signal === "SELL BIAS"
+            trade =>
+                trade.signal === "SELL" ||
+                trade.signal === "SELL BIAS"
         );
 
 
     const totalPoints =
         trades.reduce(
-            (sum, trade) =>
-                sum + trade.points,
+            (
+                sum,
+                trade
+            ) =>
+                sum +
+                Number(
+                    trade.points
+                ),
+
             0
         );
 
 
     const grossProfit =
         wins.reduce(
-            (sum, trade) =>
-                sum + Math.max(
-                    trade.points,
+            (
+                sum,
+                trade
+            ) =>
+                sum +
+                Math.max(
+                    Number(
+                        trade.points
+                    ),
                     0
                 ),
+
             0
         );
 
 
     const grossLoss =
         Math.abs(
+
             losses.reduce(
-                (sum, trade) =>
-                    sum + Math.min(
-                        trade.points,
+
+                (
+                    sum,
+                    trade
+                ) =>
+
+                    sum +
+                    Math.min(
+                        Number(
+                            trade.points
+                        ),
                         0
                     ),
+
                 0
+
             )
+
         );
 
 
     const winRate =
-        trades.length
+        trades.length > 0
+
             ? (
                 wins.length /
                 trades.length
             ) * 100
+
             : 0;
 
 
     const averageWin =
-        wins.length
+        wins.length > 0
+
             ? grossProfit /
               wins.length
+
             : 0;
 
 
     const averageLoss =
-        losses.length
+        losses.length > 0
+
             ? grossLoss /
               losses.length
+
             : 0;
 
 
     const profitFactor =
         grossLoss > 0
+
             ? grossProfit /
               grossLoss
+
             : grossProfit > 0
+
                 ? Infinity
+
                 : 0;
 
 
@@ -1284,20 +1409,24 @@ function runV9Backtest(
     ) {
 
         equity +=
-            trade.points;
+            Number(
+                trade.points
+            );
 
 
         if (
             equity > peak
         ) {
 
-            peak = equity;
+            peak =
+                equity;
 
         }
 
 
         const drawdown =
-            peak - equity;
+            peak -
+            equity;
 
 
         if (
@@ -1313,7 +1442,14 @@ function runV9Backtest(
     }
 
 
+    // ==================================================
+    // RESULT
+    // ==================================================
+
     return {
+
+        status:
+            "BACKTEST_COMPLETE",
 
         candles:
             candles.length,
@@ -1333,23 +1469,32 @@ function runV9Backtest(
         losses:
             losses.length,
 
-        winRate,
+        winRate:
+            round(winRate),
 
-        totalPoints,
+        totalPoints:
+            round(totalPoints),
 
-        averageWin,
+        averageWin:
+            round(averageWin),
 
-        averageLoss,
+        averageLoss:
+            round(averageLoss),
 
-        profitFactor,
+        profitFactor:
+            round(profitFactor),
 
-        maxDrawdown,
+        maxDrawdown:
+            round(maxDrawdown),
 
-        grossProfit,
+        grossProfit:
+            round(grossProfit),
 
-        grossLoss,
+        grossLoss:
+            round(grossLoss),
 
-        trades
+        trades:
+            trades
 
     };
 
@@ -1364,111 +1509,403 @@ function renderV9Results(
     result
 ) {
 
+    if (
+        !result ||
+        typeof result !== "object"
+    ) {
+
+        console.error(
+            "Invalid V9 result:",
+            result
+        );
+
+        return;
+
+    }
+
+
+    /*
+    IMPORTANT:
+
+    Always use the numeric count.
+
+    NEVER place result.trades directly
+    into the Total Trades field.
+    */
+
+    const tradeArray =
+        Array.isArray(
+            result.trades
+        )
+            ? result.trades
+            : [];
+
+
+    const tradeCount =
+        tradeArray.length;
+
+
+    const buyCount =
+        Array.isArray(
+            result.buyTrades
+        )
+            ? result.buyTrades.length
+            : Number(
+                result.buyTrades
+            ) || 0;
+
+
+    const sellCount =
+        Array.isArray(
+            result.sellTrades
+        )
+            ? result.sellTrades.length
+            : Number(
+                result.sellTrades
+            ) || 0;
+
+
+    const winCount =
+        Array.isArray(
+            result.wins
+        )
+            ? result.wins.length
+            : Number(
+                result.wins
+            ) || 0;
+
+
+    const lossCount =
+        Array.isArray(
+            result.losses
+        )
+            ? result.losses.length
+            : Number(
+                result.losses
+            ) || 0;
+
+
+    // ==================================================
+    // CANDLES
+    // ==================================================
+
     btSet(
         "btCandles",
-        result.candles
+        Number(
+            result.candles
+        ) || 0
     );
 
 
+    // ==================================================
+    // TRADES
+    // ==================================================
+
     btSet(
         "btTrades",
-        result.trades
+        tradeCount
     );
 
 
     btSet(
         "btBuyTrades",
-        result.buyTrades
+        buyCount
     );
 
 
     btSet(
         "btSellTrades",
-        result.sellTrades
+        sellCount
     );
 
 
+    // ==================================================
+    // RESULTS
+    // ==================================================
+
     btSet(
         "btWins",
-        result.wins
+        winCount
     );
 
 
     btSet(
         "btLosses",
-        result.losses
+        lossCount
     );
+
+
+    // ==================================================
+    // WIN RATE
+    // ==================================================
+
+    const winRate =
+        Number(
+            result.winRate
+        );
 
 
     btSet(
         "btWinRate",
-        `${result.winRate.toFixed(1)}%`
+
+        Number.isFinite(
+            winRate
+        )
+            ? `${winRate.toFixed(1)}%`
+            : "--"
+
     );
+
+
+    // ==================================================
+    // TOTAL POINTS
+    // ==================================================
+
+    const points =
+        Number(
+            result.totalPoints
+        );
 
 
     btSet(
         "btPoints",
-        result.totalPoints >= 0
-            ? `+${result.totalPoints.toFixed(2)}`
-            : result.totalPoints.toFixed(2)
+
+        Number.isFinite(
+            points
+        )
+
+            ? points >= 0
+
+                ? `+${points.toFixed(2)}`
+
+                : points.toFixed(2)
+
+            : "--"
+
     );
+
+
+    // ==================================================
+    // AVERAGE WIN
+    // ==================================================
+
+    const averageWin =
+        Number(
+            result.averageWin
+        );
 
 
     btSet(
         "btAvgWin",
-        result.averageWin.toFixed(2)
+
+        Number.isFinite(
+            averageWin
+        )
+            ? averageWin.toFixed(2)
+            : "--"
+
     );
+
+
+    // ==================================================
+    // AVERAGE LOSS
+    // ==================================================
+
+    const averageLoss =
+        Number(
+            result.averageLoss
+        );
 
 
     btSet(
         "btAvgLoss",
-        result.averageLoss.toFixed(2)
-    );
-
-
-    btSet(
-        "btProfitFactor",
 
         Number.isFinite(
-            result.profitFactor
+            averageLoss
         )
-            ? result.profitFactor.toFixed(2)
-            : "∞"
+            ? averageLoss.toFixed(2)
+            : "--"
 
     );
+
+
+    // ==================================================
+    // PROFIT FACTOR
+    // ==================================================
+
+    const profitFactor =
+        Number(
+            result.profitFactor
+        );
+
+
+    if (
+        result.profitFactor === Infinity
+    ) {
+
+        btSet(
+            "btProfitFactor",
+            "∞"
+        );
+
+    }
+
+    else {
+
+        btSet(
+            "btProfitFactor",
+
+            Number.isFinite(
+                profitFactor
+            )
+                ? profitFactor.toFixed(2)
+                : "--"
+
+        );
+
+    }
+
+
+    // ==================================================
+    // MAX DRAWDOWN
+    // ==================================================
+
+    const drawdown =
+        Number(
+            result.maxDrawdown
+        );
 
 
     btSet(
         "btDrawdown",
-        result.maxDrawdown.toFixed(2)
+
+        Number.isFinite(
+            drawdown
+        )
+            ? drawdown.toFixed(2)
+            : "--"
+
     );
 
+
+    // ==================================================
+    // STATUS
+    // ==================================================
 
     btSet(
         "btStatus",
         "BACKTEST COMPLETE"
     );
 
+
+    // ==================================================
+    // DEBUG
+    // ==================================================
+
+    console.log(
+        "================================"
+    );
+
+
+    console.log(
+        "TradeMind Pro V9 Result"
+    );
+
+
+    console.log(
+        "Candles:",
+        result.candles
+    );
+
+
+    console.log(
+        "Trades:",
+        tradeCount
+    );
+
+
+    console.log(
+        "BUY:",
+        buyCount
+    );
+
+
+    console.log(
+        "SELL:",
+        sellCount
+    );
+
+
+    console.log(
+        "Wins:",
+        winCount
+    );
+
+
+    console.log(
+        "Losses:",
+        lossCount
+    );
+
+
+    console.log(
+        "Win Rate:",
+        result.winRate
+    );
+
+
+    console.log(
+        "Total Points:",
+        result.totalPoints
+    );
+
+
+    console.log(
+        "Profit Factor:",
+        result.profitFactor
+    );
+
+
+    console.log(
+        "Max Drawdown:",
+        result.maxDrawdown
+    );
+
+
+    console.log(
+        "Trade array:",
+        tradeArray
+    );
+
+
+    console.log(
+        "================================"
+    );
+
 }
 
 
 // ======================================================
-// FIND CANDLES
+// EXTRACT CANDLES
 // ======================================================
 
 function extractBacktestCandles(
     data
 ) {
 
+    if (
+        !data ||
+        typeof data !== "object"
+    ) {
+
+        return [];
+
+    }
+
+
     const nifty =
-        data?.nifty ||
-        {};
+        data.nifty || {};
 
-
-    /*
-    V9 supports several possible
-    candle property names.
-    */
 
     const candidates = [
 
@@ -1478,9 +1915,9 @@ function extractBacktestCandles(
 
         nifty.history,
 
-        data?.candles,
+        data.candles,
 
-        data?.historicalCandles
+        data.historicalCandles
 
     ];
 
@@ -1518,11 +1955,37 @@ function setupV9Button() {
         );
 
 
-    if (!button) {
+    if (
+        !button
+    ) {
+
+        console.warn(
+            "V9 backtest button not found."
+        );
 
         return;
 
     }
+
+
+    /*
+    Prevent duplicate event
+    listeners if the script
+    is initialized more than once.
+    */
+
+    if (
+        button.dataset.v9Bound ===
+        "true"
+    ) {
+
+        return;
+
+    }
+
+
+    button.dataset.v9Bound =
+        "true";
 
 
     button.addEventListener(
@@ -1545,18 +2008,74 @@ function setupV9Button() {
 
             try {
 
+                console.log(
+                    "================================"
+                );
+
+
+                console.log(
+                    "TradeMind V9 Backtest Started"
+                );
+
+
                 const response =
                     await fetch(
                         "/api/indicators?interval=5minute",
                         {
+                            method:
+                                "GET",
+
                             cache:
-                                "no-store"
+                                "no-store",
+
+                            headers: {
+                                "Accept":
+                                    "application/json"
+                            }
                         }
                     );
 
 
-                const data =
-                    await response.json();
+                const text =
+                    await response.text();
+
+
+                let data;
+
+
+                try {
+
+                    data =
+                        JSON.parse(
+                            text
+                        );
+
+                }
+
+                catch {
+
+                    throw new Error(
+                        `Invalid API response (${response.status})`
+                    );
+
+                }
+
+
+                if (
+                    !response.ok
+                ) {
+
+                    throw new Error(
+                        `API error ${response.status}`
+                    );
+
+                }
+
+
+                console.log(
+                    "Historical API data:",
+                    data
+                );
 
 
                 const candles =
@@ -1565,12 +2084,20 @@ function setupV9Button() {
                     );
 
 
+                console.log(
+                    "Historical candles found:",
+                    candles.length
+                );
+
+
                 if (
                     candles.length < 50
                 ) {
 
                     throw new Error(
-                        `Only ${candles.length} candles available. V9 requires the full historical candle array.`
+
+                        `Only ${candles.length} candles available. V9 requires at least 50.`
+
                     );
 
                 }
@@ -1594,7 +2121,9 @@ function setupV9Button() {
 
             }
 
-            catch (error) {
+            catch (
+                error
+            ) {
 
                 console.error(
                     "V9 backtest error:",
@@ -1604,11 +2133,10 @@ function setupV9Button() {
 
                 btSet(
                     "btStatus",
-                    error.message
+                    `ERROR: ${error.message}`
                 );
 
             }
-
 
             finally {
 
@@ -1624,6 +2152,11 @@ function setupV9Button() {
         }
     );
 
+
+    console.log(
+        "V9 backtest button connected."
+    );
+
 }
 
 
@@ -1632,6 +2165,11 @@ function setupV9Button() {
 // ======================================================
 
 function initializeV9() {
+
+    console.log(
+        "TradeMind Pro V9 Backtest Engine Ready"
+    );
+
 
     setupV9Button();
 
@@ -1662,7 +2200,7 @@ else {
 
 
 // ======================================================
-// EXPOSE ENGINE
+// GLOBAL API
 // ======================================================
 
 window.TradeMindV9 = {
