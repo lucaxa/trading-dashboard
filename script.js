@@ -191,36 +191,20 @@ function extractQuotes(data) {
     return data.result;
   }
 
-  /*
-  Some APIs return an object
-  keyed by security ID.
+  if (typeof data === "object") {
 
-  Convert it into an array.
-  */
-
-  if (
-    typeof data === "object"
-  ) {
-
-    const values =
-      Object.values(data);
-
-    if (
-      values.length &&
-      values.every(
-        item =>
-          typeof item === "object"
-      )
-    ) {
-
-      return values;
-
-    }
+    return Object.entries(data).map(
+      ([scripCode, quote]) => ({
+        scripCode,
+        ...quote
+      })
+    );
 
   }
 
   return [];
 }
+
 
 
 /*
@@ -232,67 +216,14 @@ function findQuote(
   instrument
 ) {
 
-  const text =
-    JSON.stringify(
-      quotes
-    ).toUpperCase();
-
-  /*
-  First attempt:
-  identify using instrument
-  names returned by API.
-  */
-
-  for (
-    const quote of quotes
-  ) {
-
-    const quoteText =
-      JSON.stringify(
-        quote
-      ).toUpperCase();
-
-    if (
-      instrument === "nifty" &&
-      (
-        quoteText.includes(
-          "NIFTY 50"
-        ) ||
-        quoteText.includes(
-          "NIFTY50"
-        )
-      )
-    ) {
-
-      return quote;
-
-    }
-
-    if (
-      instrument === "banknifty" &&
-      (
-        quoteText.includes(
-          "BANK NIFTY"
-        ) ||
-        quoteText.includes(
-          "BANKNIFTY"
-        )
-      )
-    ) {
-
-      return quote;
-
-    }
-
+  if (!Array.isArray(quotes)) {
+    return null;
   }
 
   /*
-  If the API response doesn't
-  contain names, use position.
-
-  Our backend requests:
-  NIFTY first,
-  BANKNIFTY second.
+  api/quotes.js requests:
+  NIFTY first
+  BANKNIFTY second
   */
 
   if (
@@ -312,7 +243,6 @@ function findQuote(
   }
 
   return null;
-
 }
 
 
@@ -369,17 +299,12 @@ function updateInstrument(
 /*
 Find the price field safely.
 */
-
-function extractPrice(
-  quote
-) {
+function extractPrice(quote) {
 
   if (
     typeof quote === "number"
   ) {
-
     return quote;
-
   }
 
   if (!quote) {
@@ -388,6 +313,7 @@ function extractPrice(
 
   const possibleFields = [
 
+    "live_price",
     "ltp",
     "LTP",
 
@@ -405,15 +331,11 @@ function extractPrice(
   ];
 
   for (
-    const field
-    of possibleFields
+    const field of possibleFields
   ) {
 
-    const value =
-      quote[field];
-
     const number =
-      Number(value);
+      Number(quote[field]);
 
     if (
       Number.isFinite(number) &&
@@ -427,8 +349,8 @@ function extractPrice(
   }
 
   return NaN;
-
 }
+
 
 
 /*
