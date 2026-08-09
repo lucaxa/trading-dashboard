@@ -1365,6 +1365,16 @@ WebSocket streaming.
 setInterval(
   fetchMarketData,
   5000
+
+  /*
+Refresh technical indicators
+every 30 seconds.
+*/
+
+setInterval(
+  fetchIndicatorData,
+  30000
+
 );
 
 
