@@ -1,8 +1,6 @@
 /*
 TradeMind Pro
-V10.17 Historical Backtest Engine
-
-V10.17 DIRECTIONAL STRATEGY
+V10.18 Historical Backtest Engine
 
 IMPORTANT:
 - PAPER BACKTEST ONLY
@@ -11,200 +9,72 @@ IMPORTANT:
 - NIFTY 50
 - 5 minute default
 
-V10.17:
-
-SELL:
-- EMA 9 / EMA 21 bearish
-- EMA slope bearish
-- EMA separation
-- Trend strength
-- VWAP confirmation
-- Pullback toward EMA9
-- RSI bearish momentum
-- Bearish candle confirmation
-- Not overextended
-- Entry gap protection
-
-BUY:
-- Separate BUY architecture
-- Bullish EMA trend
-- Positive EMA slopes
-- Strong EMA separation
-- Trend strength
-- Controlled EMA9 pullback
-- Previous candle must show pullback
-- Bullish recovery candle
-- RSI recovery from lower zone
-- RSI not already extended
-- VWAP distance protection
-- EMA extension protection
-- Previous expansion candle protection
-- Entry gap protection
-
-Risk:
-- ATR based stop
-- 1:2 reward/risk
-- Next candle execution
+V10.18 changes:
+- SELL architecture retained from V10.17
+- BUY architecture selectively relaxed
+- Wider BUY RSI zone
+- BUY RSI recovery is supportive rather than mandatory
+- BUY rejection requirement relaxed
+- BUY recovery requirement simplified
+- BUY EMA9 distance allowed up to 0.85 ATR
+- ATR stop = 1.5 ATR
+- Reward/Risk = 1:2
+- Next-candle execution
 - One position at a time
 - Cooldown
-- No same-candle re-entry
 - No overnight positions
 */
 
-
-// ======================================================
-// CONFIGURATION
-// ======================================================
-
 const CONFIG = {
 
-    VERSION: "V10.17",
+    VERSION: "V10.18",
 
     EMA_FAST: 9,
-
     EMA_SLOW: 21,
-
     RSI_PERIOD: 14,
-
     ATR_PERIOD: 14,
 
     ATR_STOP_MULTIPLIER: 1.5,
-
     RISK_REWARD: 2,
 
-    // --------------------------------------------------
-    // GENERAL TREND FILTERS
-    // --------------------------------------------------
-
     MIN_DIRECTIONAL_STRENGTH: 0.30,
-
     MIN_EMA_ATR_SEPARATION: 0.25,
-
     MIN_VWAP_ATR_DISTANCE: 0.05,
-
-    // --------------------------------------------------
-    // EMA SLOPE
-    // --------------------------------------------------
 
     EMA_SLOPE_LOOKBACK: 3,
 
     MIN_BUY_EMA9_SLOPE_ATR: 0.03,
-
     MIN_SELL_EMA9_SLOPE_ATR: 0.02,
 
-    // --------------------------------------------------
-    // GENERAL PULLBACK
-    // --------------------------------------------------
-
     MIN_PULLBACK_ATR: 0.08,
-
     MAX_PULLBACK_ATR: 0.85,
 
-    // --------------------------------------------------
-    // GENERAL CANDLE
-    // --------------------------------------------------
-
     MIN_CANDLE_BODY_RATIO: 0.40,
-
     MIN_CLOSE_LOCATION: 0.60,
 
-    // --------------------------------------------------
-    // GENERAL EXTENSION
-    // --------------------------------------------------
-
     MAX_EMA_EXTENSION_ATR: 1.15,
-
     HARD_EMA_EXTENSION_ATR: 1.40,
 
-    // --------------------------------------------------
-    // SELL RSI
-    // --------------------------------------------------
-
     SELL_RSI_MIN: 35,
-
     SELL_RSI_MAX: 48,
 
-    SELL_RSI_HARD_MIN: 30,
+    // ==================================================
+    // V10.18 BUY SETTINGS
+    // ==================================================
 
-    SELL_RSI_HARD_MAX: 52,
+    BUY_RSI_MIN: 50,
+    BUY_RSI_MAX: 62,
+    BUY_RSI_HARD_MAX: 68,
 
-    // --------------------------------------------------
-    // V10.17 BUY RSI
-    // --------------------------------------------------
+    MIN_BUY_RSI_RISE: 0.50,
 
-    BUY_RSI_MIN: 48,
+    BUY_MIN_WICK_REJECTION_RATIO: 0.15,
 
-    BUY_RSI_MAX: 59,
-
-    BUY_RSI_HARD_MAX: 62,
-
-    // --------------------------------------------------
-    // RSI RECOVERY
-    // --------------------------------------------------
-
-    RSI_RECOVERY_LOOKBACK: 2,
-
-    MIN_BUY_RSI_RISE: 1.00,
-
-    MAX_BUY_RSI_DROP: 0.75,
-
-    // --------------------------------------------------
-    // V10.17 BUY PULLBACK
-    // --------------------------------------------------
-
-    BUY_PULLBACK_MAX_ATR: 0.55,
-
-    BUY_EMA_TOUCH_ATR: 0.18,
-
-    BUY_MAX_RECOVERY_DISTANCE_ATR: 0.55,
-
-    BUY_MIN_WICK_REJECTION_RATIO: 0.25,
-
-    // --------------------------------------------------
-    // V10.17 BUY CANDLE
-    // --------------------------------------------------
-
-    BUY_MIN_CLOSE_LOCATION: 0.65,
-
-    BUY_MIN_BODY_RATIO: 0.45,
-
-    // --------------------------------------------------
-    // V10.17 PREVIOUS CANDLE
-    // --------------------------------------------------
-
-    BUY_REQUIRE_PULLBACK_CANDLE: true,
-
-    BUY_MAX_PREVIOUS_BODY_RATIO: 0.70,
-
-    BUY_MAX_PREVIOUS_RANGE_ATR: 1.20,
-
-    // --------------------------------------------------
-    // V10.17 BUY VWAP
-    // --------------------------------------------------
-
-    BUY_MAX_VWAP_DISTANCE_ATR: 0.85,
-
-    // --------------------------------------------------
-    // V10.17 BUY EXTENSION
-    // --------------------------------------------------
-
-    BUY_MAX_EMA_EXTENSION_ATR: 0.65,
-
-    // --------------------------------------------------
-    // ENTRY GAP
-    // --------------------------------------------------
+    BUY_MAX_EMA_DISTANCE_ATR: 0.85,
 
     MAX_ENTRY_GAP_ATR: 0.25,
 
-    // --------------------------------------------------
-    // COOLDOWN
-    // --------------------------------------------------
-
     COOLDOWN_CANDLES: 3,
-
-    // --------------------------------------------------
-    // TRADING SESSION
-    // --------------------------------------------------
 
     ENTRY_START_MINUTES:
         9 * 60 + 20,
@@ -214,7 +84,6 @@ const CONFIG = {
 
     SESSION_CLOSE_MINUTES:
         15 * 60 + 25
-
 };
 
 
@@ -230,7 +99,6 @@ function ema(values, period) {
     ) {
 
         return null;
-
     }
 
     const multiplier =
@@ -259,11 +127,9 @@ function ema(values, period) {
                 (current - value) *
                 multiplier
             ) + value;
-
     }
 
     return value;
-
 }
 
 
@@ -282,11 +148,9 @@ function rsi(
     ) {
 
         return null;
-
     }
 
     let gains = 0;
-
     let losses = 0;
 
     for (
@@ -305,15 +169,11 @@ function rsi(
 
             gains += change;
 
-        }
-
-        else {
+        } else {
 
             losses +=
                 Math.abs(change);
-
         }
-
     }
 
     let averageGain =
@@ -357,7 +217,6 @@ function rsi(
                 (period - 1) +
                 loss
             ) / period;
-
     }
 
     if (
@@ -365,7 +224,6 @@ function rsi(
     ) {
 
         return 100;
-
     }
 
     const rs =
@@ -379,7 +237,6 @@ function rsi(
             (1 + rs)
         )
     );
-
 }
 
 
@@ -407,7 +264,6 @@ function trueRange(
     ) {
 
         return null;
-
     }
 
     if (
@@ -415,7 +271,6 @@ function trueRange(
     ) {
 
         return high - low;
-
     }
 
     return Math.max(
@@ -431,9 +286,7 @@ function trueRange(
             low -
             previousClose
         )
-
     );
-
 }
 
 
@@ -452,7 +305,6 @@ function atr(
     ) {
 
         return null;
-
     }
 
     const ranges = [];
@@ -474,9 +326,7 @@ function atr(
         ) {
 
             ranges.push(value);
-
         }
-
     }
 
     if (
@@ -484,7 +334,6 @@ function atr(
     ) {
 
         return null;
-
     }
 
     let value =
@@ -508,11 +357,9 @@ function atr(
                 (period - 1) +
                 ranges[i]
             ) / period;
-
     }
 
     return value;
-
 }
 
 
@@ -539,7 +386,6 @@ function getISTDate(
     return date
         .toISOString()
         .slice(0, 10);
-
 }
 
 
@@ -568,7 +414,6 @@ function getISTMinutes(
         60
     ) +
     date.getUTCMinutes();
-
 }
 
 
@@ -586,7 +431,6 @@ function vwap(
     ) {
 
         return null;
-
     }
 
     const latest =
@@ -600,7 +444,6 @@ function vwap(
         );
 
     let totalPV = 0;
-
     let totalVolume = 0;
 
     for (
@@ -614,7 +457,6 @@ function vwap(
         ) {
 
             continue;
-
         }
 
         const high =
@@ -637,7 +479,6 @@ function vwap(
         ) {
 
             continue;
-
         }
 
         const typicalPrice =
@@ -653,7 +494,6 @@ function vwap(
 
         totalVolume +=
             volume;
-
     }
 
     if (
@@ -661,14 +501,12 @@ function vwap(
     ) {
 
         return null;
-
     }
 
     return (
         totalPV /
         totalVolume
     );
-
 }
 
 
@@ -685,7 +523,6 @@ function normalizeCandles(
     ) {
 
         return [];
-
     }
 
     return candles
@@ -693,135 +530,123 @@ function normalizeCandles(
         .map(
             candle => {
 
+                let normalized;
+
                 if (
                     Array.isArray(candle)
                 ) {
 
-                    const normalized = {
+                    normalized = {
 
                         ts:
-                            Number(candle[0]),
+                            Number(
+                                candle[0]
+                            ),
 
                         o:
-                            Number(candle[1]),
+                            Number(
+                                candle[1]
+                            ),
 
                         h:
-                            Number(candle[2]),
+                            Number(
+                                candle[2]
+                            ),
 
                         l:
-                            Number(candle[3]),
+                            Number(
+                                candle[3]
+                            ),
 
                         c:
-                            Number(candle[4]),
+                            Number(
+                                candle[4]
+                            ),
 
                         v:
                             Number(
                                 candle[5] ?? 0
                             )
-
                     };
-
-                    if (
-                        !Number.isFinite(
-                            normalized.ts
-                        ) ||
-                        !Number.isFinite(
-                            normalized.o
-                        ) ||
-                        !Number.isFinite(
-                            normalized.h
-                        ) ||
-                        !Number.isFinite(
-                            normalized.l
-                        ) ||
-                        !Number.isFinite(
-                            normalized.c
-                        )
-                    ) {
-
-                        return null;
-
-                    }
-
-                    if (
-                        normalized.h <
-                        normalized.l
-                    ) {
-
-                        return null;
-
-                    }
-
-                    return normalized;
 
                 }
 
-                if (
+                else if (
                     candle &&
-                    typeof candle === "object"
+                    typeof candle ===
+                    "object"
                 ) {
 
-                    const normalized = {
+                    normalized = {
 
                         ts:
-                            Number(candle.ts),
+                            Number(
+                                candle.ts
+                            ),
 
                         o:
-                            Number(candle.o),
+                            Number(
+                                candle.o
+                            ),
 
                         h:
-                            Number(candle.h),
+                            Number(
+                                candle.h
+                            ),
 
                         l:
-                            Number(candle.l),
+                            Number(
+                                candle.l
+                            ),
 
                         c:
-                            Number(candle.c),
+                            Number(
+                                candle.c
+                            ),
 
                         v:
                             Number(
                                 candle.v ?? 0
                             )
-
                     };
-
-                    if (
-                        !Number.isFinite(
-                            normalized.ts
-                        ) ||
-                        !Number.isFinite(
-                            normalized.o
-                        ) ||
-                        !Number.isFinite(
-                            normalized.h
-                        ) ||
-                        !Number.isFinite(
-                            normalized.l
-                        ) ||
-                        !Number.isFinite(
-                            normalized.c
-                        )
-                    ) {
-
-                        return null;
-
-                    }
-
-                    if (
-                        normalized.h <
-                        normalized.l
-                    ) {
-
-                        return null;
-
-                    }
-
-                    return normalized;
 
                 }
 
-                return null;
+                else {
 
+                    return null;
+                }
+
+                if (
+                    !Number.isFinite(
+                        normalized.ts
+                    ) ||
+                    !Number.isFinite(
+                        normalized.o
+                    ) ||
+                    !Number.isFinite(
+                        normalized.h
+                    ) ||
+                    !Number.isFinite(
+                        normalized.l
+                    ) ||
+                    !Number.isFinite(
+                        normalized.c
+                    )
+                ) {
+
+                    return null;
+                }
+
+                if (
+                    normalized.h <
+                    normalized.l
+                ) {
+
+                    return null;
+                }
+
+                return normalized;
             }
         )
 
@@ -832,7 +657,6 @@ function normalizeCandles(
                 a.ts -
                 b.ts
         );
-
 }
 
 
@@ -857,7 +681,6 @@ function calculateHistoricalIndicators(
     ) {
 
         return null;
-
     }
 
     const closes =
@@ -896,23 +719,27 @@ function calculateHistoricalIndicators(
         );
 
     if (
-        !Number.isFinite(ema9Value) ||
-        !Number.isFinite(ema21Value) ||
-        !Number.isFinite(rsiValue) ||
-        !Number.isFinite(atrValue) ||
-        !Number.isFinite(vwapValue)
+        !Number.isFinite(
+            ema9Value
+        ) ||
+        !Number.isFinite(
+            ema21Value
+        ) ||
+        !Number.isFinite(
+            rsiValue
+        ) ||
+        !Number.isFinite(
+            atrValue
+        ) ||
+        !Number.isFinite(
+            vwapValue
+        )
     ) {
 
         return null;
-
     }
 
-    // --------------------------------------------------
-    // PREVIOUS EMA VALUES
-    // --------------------------------------------------
-
     let ema9Previous = null;
-
     let ema21Previous = null;
 
     if (
@@ -930,7 +757,9 @@ function calculateHistoricalIndicators(
                 )
                 .map(
                     candle =>
-                        Number(candle.c)
+                        Number(
+                            candle.c
+                        )
                 );
 
         ema9Previous =
@@ -944,7 +773,6 @@ function calculateHistoricalIndicators(
                 previousCloses,
                 CONFIG.EMA_SLOW
             );
-
     }
 
     const ema9Slope =
@@ -963,10 +791,6 @@ function calculateHistoricalIndicators(
               ema21Previous
             : null;
 
-    // --------------------------------------------------
-    // EMA SPREAD
-    // --------------------------------------------------
-
     const emaSpread =
         Math.abs(
             ema9Value -
@@ -979,12 +803,7 @@ function calculateHistoricalIndicators(
               atrValue
             : 0;
 
-    // --------------------------------------------------
-    // PREVIOUS RSI
-    // --------------------------------------------------
-
     let previousRSI = null;
-
     let previousPreviousRSI = null;
 
     if (
@@ -1008,7 +827,9 @@ function calculateHistoricalIndicators(
             rsi(
                 previousHistory.map(
                     candle =>
-                        Number(candle.c)
+                        Number(
+                            candle.c
+                        )
                 ),
                 CONFIG.RSI_PERIOD
             );
@@ -1017,11 +838,12 @@ function calculateHistoricalIndicators(
             rsi(
                 previousPreviousHistory.map(
                     candle =>
-                        Number(candle.c)
+                        Number(
+                            candle.c
+                        )
                 ),
                 CONFIG.RSI_PERIOD
             );
-
     }
 
     return {
@@ -1052,9 +874,7 @@ function calculateHistoricalIndicators(
             vwapValue,
 
         directionalStrength
-
     };
-
 }
 
 
@@ -1115,14 +935,6 @@ function analyzeCandle(
             ) / range
             : 0.5;
 
-    const bullish =
-        close >
-        open;
-
-    const bearish =
-        close <
-        open;
-
     return {
 
         range,
@@ -1137,17 +949,19 @@ function analyzeCandle(
 
         closeLocation,
 
-        bullish,
+        bullish:
+            close >
+            open,
 
-        bearish
-
+        bearish:
+            close <
+            open
     };
-
 }
 
 
 // ======================================================
-// V10.17 SIGNAL
+// V10.18 SIGNAL ENGINE
 // ======================================================
 
 function getSignal(
@@ -1164,39 +978,54 @@ function getSignal(
 
         return {
 
-            signal: "WAIT",
+            signal:
+                "WAIT",
 
             buyScore: 0,
 
             sellScore: 0,
 
             reason:
-                "Missing data"
+                "Missing data",
 
+            diagnostics: {}
         };
-
     }
 
     const ema9 =
-        Number(indicators.ema9);
+        Number(
+            indicators.ema9
+        );
 
     const ema21 =
-        Number(indicators.ema21);
+        Number(
+            indicators.ema21
+        );
 
     const ema9Slope =
-        Number(indicators.ema9Slope);
+        Number(
+            indicators.ema9Slope
+        );
 
     const ema21Slope =
-        Number(indicators.ema21Slope);
+        Number(
+            indicators.ema21Slope
+        );
 
     const emaSpread =
-        Number(indicators.emaSpread);
+        Number(
+            indicators.emaSpread
+        );
 
     const rsi14 =
-        Number(indicators.rsi14);
+        Number(
+            indicators.rsi14
+        );
 
     const previousRSI =
-        Number(indicators.previousRSI);
+        Number(
+            indicators.previousRSI
+        );
 
     const previousPreviousRSI =
         Number(
@@ -1204,10 +1033,14 @@ function getSignal(
         );
 
     const atr14 =
-        Number(indicators.atr14);
+        Number(
+            indicators.atr14
+        );
 
     const vwapValue =
-        Number(indicators.vwap);
+        Number(
+            indicators.vwap
+        );
 
     const directionalStrength =
         Number(
@@ -1215,7 +1048,9 @@ function getSignal(
         );
 
     const close =
-        Number(candle.c);
+        Number(
+            candle.c
+        );
 
     if (
         !Number.isFinite(ema9) ||
@@ -1226,28 +1061,27 @@ function getSignal(
         !Number.isFinite(rsi14) ||
         !Number.isFinite(atr14) ||
         !Number.isFinite(vwapValue) ||
-        !Number.isFinite(directionalStrength) ||
+        !Number.isFinite(
+            directionalStrength
+        ) ||
         atr14 <= 0
     ) {
 
         return {
 
-            signal: "WAIT",
+            signal:
+                "WAIT",
 
             buyScore: 0,
 
             sellScore: 0,
 
             reason:
-                "Indicators unavailable"
+                "Indicators unavailable",
 
+            diagnostics: {}
         };
-
     }
-
-    // ==================================================
-    // CANDLE ANALYSIS
-    // ==================================================
 
     const currentCandle =
         analyzeCandle(
@@ -1268,8 +1102,9 @@ function getSignal(
             )
             : null;
 
+
     // ==================================================
-    // BASIC TREND
+    // TREND
     // ==================================================
 
     const bullishTrend =
@@ -1291,8 +1126,9 @@ function getSignal(
         ) >=
         CONFIG.MIN_EMA_ATR_SEPARATION;
 
+
     // ==================================================
-    // EMA SLOPE
+    // SLOPE
     // ==================================================
 
     const bullishSlope =
@@ -1310,6 +1146,7 @@ function getSignal(
             CONFIG.MIN_SELL_EMA9_SLOPE_ATR
         ) &&
         ema21Slope <= 0;
+
 
     // ==================================================
     // VWAP
@@ -1329,26 +1166,23 @@ function getSignal(
             vwapValue
         );
 
-    const vwapDistanceATR =
-        vwapDistance /
-        atr14;
-
     const vwapConfirmed =
-        vwapDistanceATR >=
-        CONFIG.MIN_VWAP_ATR_DISTANCE;
+        vwapDistance >=
+        (
+            atr14 *
+            CONFIG.MIN_VWAP_ATR_DISTANCE
+        );
+
 
     // ==================================================
     // EXTENSION
     // ==================================================
 
-    const emaExtension =
+    const emaExtensionATR =
         Math.abs(
             close -
             ema9
-        );
-
-    const emaExtensionATR =
-        emaExtension /
+        ) /
         atr14;
 
     const notOverextended =
@@ -1359,18 +1193,16 @@ function getSignal(
         emaExtensionATR >
         CONFIG.HARD_EMA_EXTENSION_ATR;
 
+
     // ==================================================
-    // GENERAL PULLBACK
+    // PULLBACK
     // ==================================================
 
-    const pullbackDistance =
+    const pullbackDistanceATR =
         Math.abs(
             close -
             ema9
-        );
-
-    const pullbackDistanceATR =
-        pullbackDistance /
+        ) /
         atr14;
 
     const validPullback =
@@ -1378,6 +1210,13 @@ function getSignal(
             CONFIG.MIN_PULLBACK_ATR &&
         pullbackDistanceATR <=
             CONFIG.MAX_PULLBACK_ATR;
+
+    const buyPullback =
+        pullbackDistanceATR >=
+            CONFIG.MIN_PULLBACK_ATR &&
+        pullbackDistanceATR <=
+            CONFIG.BUY_MAX_EMA_DISTANCE_ATR;
+
 
     // ==================================================
     // RSI
@@ -1400,207 +1239,37 @@ function getSignal(
         CONFIG.BUY_RSI_HARD_MAX;
 
     const buyRSIRecovery =
-        Number.isFinite(previousRSI) &&
-        Number.isFinite(previousPreviousRSI) &&
+        Number.isFinite(
+            previousRSI
+        ) &&
+        Number.isFinite(
+            previousPreviousRSI
+        ) &&
         rsi14 >
         previousRSI &&
+        previousRSI >=
+        previousPreviousRSI &&
         (
             rsi14 -
             previousRSI
         ) >=
-        CONFIG.MIN_BUY_RSI_RISE &&
-        previousRSI >=
-        previousPreviousRSI;
+        CONFIG.MIN_BUY_RSI_RISE;
 
-    // ==================================================
-    // PREVIOUS CANDLE
-    // ==================================================
+    /*
+    V10.18:
+    RSI recovery is supportive.
+    It is NOT mandatory if RSI
+    is already inside BUY zone.
+    */
 
-    const previousClose =
-        previousCandle
-            ? Number(previousCandle.c)
-            : null;
-
-    const previousHigh =
-        previousCandle
-            ? Number(previousCandle.h)
-            : null;
-
-    const previousLow =
-        previousCandle
-            ? Number(previousCandle.l)
-            : null;
-
-    const previousRange =
-        previousCandle
-            ? Number(previousCandle.h) -
-              Number(previousCandle.l)
-            : null;
-
-    const previousRangeATR =
-        Number.isFinite(previousRange)
-            ? previousRange /
-              atr14
-            : Infinity;
-
-    const previousBodyRatio =
-        previousAnalysis
-            ? previousAnalysis.bodyRatio
-            : 0;
-
-    const previousBearish =
-        previousAnalysis?.bearish === true;
-
-    // ==================================================
-    // V10.17 CONTROLLED BUY PULLBACK
-    // ==================================================
-
-    const previousLowNearEMA9 =
-        Number.isFinite(previousLow) &&
-        previousLow <=
+    const buyRSIUsable =
+        buyRSI ||
         (
-            ema9 +
-            atr14 *
-            CONFIG.BUY_EMA_TOUCH_ATR
+            rsi14 >= 50 &&
+            rsi14 <= 60 &&
+            buyRSIRecovery
         );
 
-    const previousCloseNearEMA9 =
-        Number.isFinite(previousClose) &&
-        Math.abs(
-            previousClose -
-            ema9
-        ) /
-        atr14 <=
-        CONFIG.BUY_PULLBACK_MAX_ATR;
-
-    const previousPullback =
-        previousLowNearEMA9 ||
-        previousCloseNearEMA9 ||
-        previousBearish;
-
-    const previousCandleNotExpansion =
-        previousRangeATR <=
-        CONFIG.BUY_MAX_PREVIOUS_RANGE_ATR &&
-        previousBodyRatio <=
-        CONFIG.BUY_MAX_PREVIOUS_BODY_RATIO;
-
-    const validBuyPullback =
-        previousPullback &&
-        previousCandleNotExpansion;
-
-    // ==================================================
-    // CURRENT BUY RECOVERY
-    // ==================================================
-
-    const bullishCandle =
-        currentCandle.bullish;
-
-    const bullishBody =
-        currentCandle.bodyRatio >=
-        CONFIG.BUY_MIN_BODY_RATIO;
-
-    const bullishCloseLocation =
-        currentCandle.closeLocation >=
-        CONFIG.BUY_MIN_CLOSE_LOCATION;
-
-    const recoveryAboveEMA9 =
-        close >
-        ema9;
-
-    const recoveryDistanceATR =
-        Math.abs(
-            close -
-            ema9
-        ) /
-        atr14;
-
-    const recoveryNotTooFar =
-        recoveryDistanceATR <=
-        CONFIG.BUY_MAX_RECOVERY_DISTANCE_ATR;
-
-    const recoveryAbovePreviousClose =
-        Number.isFinite(previousClose) &&
-        close >
-        previousClose;
-
-    const recoveryAbovePreviousHigh =
-        Number.isFinite(previousHigh) &&
-        close >
-        previousHigh;
-
-    const bullishRecovery =
-        bullishCandle &&
-        bullishBody &&
-        bullishCloseLocation &&
-        recoveryAboveEMA9 &&
-        recoveryAbovePreviousClose &&
-        recoveryNotTooFar;
-
-    // ==================================================
-    // BUY VWAP DISTANCE
-    // ==================================================
-
-    const buyVWAPDistanceAcceptable =
-        aboveVWAP &&
-        vwapConfirmed &&
-        vwapDistanceATR <=
-        CONFIG.BUY_MAX_VWAP_DISTANCE_ATR;
-
-    // ==================================================
-    // BEARISH PRESSURE
-    // ==================================================
-
-    let bearishPressure = 0;
-
-    if (
-        previousAnalysis?.bearish
-    ) {
-
-        bearishPressure++;
-
-    }
-
-    if (
-        previousPreviousAnalysis?.bearish
-    ) {
-
-        bearishPressure++;
-
-    }
-
-    const noHeavyBearishPressure =
-        bearishPressure <= 1;
-
-    // ==================================================
-    // BUY RSI RECOVERY ZONE
-    // ==================================================
-
-    const buyRSIRecoveryZone =
-        buyRSI &&
-        buyRSIRecovery &&
-        rsi14 < 59;
-
-    // ==================================================
-    // BUY EXTENSION
-    // ==================================================
-
-    const buyExtensionAcceptable =
-        emaExtensionATR <=
-        CONFIG.BUY_MAX_EMA_EXTENSION_ATR &&
-        !hardOverextended;
-
-    // ==================================================
-    // SELL PULLBACK
-    // ==================================================
-
-    const sellPullback =
-        validPullback &&
-        close <=
-        (
-            ema9 +
-            atr14 *
-            0.15
-        );
 
     // ==================================================
     // SELL CANDLE
@@ -1616,6 +1285,129 @@ function getSignal(
             CONFIG.MIN_CLOSE_LOCATION
         );
 
+
+    // ==================================================
+    // BUY REJECTION
+    // ==================================================
+
+    const bullishLowerWick =
+        currentCandle.lowerWick >=
+        (
+            currentCandle.range *
+            CONFIG.BUY_MIN_WICK_REJECTION_RATIO
+        );
+
+    const bullishClose =
+        currentCandle.bullish;
+
+    const bullishCloseLocation =
+        currentCandle.closeLocation >=
+        CONFIG.MIN_CLOSE_LOCATION;
+
+    /*
+    V10.18:
+    Bullish candle + modest lower wick.
+    */
+
+    const bullishRejection =
+        bullishLowerWick &&
+        bullishClose;
+
+
+    // ==================================================
+    // BUY RECOVERY
+    // ==================================================
+
+    const previousClose =
+        previousCandle
+            ? Number(
+                previousCandle.c
+            )
+            : null;
+
+    const previousHigh =
+        previousCandle
+            ? Number(
+                previousCandle.h
+            )
+            : null;
+
+    const recoveryAboveEMA9 =
+        close >
+        ema9;
+
+    const recoveryAbovePreviousClose =
+        Number.isFinite(
+            previousClose
+        )
+            ? close >
+              previousClose
+            : false;
+
+    const recoveryAbovePreviousHigh =
+        Number.isFinite(
+            previousHigh
+        )
+            ? close >
+              previousHigh
+            : false;
+
+    const bullishRecovery =
+        recoveryAboveEMA9 &&
+        recoveryAbovePreviousClose &&
+        (
+            recoveryAbovePreviousHigh ||
+            bullishCloseLocation
+        );
+
+    const simpleBullishRecovery =
+        recoveryAboveEMA9 &&
+        bullishClose &&
+        bullishCloseLocation;
+
+    const buyRecovery =
+        bullishRecovery ||
+        simpleBullishRecovery;
+
+
+    // ==================================================
+    // BEARISH PRESSURE
+    // ==================================================
+
+    let bearishPressure = 0;
+
+    if (
+        previousAnalysis?.bearish
+    ) {
+
+        bearishPressure++;
+    }
+
+    if (
+        previousPreviousAnalysis?.bearish
+    ) {
+
+        bearishPressure++;
+    }
+
+    const noHeavyBearishPressure =
+        bearishPressure <= 1;
+
+
+    // ==================================================
+    // SELL PULLBACK
+    // ==================================================
+
+    const sellPullback =
+        validPullback &&
+        close <=
+        (
+            ema9 +
+            atr14 *
+            0.15
+        );
+
+
     // ==================================================
     // ENTRY GAP
     // ==================================================
@@ -1628,16 +1420,22 @@ function getSignal(
 
         entryGapATR =
             (
-                Number(candle.o) -
-                Number(previousCandle.c)
+                Number(
+                    candle.o
+                ) -
+                Number(
+                    previousCandle.c
+                )
             ) /
             atr14;
-
     }
 
     const entryGapAcceptable =
-        Math.abs(entryGapATR) <=
+        Math.abs(
+            entryGapATR
+        ) <=
         CONFIG.MAX_ENTRY_GAP_ATR;
+
 
     // ==================================================
     // BUY SCORE
@@ -1656,7 +1454,6 @@ function getSignal(
         buyReasons.push(
             "Bullish trend"
         );
-
     }
 
     if (
@@ -1668,7 +1465,6 @@ function getSignal(
         buyReasons.push(
             "EMA slope bullish"
         );
-
     }
 
     if (
@@ -1680,7 +1476,6 @@ function getSignal(
         buyReasons.push(
             "Strong EMA separation"
         );
-
     }
 
     if (
@@ -1692,11 +1487,11 @@ function getSignal(
         buyReasons.push(
             "Trend strength"
         );
-
     }
 
     if (
-        buyVWAPDistanceAcceptable
+        aboveVWAP &&
+        vwapConfirmed
     ) {
 
         buyScore++;
@@ -1704,43 +1499,61 @@ function getSignal(
         buyReasons.push(
             "VWAP confirmation"
         );
-
     }
 
     if (
-        validBuyPullback
+        buyPullback
     ) {
 
         buyScore++;
 
         buyReasons.push(
-            "Controlled EMA9 pullback"
+            "EMA9 pullback"
         );
-
     }
 
     if (
-        bullishRecovery
+        bullishRejection
     ) {
 
         buyScore++;
 
         buyReasons.push(
-            "Bullish pullback recovery"
+            "Bullish rejection"
         );
-
     }
 
     if (
-        buyRSIRecoveryZone
+        buyRecovery
     ) {
 
         buyScore++;
 
         buyReasons.push(
-            "RSI recovery zone"
+            "Bullish recovery"
         );
+    }
 
+    if (
+        buyRSIUsable
+    ) {
+
+        buyScore++;
+
+        buyReasons.push(
+            "BUY RSI zone"
+        );
+    }
+
+    if (
+        buyRSIRecovery
+    ) {
+
+        buyScore++;
+
+        buyReasons.push(
+            "RSI recovery"
+        );
     }
 
     if (
@@ -1752,19 +1565,17 @@ function getSignal(
         buyReasons.push(
             "No heavy bearish pressure"
         );
-
     }
 
     if (
-        buyExtensionAcceptable
+        notOverextended
     ) {
 
         buyScore++;
 
         buyReasons.push(
-            "BUY extension acceptable"
+            "Not overextended"
         );
-
     }
 
     if (
@@ -1776,8 +1587,8 @@ function getSignal(
         buyReasons.push(
             "Entry gap acceptable"
         );
-
     }
+
 
     // ==================================================
     // SELL SCORE
@@ -1796,7 +1607,6 @@ function getSignal(
         sellReasons.push(
             "Bearish trend"
         );
-
     }
 
     if (
@@ -1808,7 +1618,6 @@ function getSignal(
         sellReasons.push(
             "EMA slope bearish"
         );
-
     }
 
     if (
@@ -1820,7 +1629,6 @@ function getSignal(
         sellReasons.push(
             "Strong EMA separation"
         );
-
     }
 
     if (
@@ -1832,7 +1640,6 @@ function getSignal(
         sellReasons.push(
             "Trend strength"
         );
-
     }
 
     if (
@@ -1845,7 +1652,6 @@ function getSignal(
         sellReasons.push(
             "VWAP confirmation"
         );
-
     }
 
     if (
@@ -1857,7 +1663,6 @@ function getSignal(
         sellReasons.push(
             "EMA9 pullback"
         );
-
     }
 
     if (
@@ -1869,7 +1674,6 @@ function getSignal(
         sellReasons.push(
             "RSI momentum"
         );
-
     }
 
     if (
@@ -1881,7 +1685,6 @@ function getSignal(
         sellReasons.push(
             "Strong bearish candle"
         );
-
     }
 
     if (
@@ -1893,7 +1696,6 @@ function getSignal(
         sellReasons.push(
             "Not overextended"
         );
-
     }
 
     if (
@@ -1905,8 +1707,8 @@ function getSignal(
         sellReasons.push(
             "Entry gap acceptable"
         );
-
     }
+
 
     // ==================================================
     // STRICT BUY
@@ -1917,14 +1719,17 @@ function getSignal(
         bullishSlope &&
         strongEMASeparation &&
         strongTrend &&
-        buyVWAPDistanceAcceptable &&
-        validBuyPullback &&
-        bullishRecovery &&
-        buyRSIRecoveryZone &&
+        aboveVWAP &&
+        vwapConfirmed &&
+        buyPullback &&
+        buyRecovery &&
+        buyRSIUsable &&
         buyRSINotOverbought &&
         noHeavyBearishPressure &&
-        buyExtensionAcceptable &&
+        notOverextended &&
+        !hardOverextended &&
         entryGapAcceptable;
+
 
     // ==================================================
     // STRICT SELL
@@ -1944,15 +1749,12 @@ function getSignal(
         !hardOverextended &&
         entryGapAcceptable;
 
-    // ==================================================
-    // SIGNAL
-    // ==================================================
 
     let signal =
         "WAIT";
 
     let reason =
-        "Waiting for V10.17 confirmation";
+        "Waiting for V10.18 confirmation";
 
     if (
         strictBuy &&
@@ -1981,8 +1783,8 @@ function getSignal(
             sellReasons.join(
                 " + "
             );
-
     }
+
 
     return {
 
@@ -2032,37 +1834,18 @@ function getSignal(
 
             validPullback,
 
-            validBuyPullback,
+            buyPullback,
 
-            previousPullback,
+            bullishRejection,
 
-            previousLowNearEMA9,
-
-            previousCloseNearEMA9,
-
-            previousBearish,
-
-            previousCandleNotExpansion,
-
-            bullishRecovery,
-
-            recoveryAboveEMA9,
-
-            recoveryAbovePreviousClose,
-
-            recoveryAbovePreviousHigh,
-
-            recoveryDistanceATR,
-
-            recoveryNotTooFar,
-
-            buyVWAPDistanceAcceptable,
+            bullishRecovery:
+                buyRecovery,
 
             buyRSI,
 
-            buyRSIRecovery,
+            buyRSIUsable,
 
-            buyRSIRecoveryZone,
+            buyRSIRecovery,
 
             buyRSINotOverbought,
 
@@ -2078,14 +1861,11 @@ function getSignal(
 
             hardOverextended,
 
-            buyExtensionAcceptable,
+            entryGapAcceptable,
 
-            entryGapAcceptable
-
+            bullishCloseLocation
         }
-
     };
-
 }
 
 
@@ -2273,9 +2053,7 @@ function closePosition(
             Number(
                 position.pullbackDistanceATR?.toFixed(3)
             )
-
     };
-
 }
 
 
@@ -2294,7 +2072,6 @@ function managePosition(
     ) {
 
         return null;
-
     }
 
     const open =
@@ -2306,9 +2083,10 @@ function managePosition(
     const low =
         Number(candle.l);
 
-    // --------------------------------------------------
+
+    // ==================================================
     // BUY
-    // --------------------------------------------------
+    // ==================================================
 
     if (
         position.side === "BUY"
@@ -2326,7 +2104,6 @@ function managePosition(
                 "STOP LOSS - GAP",
                 equityState
             );
-
         }
 
         if (
@@ -2341,7 +2118,6 @@ function managePosition(
                 "TARGET - GAP",
                 equityState
             );
-
         }
 
         if (
@@ -2356,7 +2132,6 @@ function managePosition(
                 "STOP LOSS",
                 equityState
             );
-
         }
 
         if (
@@ -2371,14 +2146,13 @@ function managePosition(
                 "TARGET",
                 equityState
             );
-
         }
-
     }
 
-    // --------------------------------------------------
+
+    // ==================================================
     // SELL
-    // --------------------------------------------------
+    // ==================================================
 
     if (
         position.side === "SELL"
@@ -2396,7 +2170,6 @@ function managePosition(
                 "STOP LOSS - GAP",
                 equityState
             );
-
         }
 
         if (
@@ -2411,7 +2184,6 @@ function managePosition(
                 "TARGET - GAP",
                 equityState
             );
-
         }
 
         if (
@@ -2426,7 +2198,6 @@ function managePosition(
                 "STOP LOSS",
                 equityState
             );
-
         }
 
         if (
@@ -2441,46 +2212,20 @@ function managePosition(
                 "TARGET",
                 equityState
             );
-
         }
-
     }
 
     return null;
-
 }
 
 
 // ======================================================
-// BACKTEST
+// DIAGNOSTICS
 // ======================================================
 
-function runBacktest(
-    candles
-) {
+function createDiagnostics() {
 
-    const trades = [];
-
-    let position = null;
-
-    const equityState = {
-
-        equity: 0,
-
-        peakEquity: 0,
-
-        maxDrawdown: 0
-
-    };
-
-    let cooldown = 0;
-
-    let previousSession = null;
-
-    let previousSignal =
-        "WAIT";
-
-    const diagnostics = {
+    return {
 
         weakTrend: 0,
 
@@ -2497,6 +2242,8 @@ function runBacktest(
         vwapTooClose: 0,
 
         invalidPullback: 0,
+
+        buyPullbackRejected: 0,
 
         overextended: 0,
 
@@ -2515,8 +2262,6 @@ function runBacktest(
         buyRejectionRejected: 0,
 
         buyRecoveryRejected: 0,
-
-        buyPullbackRejected: 0,
 
         buyVWAPDistanceRejected: 0,
 
@@ -2543,8 +2288,40 @@ function runBacktest(
         cooldownRejected: 0,
 
         noTradeSignal: 0
-
     };
+}
+
+
+// ======================================================
+// BACKTEST
+// ======================================================
+
+function runBacktest(
+    candles
+) {
+
+    const trades = [];
+
+    let position = null;
+
+    const equityState = {
+
+        equity: 0,
+
+        peakEquity: 0,
+
+        maxDrawdown: 0
+    };
+
+    let cooldown = 0;
+
+    let previousSession = null;
+
+    let previousSignal =
+        "WAIT";
+
+    const diagnostics =
+        createDiagnostics();
 
     const startIndex =
         Math.max(
@@ -2556,6 +2333,7 @@ function runBacktest(
             CONFIG.ATR_PERIOD + 10
 
         );
+
 
     for (
         let i = startIndex;
@@ -2588,6 +2366,7 @@ function runBacktest(
 
         let closedThisCandle =
             false;
+
 
         // ==================================================
         // NEW SESSION
@@ -2632,16 +2411,15 @@ function runBacktest(
 
                 closedThisCandle =
                     true;
-
             }
 
             previousSignal =
                 "WAIT";
-
         }
 
         previousSession =
             session;
+
 
         // ==================================================
         // INDICATORS
@@ -2658,6 +2436,7 @@ function runBacktest(
 
         let signal =
             "WAIT";
+
 
         if (
             indicators
@@ -2679,19 +2458,21 @@ function runBacktest(
             signal =
                 signalResult.signal;
 
+
             // ==================================================
             // DIAGNOSTICS
             // ==================================================
 
             const d =
-                signalResult.diagnostics;
+                signalResult.diagnostics ||
+                {};
+
 
             if (
                 !d.strongTrend
             ) {
 
                 diagnostics.weakTrend++;
-
             }
 
             if (
@@ -2699,7 +2480,6 @@ function runBacktest(
             ) {
 
                 diagnostics.weakEMASeparation++;
-
             }
 
             if (
@@ -2708,7 +2488,6 @@ function runBacktest(
             ) {
 
                 diagnostics.weakSlope++;
-
             }
 
             if (
@@ -2717,7 +2496,6 @@ function runBacktest(
             ) {
 
                 diagnostics.weakBuyTrend++;
-
             }
 
             if (
@@ -2726,7 +2504,6 @@ function runBacktest(
             ) {
 
                 diagnostics.weakBuySeparation++;
-
             }
 
             if (
@@ -2735,7 +2512,6 @@ function runBacktest(
             ) {
 
                 diagnostics.weakBuySlope++;
-
             }
 
             if (
@@ -2743,7 +2519,6 @@ function runBacktest(
             ) {
 
                 diagnostics.vwapTooClose++;
-
             }
 
             if (
@@ -2751,7 +2526,14 @@ function runBacktest(
             ) {
 
                 diagnostics.invalidPullback++;
+            }
 
+            if (
+                d.bullishTrend &&
+                !d.buyPullback
+            ) {
+
+                diagnostics.buyPullbackRejected++;
             }
 
             if (
@@ -2759,7 +2541,6 @@ function runBacktest(
             ) {
 
                 diagnostics.overextended++;
-
             }
 
             if (
@@ -2767,7 +2548,6 @@ function runBacktest(
             ) {
 
                 diagnostics.hardOverextended++;
-
             }
 
             if (
@@ -2776,7 +2556,6 @@ function runBacktest(
             ) {
 
                 diagnostics.rsiRejected++;
-
             }
 
             if (
@@ -2785,7 +2564,6 @@ function runBacktest(
             ) {
 
                 diagnostics.buyRSIRejected++;
-
             }
 
             if (
@@ -2794,16 +2572,14 @@ function runBacktest(
             ) {
 
                 diagnostics.buyRSIRecoveryRejected++;
-
             }
 
             if (
                 d.bullishTrend &&
-                !d.buyRSIRecoveryZone
+                !d.buyRSI
             ) {
 
                 diagnostics.buyRSIZoneRejected++;
-
             }
 
             if (
@@ -2812,16 +2588,14 @@ function runBacktest(
             ) {
 
                 diagnostics.buyBearishPressureRejected++;
-
             }
 
             if (
                 d.bullishTrend &&
-                !d.validBuyPullback
+                !d.bullishRejection
             ) {
 
-                diagnostics.buyPullbackRejected++;
-
+                diagnostics.buyRejectionRejected++;
             }
 
             if (
@@ -2830,43 +2604,30 @@ function runBacktest(
             ) {
 
                 diagnostics.buyRecoveryRejected++;
-
             }
 
             if (
                 d.bullishTrend &&
-                !d.buyVWAPDistanceAcceptable
+                !d.aboveVWAP
             ) {
 
                 diagnostics.buyVWAPDistanceRejected++;
-
             }
 
             if (
                 d.bullishTrend &&
-                !d.buyExtensionAcceptable
+                !d.notOverextended
             ) {
 
                 diagnostics.buyExtensionRejected++;
-
             }
 
             if (
                 d.bullishTrend &&
-                !d.previousCandleNotExpansion
+                !d.strongEMASeparation
             ) {
 
                 diagnostics.buyExpansionRejected++;
-
-            }
-
-            if (
-                d.bullishTrend &&
-                !d.bullishRecovery
-            ) {
-
-                diagnostics.buyRejectionRejected++;
-
             }
 
             const candleInfo =
@@ -2880,16 +2641,14 @@ function runBacktest(
             ) {
 
                 diagnostics.weakCandle++;
-
             }
 
             if (
                 d.bullishTrend &&
-                !d.bullishRecovery
+                !d.bullishRejection
             ) {
 
                 diagnostics.buyCandleRejected++;
-
             }
 
             if (
@@ -2898,7 +2657,6 @@ function runBacktest(
             ) {
 
                 diagnostics.bearishCandleRejected++;
-
             }
 
             if (
@@ -2907,7 +2665,6 @@ function runBacktest(
             ) {
 
                 diagnostics.bullishCloseRejected++;
-
             }
 
             if (
@@ -2916,7 +2673,6 @@ function runBacktest(
             ) {
 
                 diagnostics.bearishCloseRejected++;
-
             }
 
             if (
@@ -2924,10 +2680,9 @@ function runBacktest(
             ) {
 
                 diagnostics.entryGapRejected++;
-
             }
-
         }
+
 
         // ==================================================
         // POSITION MANAGEMENT
@@ -2964,10 +2719,9 @@ function runBacktest(
 
                 closedThisCandle =
                     true;
-
             }
-
         }
+
 
         // ==================================================
         // SESSION CLOSE
@@ -3006,8 +2760,8 @@ function runBacktest(
 
             closedThisCandle =
                 true;
-
         }
+
 
         // ==================================================
         // FRESH SIGNAL
@@ -3019,6 +2773,7 @@ function runBacktest(
 
         previousSignal =
             signal;
+
 
         // ==================================================
         // SESSION FILTER
@@ -3032,8 +2787,8 @@ function runBacktest(
             diagnostics.sessionRejected++;
 
             continue;
-
         }
+
 
         // ==================================================
         // NO ENTRY AFTER EXIT
@@ -3044,8 +2799,8 @@ function runBacktest(
         ) {
 
             continue;
-
         }
+
 
         // ==================================================
         // COOLDOWN
@@ -3060,8 +2815,8 @@ function runBacktest(
             diagnostics.cooldownRejected++;
 
             continue;
-
         }
+
 
         // ==================================================
         // ENTRY WINDOW
@@ -3077,8 +2832,8 @@ function runBacktest(
             diagnostics.sessionRejected++;
 
             continue;
-
         }
+
 
         // ==================================================
         // INDICATORS
@@ -3092,8 +2847,8 @@ function runBacktest(
             diagnostics.noTradeSignal++;
 
             continue;
-
         }
+
 
         // ==================================================
         // FRESH SIGNAL
@@ -3106,8 +2861,8 @@ function runBacktest(
             diagnostics.duplicateSignalRejected++;
 
             continue;
-
         }
+
 
         // ==================================================
         // NEXT CANDLE
@@ -3119,7 +2874,6 @@ function runBacktest(
         ) {
 
             continue;
-
         }
 
         const nextCandle =
@@ -3132,8 +2886,8 @@ function runBacktest(
         ) {
 
             continue;
-
         }
+
 
         // ==================================================
         // ATR
@@ -3145,13 +2899,15 @@ function runBacktest(
             );
 
         if (
-            !Number.isFinite(atrValue) ||
+            !Number.isFinite(
+                atrValue
+            ) ||
             atrValue <= 0
         ) {
 
             continue;
-
         }
+
 
         // ==================================================
         // ENTRY
@@ -3163,16 +2919,18 @@ function runBacktest(
             );
 
         if (
-            !Number.isFinite(entry) ||
+            !Number.isFinite(
+                entry
+            ) ||
             entry <= 0
         ) {
 
             continue;
-
         }
 
+
         // ==================================================
-        // ACTUAL ENTRY GAP
+        // ENTRY GAP
         // ==================================================
 
         const signalClose =
@@ -3197,8 +2955,8 @@ function runBacktest(
             diagnostics.entryGapRejected++;
 
             continue;
-
         }
+
 
         // ==================================================
         // STOP / TARGET
@@ -3219,13 +2977,18 @@ function runBacktest(
 
         const stop =
             side === "BUY"
+
                 ? entry - risk
+
                 : entry + risk;
 
         const target =
             side === "BUY"
+
                 ? entry + reward
+
                 : entry - reward;
+
 
         // ==================================================
         // CREATE POSITION
@@ -3286,32 +3049,36 @@ function runBacktest(
                 indicators.directionalStrength,
 
             bodyRatio:
-                signalResult.diagnostics
+                signalResult
+                    .diagnostics
                     ?.bodyRatio,
 
             closeLocation:
-                signalResult.diagnostics
+                signalResult
+                    .diagnostics
                     ?.closeLocation,
 
             entryGapATR:
                 actualEntryGapATR,
 
             emaExtensionATR:
-                signalResult.diagnostics
+                signalResult
+                    .diagnostics
                     ?.emaExtensionATR,
 
             pullbackDistanceATR:
-                signalResult.diagnostics
+                signalResult
+                    .diagnostics
                     ?.pullbackDistanceATR
-
         };
+
 
         console.log(
             `${CONFIG.VERSION} ENTRY:`,
             position
         );
-
     }
+
 
     // ==================================================
     // CLOSE FINAL POSITION
@@ -3344,8 +3111,8 @@ function runBacktest(
         trades.push(
             trade
         );
-
     }
+
 
     // ==================================================
     // STATISTICS
@@ -3442,121 +3209,111 @@ function runBacktest(
 
     const profitFactor =
         grossLoss > 0
+
             ? grossProfit /
               grossLoss
+
             : grossProfit > 0
                 ? Infinity
                 : 0;
 
+
+    function getDirectionStats(
+        list
+    ) {
+
+        const directionWins =
+            list.filter(
+                trade =>
+                    trade.points > 0
+            ).length;
+
+        const directionLosses =
+            list.filter(
+                trade =>
+                    trade.points <= 0
+            ).length;
+
+        return {
+
+            trades:
+                list.length,
+
+            wins:
+                directionWins,
+
+            losses:
+                directionLosses,
+
+            winRate:
+                list.length > 0
+                    ? (
+                        directionWins /
+                        list.length
+                    ) * 100
+                    : 0,
+
+            points:
+                list.reduce(
+                    (sum, trade) =>
+                        sum +
+                        trade.points,
+                    0
+                )
+        };
+    }
+
+
     const directionStats = {
 
-        BUY: {
+        BUY:
+            getDirectionStats(
+                buyTrades
+            ),
 
-            trades:
-                buyTrades.length,
-
-            wins:
-                buyTrades.filter(
-                    trade =>
-                        trade.points > 0
-                ).length,
-
-            losses:
-                buyTrades.filter(
-                    trade =>
-                        trade.points <= 0
-                ).length,
-
-            winRate:
-                buyTrades.length > 0
-                    ? (
-                        buyTrades.filter(
-                            trade =>
-                                trade.points > 0
-                        ).length /
-                        buyTrades.length
-                    ) * 100
-                    : 0,
-
-            points:
-                buyTrades.reduce(
-                    (sum, trade) =>
-                        sum +
-                        trade.points,
-                    0
-                )
-
-        },
-
-        SELL: {
-
-            trades:
-                sellTrades.length,
-
-            wins:
-                sellTrades.filter(
-                    trade =>
-                        trade.points > 0
-                ).length,
-
-            losses:
-                sellTrades.filter(
-                    trade =>
-                        trade.points <= 0
-                ).length,
-
-            winRate:
-                sellTrades.length > 0
-                    ? (
-                        sellTrades.filter(
-                            trade =>
-                                trade.points > 0
-                        ).length /
-                        sellTrades.length
-                    ) * 100
-                    : 0,
-
-            points:
-                sellTrades.reduce(
-                    (sum, trade) =>
-                        sum +
-                        trade.points,
-                    0
-                )
-
-        }
-
+        SELL:
+            getDirectionStats(
+                sellTrades
+            )
     };
+
 
     const targetExits =
         trades.filter(
             trade =>
-                trade.reason === "TARGET"
+                trade.reason ===
+                "TARGET"
         ).length;
 
     const stopLossExits =
         trades.filter(
             trade =>
-                trade.reason === "STOP LOSS"
+                trade.reason ===
+                "STOP LOSS"
         ).length;
 
     const sessionCloseExits =
         trades.filter(
             trade =>
-                trade.reason === "SESSION CLOSE"
+                trade.reason ===
+                "SESSION CLOSE"
         ).length;
 
     const gapExits =
         trades.filter(
             trade =>
-                trade.reason.includes("GAP")
+                trade.reason.includes(
+                    "GAP"
+                )
         ).length;
 
     const endOfDataExits =
         trades.filter(
             trade =>
-                trade.reason === "END OF DATA"
+                trade.reason ===
+                "END OF DATA"
         ).length;
+
 
     return {
 
@@ -3605,9 +3362,7 @@ function runBacktest(
         diagnostics,
 
         trades
-
     };
-
 }
 
 
@@ -3632,7 +3387,6 @@ function extractCandles(
 
         result
             ?.candles
-
     ];
 
     for (
@@ -3640,17 +3394,16 @@ function extractCandles(
     ) {
 
         if (
-            Array.isArray(candidate)
+            Array.isArray(
+                candidate
+            )
         ) {
 
             return candidate;
-
         }
-
     }
 
     return [];
-
 }
 
 
@@ -3681,14 +3434,14 @@ export default async function handler(
 
                 error:
                     "INDSTOCKS_TOKEN is not configured"
-
             });
-
         }
+
 
         const interval =
             req.query?.interval ||
             "5minute";
+
 
         const allowedIntervals = [
 
@@ -3708,6 +3461,7 @@ export default async function handler(
 
         ];
 
+
         if (
             !allowedIntervals.includes(
                 interval
@@ -3723,10 +3477,9 @@ export default async function handler(
 
                 error:
                     "Invalid candle interval"
-
             });
-
         }
+
 
         // ==================================================
         // NIFTY 50
@@ -3737,6 +3490,7 @@ export default async function handler(
 
         const scripCode =
             `NIDX_${NIFTY_ID}`;
+
 
         // ==================================================
         // HISTORICAL WINDOW
@@ -3755,6 +3509,7 @@ export default async function handler(
                 1000
             );
 
+
         // ==================================================
         // API URL
         // ==================================================
@@ -3767,6 +3522,7 @@ export default async function handler(
             )}` +
             `&start_time=${startTime}` +
             `&end_time=${endTime}`;
+
 
         console.log(
             "================================"
@@ -3790,6 +3546,7 @@ export default async function handler(
             "================================"
         );
 
+
         // ==================================================
         // FETCH
         // ==================================================
@@ -3809,21 +3566,24 @@ export default async function handler(
 
                         Accept:
                             "application/json"
-
                     }
-
                 }
             );
+
 
         const text =
             await response.text();
 
+
         let result;
+
 
         try {
 
             result =
-                JSON.parse(text);
+                JSON.parse(
+                    text
+                );
 
         }
 
@@ -3844,10 +3604,9 @@ export default async function handler(
                         0,
                         1000
                     )
-
             });
-
         }
+
 
         console.log(
             `${CONFIG.VERSION} INDstocks response:`,
@@ -3858,6 +3617,7 @@ export default async function handler(
                 3000
             )
         );
+
 
         // ==================================================
         // API ERROR
@@ -3878,10 +3638,9 @@ export default async function handler(
 
                 error:
                     result
-
             });
-
         }
+
 
         // ==================================================
         // EXTRACT
@@ -3892,12 +3651,16 @@ export default async function handler(
                 result
             );
 
+
         console.log(
             `${CONFIG.VERSION} raw candle count:`,
-            Array.isArray(rawCandles)
+            Array.isArray(
+                rawCandles
+            )
                 ? rawCandles.length
                 : 0
         );
+
 
         // ==================================================
         // NORMALIZE
@@ -3908,10 +3671,12 @@ export default async function handler(
                 rawCandles
             );
 
+
         console.log(
             `${CONFIG.VERSION} normalized candle count:`,
             candles.length
         );
+
 
         // ==================================================
         // INSUFFICIENT DATA
@@ -3981,7 +3746,6 @@ export default async function handler(
                         winRate: 0,
 
                         points: 0
-
                     },
 
                     SELL: {
@@ -3995,18 +3759,15 @@ export default async function handler(
                         winRate: 0,
 
                         points: 0
-
                     }
-
                 },
 
                 diagnostics: {},
 
                 trades: []
-
             });
-
         }
+
 
         // ==================================================
         // RUN BACKTEST
@@ -4016,6 +3777,7 @@ export default async function handler(
             runBacktest(
                 candles
             );
+
 
         // ==================================================
         // LOG RESULT
@@ -4097,6 +3859,7 @@ export default async function handler(
             "================================"
         );
 
+
         // ==================================================
         // RESPONSE
         // ==================================================
@@ -4172,12 +3935,13 @@ export default async function handler(
 
             trades:
                 backtest.trades
-
         });
 
     }
 
-    catch (error) {
+    catch (
+        error
+    ) {
 
         console.error(
             `${CONFIG.VERSION} BACKTEST ERROR:`,
@@ -4197,9 +3961,6 @@ export default async function handler(
             details:
                 error?.message ||
                 "Unknown error"
-
         });
-
     }
-
 }
