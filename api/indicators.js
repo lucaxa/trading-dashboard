@@ -2,13 +2,11 @@
 TradeMind Pro
 V4 Technical Indicator Engine
 
-Uses REAL historical candles.
-
-Indicators:
-- EMA 9
-- EMA 21
-- RSI 14
-- VWAP
+REAL historical candles
+EMA 9
+EMA 21
+RSI 14
+VWAP
 
 PAPER ANALYSIS ONLY.
 No orders are placed.
@@ -16,9 +14,7 @@ No orders are placed.
 
 function ema(values, period) {
 
-  if (
-    values.length < period
-  ) {
+  if (values.length < period) {
     return null;
   }
 
@@ -29,8 +25,7 @@ function ema(values, period) {
     values
       .slice(0, period)
       .reduce(
-        (sum, value) =>
-          sum + value,
+        (sum, value) => sum + value,
         0
       ) / period;
 
@@ -42,8 +37,7 @@ function ema(values, period) {
 
     emaValue =
       (
-        values[i] -
-        emaValue
+        values[i] - emaValue
       ) *
       multiplier +
       emaValue;
@@ -51,7 +45,6 @@ function ema(values, period) {
   }
 
   return emaValue;
-
 }
 
 
@@ -81,14 +74,9 @@ function rsi(
       values[i - 1];
 
     if (change > 0) {
-
       gains += change;
-
     } else {
-
-      losses +=
-        Math.abs(change);
-
+      losses += Math.abs(change);
     }
 
   }
@@ -110,16 +98,10 @@ function rsi(
       values[i - 1];
 
     const gain =
-      Math.max(
-        change,
-        0
-      );
+      Math.max(change, 0);
 
     const loss =
-      Math.max(
-        -change,
-        0
-      );
+      Math.max(-change, 0);
 
     averageGain =
       (
@@ -137,12 +119,8 @@ function rsi(
 
   }
 
-  if (
-    averageLoss === 0
-  ) {
-
+  if (averageLoss === 0) {
     return 100;
-
   }
 
   const rs =
@@ -153,19 +131,16 @@ function rsi(
     100 -
     100 / (1 + rs)
   );
-
 }
 
 
 function vwap(candles) {
 
   let cumulativeTPV = 0;
-
   let cumulativeVolume = 0;
 
   for (
-    const candle
-    of candles
+    const candle of candles
   ) {
 
     const high =
@@ -180,6 +155,15 @@ function vwap(candles) {
     const volume =
       Number(candle[5]);
 
+    if (
+      !Number.isFinite(high) ||
+      !Number.isFinite(low) ||
+      !Number.isFinite(close) ||
+      !Number.isFinite(volume)
+    ) {
+      continue;
+    }
+
     const typicalPrice =
       (
         high +
@@ -193,22 +177,16 @@ function vwap(candles) {
 
     cumulativeVolume +=
       volume;
-
   }
 
-  if (
-    cumulativeVolume === 0
-  ) {
-
+  if (cumulativeVolume === 0) {
     return null;
-
   }
 
   return (
     cumulativeTPV /
     cumulativeVolume
   );
-
 }
 
 
@@ -218,48 +196,27 @@ function extractCandles(data) {
     return [];
   }
 
-  /*
-  Common INDstocks structure.
-  */
-
-  if (
-    Array.isArray(data)
-  ) {
-
+  if (Array.isArray(data)) {
     return data;
-
   }
 
   if (
-    Array.isArray(
-      data.candles
-    )
+    Array.isArray(data.candles)
   ) {
-
     return data.candles;
-
   }
-
-  /*
-  Sometimes data is keyed
-  by security ID.
-  */
 
   if (
     typeof data === "object"
   ) {
 
     for (
-      const value
-      of Object.values(data)
+      const value of
+      Object.values(data)
     ) {
 
-      if (
-        Array.isArray(value)
-      ) {
-
+      if (Array.isArray(value)) {
         return value;
-
       }
 
       if (
@@ -270,15 +227,12 @@ function extractCandles(data) {
       ) {
 
         return value.candles;
-
       }
 
     }
-
   }
 
   return [];
-
 }
 
 
@@ -295,12 +249,9 @@ export default async function handler(
     if (!token) {
 
       return res.status(500).json({
-
         success: false,
-
         error:
           "INDSTOCKS_TOKEN is not configured"
-
       });
 
     }
@@ -310,8 +261,8 @@ export default async function handler(
       "5minute";
 
     /*
-    Same IDs already used
-    in api/quotes.js
+    Same IDs already working
+    with your quote endpoint.
     */
 
     const NIFTY_ID =
@@ -350,7 +301,6 @@ export default async function handler(
         url,
         {
           method: "GET",
-
           headers: {
             Authorization: token
           }
@@ -365,192 +315,43 @@ export default async function handler(
       return res.status(
         response.status
       ).json({
+        success: false,
+        error: result
+      });
+
+    }
+
+    const rawData =
+      result.data;
+
+    const candles =
+      extractCandles(rawData);
+
+    if (
+      candles.length === 0
+    ) {
+
+      return res.status(200).json({
 
         success: false,
 
-        error: result
+        error:
+          "No candles found",
+
+        rawData
 
       });
 
     }
 
     /*
-    Extract raw candles.
+    TEMPORARY DEBUG RESPONSE
+
+    We want to see the EXACT
+    candle structure returned
+    by INDstocks.
+
     */
-
-    const rawData =
-      result.data;
-
-    const candles =
-      extractCandles(
-        rawData
-      );
-
-    if (
-      candles.length === 0
-    ) {
-return res.status(200).json({
-
-  success: true,
-
-  interval,
-
-  candleCount:
-    candles.length,
-
-  sampleCandles:
-    candles.slice(0, 3),
-
-  firstCandle:
-    candles[0],
-
-  lastCandle:
-    candles[candles.length - 1]
-
-});
-      
-
-    }
-
-    /*
-    Extract closing prices.
-    */
-
-    const closes =
-      candles
-        .map(
-          candle =>
-            Number(candle[4])
-        )
-        .filter(
-          value =>
-            Number.isFinite(value)
-        );
-
-    const ema9 =
-      ema(
-        closes,
-        9
-      );
-
-    const ema21 =
-      ema(
-        closes,
-        21
-      );
-
-    const rsi14 =
-      rsi(
-        closes,
-        14
-      );
-
-    const currentPrice =
-      closes[
-        closes.length - 1
-      ];
-
-    const currentVWAP =
-      vwap(
-        candles
-      );
-
-    /*
-    Trend determination.
-    */
-
-    let trend =
-      "SIDEWAYS";
-
-    if (
-      ema9 &&
-      ema21
-    ) {
-
-      if (
-        ema9 > ema21
-      ) {
-
-        trend =
-          "BULLISH";
-
-      }
-
-      if (
-        ema9 < ema21
-      ) {
-
-        trend =
-          "BEARISH";
-
-      }
-
-    }
-
-    /*
-    RSI interpretation.
-    */
-
-    let momentum =
-      "NEUTRAL";
-
-    if (
-      rsi14 !== null
-    ) {
-
-      if (
-        rsi14 >= 60
-      ) {
-
-        momentum =
-          "POSITIVE";
-
-      }
-
-      if (
-        rsi14 <= 40
-      ) {
-
-        momentum =
-          "NEGATIVE";
-
-      }
-
-    }
-
-    /*
-    VWAP position.
-    */
-
-    let vwapPosition =
-      "NEUTRAL";
-
-    if (
-      currentVWAP &&
-      currentPrice
-    ) {
-
-      if (
-        currentPrice >
-        currentVWAP
-      ) {
-
-        vwapPosition =
-          "ABOVE";
-
-      }
-
-      if (
-        currentPrice <
-        currentVWAP
-      ) {
-
-        vwapPosition =
-          "BELOW";
-
-      }
-
-    }
 
     return res.status(200).json({
 
@@ -561,30 +362,16 @@ return res.status(200).json({
       candleCount:
         candles.length,
 
-      currentPrice,
+      sampleCandles:
+        candles.slice(0, 3),
 
-      indicators: {
+      firstCandle:
+        candles[0],
 
-        ema9,
-
-        ema21,
-
-        rsi14,
-
-        vwap:
-          currentVWAP
-
-      },
-
-      analysis: {
-
-        trend,
-
-        momentum,
-
-        vwapPosition
-
-      }
+      lastCandle:
+        candles[
+          candles.length - 1
+        ]
 
     });
 
