@@ -128,3 +128,43 @@ console.log(
         testIndicators
     )
 );
+// =========================
+// SHOW TEST RESULT ON PAGE
+// =========================
+
+document.addEventListener("DOMContentLoaded", function () {
+
+    const testBox = document.createElement("div");
+
+    testBox.style.cssText = `
+        margin: 20px;
+        padding: 20px;
+        background: #161b26;
+        border: 1px solid #2a3345;
+        border-radius: 16px;
+        color: white;
+        font-family: Arial, sans-serif;
+    `;
+
+    testBox.innerHTML = `
+        <h2>🧪 Strategy Engine Test</h2>
+
+        <p>Test Price: ${testCandle.c}</p>
+        <p>EMA 9: ${testIndicators.ema9}</p>
+        <p>EMA 21: ${testIndicators.ema21}</p>
+        <p>RSI 14: ${testIndicators.rsi14}</p>
+        <p>VWAP: ${testIndicators.vwap}</p>
+
+        <hr>
+
+        <h2>
+            Result:
+            ${result.signal}
+        </h2>
+
+        <p>${result.reason}</p>
+    `;
+
+    document.body.appendChild(testBox);
+
+});
