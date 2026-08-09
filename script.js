@@ -1692,9 +1692,10 @@ async function runV10Backtest() {
         true;
 
 
-    const button =
-        $("runBacktestBtn") ||
-        $("runV9Backtest");
+  const button =
+    $("runBacktestBtn") ||
+    $("runV9Backtest") ||
+    $("runV10Backtest");  
 
 
     if (
