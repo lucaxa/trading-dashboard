@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="theme-color"
+    content="#0b1220"
+  >
+
+  <title>TradeMind Pro</title>
+
+  <style>
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+      background: #0b1220;
+      color: #f8fafc;
+    }
+
+    .container {
+      width: min(1100px, 92%);
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    h1,
+    h2,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 6px;
+      font-size: 30px;
+    }
+
+    .subtitle {
+      margin-bottom: 0;
+      color: #94a3b8;
+    }
+
+    .market-status {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px 14px;
+      border: 1px solid #243244;
+      border-radius: 999px;
+      background: #111827;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #22c55e;
+    }
+
+    .dot.closed {
+      background: #64748b;
+    }
+
+    .market-grid,
+    .analysis-grid,
+    .trade-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .market-grid {
+      grid-template-columns: repeat(2, 1fr);
+      margin-bottom: 16px;
+    }
+
+    .analysis-grid,
+    .trade-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .market-card,
+    .signal-card,
+    .trade-card,
+    .info-card {
+      background: #111827;
+      border: 1px solid #243244;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .card-header,
+    .section-title,
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-header {
+      color: #cbd5e1;
+      font-weight: 700;
+    }
+
+    .badge,
+    .paper {
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: #1e293b;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .price {
+      margin: 18px 0 5px;
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    .change {
+      min-height: 20px;
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    .change.up {
+      color: #22c55e;
+    }
+
+    .change.down {
+      color: #ef4444;
+    }
+
+    .mini-status {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid #243244;
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    .mini-status strong {
+      color: #f8fafc;
+    }
+
+    .section-title {
+      margin-bottom: 20px;
+    }
+
+    .section-title h2,
+    .info-card h2 {
+      margin-bottom: 0;
+      font-size: 18px;
+    }
+
+    #analysisStatus {
+      color: #22c55e;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .analysis-grid > div,
+    .trade-grid > div {
+      padding: 16px;
+      border-radius: 12px;
+      background: #0b1220;
+      border: 1px solid #1e293b;
+    }
+
+    .analysis-grid span,
+    .trade-grid span {
+      display: block;
+      margin-bottom: 8px;
+      color: #94a3b8;
+      font-size: 12px;
+    }
+
+    .analysis-grid strong,
+    .trade-grid strong {
+      font-size: 18px;
+    }
+
+    #signal {
+      font-size: 22px;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 20px;
+      padding: 14px 18px;
+      border: 0;
+      border-radius: 10px;
+      background: #2563eb;
+      color: white;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    button:hover {
+      opacity: 0.92;
+    }
+
+    .status-row {
+      padding: 12px 0;
+      border-bottom: 1px solid #243244;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    .status-row:last-of-type {
+      border-bottom: 0;
+    }
+
+    .status-row strong {
+      color: #f8fafc;
+    }
+
+    .disabled {
+      color: #64748b !important;
+    }
+
+    .last-update {
+      margin-top: 18px;
+      color: #64748b;
+      font-size: 12px;
+    }
+
+    footer {
+      padding-top: 8px;
+      text-align: center;
+      color: #64748b;
+      font-size: 12px;
+    }
+
+    @media (max-width: 760px) {
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .market-grid,
+      .analysis-grid,
+      .trade-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .price {
+        font-size: 28px;
+      }
+
+    }
+
+  </style>
+
+</head>
+
+
+<body>
+
+  <main class="container">
+
+    <header class="topbar">
+
+      <div>
+        <h1>TradeMind Pro</h1>
+        <p class="subtitle">
+          Indian Intraday Trading Dashboard
+        </p>
+      </div>
+
+      <div class="market-status">
+
+        <span
+          id="statusDot"
+          class="dot"
+        ></span>
+
+        <span id="marketStatus">
+          CHECKING
+        </span>
+
+      </div>
+
+    </header>
+
+
+    <!-- MARKET DATA -->
+
+    <section class="market-grid">
+
+      <div class="market-card">
+
+        <div class="card-header">
+
+          <span>NIFTY 50</span>
+
+          <span class="badge">
+            INDEX
+          </span>
+
+        </div>
+
+        <div
+          id="niftyPrice"
+          class="price"
+        >
+          --
+        </div>
+
+        <div
+          id="niftyChange"
+          class="change"
+        >
+          Waiting for data
+        </div>
+
+        <div class="mini-status">
+
+          <span>Trend</span>
+
+          <strong id="niftyTrend">
+            --
+          </strong>
+
+        </div>
+
+      </div>
+
+
+      <div class="market-card">
+
+        <div class="card-header">
+
+          <span>BANKNIFTY</span>
+
+          <span class="badge">
+            INDEX
+          </span>
+
+        </div>
+
+        <div
+          id="bankPrice"
+          class="price"
+        >
+          --
+        </div>
+
+        <div
+          id="bankChange"
+          class="change"
+        >
+          Waiting for data
+        </div>
+
+        <div class="mini-status">
+
+          <span>Trend</span>
+
+          <strong id="bankTrend">
+            --
+          </strong>
+
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- MARKET ANALYSIS -->
+
+    <section class="signal-card">
+
+      <div class="section-title">
+
+        <h2>Market Analysis</h2>
+
+        <span id="analysisStatus">
+          CONNECTING
+        </span>
+
+      </div>
+
+
+      <div class="analysis-grid">
+
+        <div>
+
+          <span>Trend</span>
+
+          <strong id="trend">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>Momentum</span>
+
+          <strong id="momentum">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>Volatility</span>
+
+          <strong id="volatility">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>Signal</span>
+
+          <strong id="signal">
+            WAIT
+          </strong>
+
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- TRADE SETUP -->
+
+    <section class="trade-card">
+
+      <div class="section-title">
+
+        <h2>Trade Setup</h2>
+
+        <span class="paper">
+          PAPER MODE
+        </span>
+
+      </div>
+
+
+      <div class="trade-grid">
+
+        <div>
+
+          <span>Entry</span>
+
+          <strong id="entry">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>Stop Loss</span>
+
+          <strong id="stoploss">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>Target</span>
+
+          <strong id="target">
+            --
+          </strong>
+
+        </div>
+
+
+        <div>
+
+          <span>Risk / Reward</span>
+
+          <strong id="riskReward">
+            --
+          </strong>
+
+        </div>
+
+      </div>
+
+
+      <button id="paperTradeBtn">
+        PAPER TRADE
+      </button>
+
+    </section>
+
+
+    <!-- SYSTEM STATUS -->
+
+    <section class="info-card">
+
+      <h2>
+        System Status
+      </h2>
+
+
+      <div class="status-row">
+
+        <span>Market Data</span>
+
+        <strong id="dataStatus">
+          INDSTOCKS
+        </strong>
+
+      </div>
+
+
+      <div class="status-row">
+
+        <span>Data Source</span>
+
+        <strong>
+          INDmoney / INDstocks
+        </strong>
+
+      </div>
+
+
+      <div class="status-row">
+
+        <span>Strategy Engine</span>
+
+        <strong>
+          ACTIVE
+        </strong>
+
+      </div>
+
+
+      <div class="status-row">
+
+        <span>Historical Candles</span>
+
+        <strong id="candleStatus">
+          5-MINUTE
+        </strong>
+
+      </div>
+
+
+      <div class="status-row">
+
+        <span>Live Trading</span>
+
+        <strong class="disabled">
+          DISABLED
+        </strong>
+
+      </div>
+
+
+      <div class="last-update">
+
+        Last update:
+        <span id="lastUpdate">
+          --
+        </span>
+
+      </div>
+
+    </section>
+
+
+    <footer>
+      TradeMind Pro • V4 • Paper Trading Only
+    </footer>
+
+  </main>
+
+
+  <!--
+    IMPORTANT:
+    strategy.js must load before script.js.
+  -->
+
+  <script src="./strategy.js"></script>
+
+  <script src="./script.js"></script>
+
+</body>
+
+</html>
