@@ -2,27 +2,31 @@
 TradeMind Pro
 V9 Frontend Controller
 
-INDstocks → Vercel → Dashboard
+INDstocks → Vercel
+             ↓
+       Live Market Data
+             ↓
+       Technical Indicators
+             ↓
+       V9 Historical Backtest
 
-V9 FEATURES:
+Features:
 - Live NIFTY 50
 - Live BANKNIFTY
-- Historical candle fallback
+- Historical indicators
 - EMA 9
 - EMA 21
 - RSI 14
 - VWAP
 - ATR 14
 - Swing High / Swing Low
-- V8 Confirmation Strategy
-- Historical Backtesting
-- BUY / SELL simulation
-- Entry / Stop Loss / Target
-- Win Rate
-- Profit Factor
-- Max Drawdown
-- Average Win / Loss
-- Total Points
+- V8 confirmation strategy
+- Buy / Sell score
+- Strategy confidence
+- Dynamic Entry / Stop Loss / Target
+- V9 Historical Backtest
+- Backtest statistics
+- Trade history
 
 PAPER TRADING ONLY.
 NO REAL ORDERS.
@@ -43,17 +47,19 @@ const state = {
 
     indicators: null,
 
+    backtest: null,
+
     connected: false,
 
     lastUpdate: null,
 
-    backtest: null
+    backtestRunning: false
 
 };
 
 
 // ======================================================
-// DOM HELPERS
+// DOM
 // ======================================================
 
 function $(id) {
@@ -76,52 +82,8 @@ function setText(id, value) {
 }
 
 
-// V9 supports several possible IDs.
-// This makes the controller safer if
-// the HTML naming changed slightly.
-
-function setTextAny(ids, value) {
-
-    for (const id of ids) {
-
-        const element = $(id);
-
-        if (element) {
-
-            element.textContent = value;
-
-            return true;
-
-        }
-
-    }
-
-    return false;
-
-}
-
-
-function getElementAny(ids) {
-
-    for (const id of ids) {
-
-        const element = $(id);
-
-        if (element) {
-
-            return element;
-
-        }
-
-    }
-
-    return null;
-
-}
-
-
 // ======================================================
-// FORMAT HELPERS
+// FORMATTING
 // ======================================================
 
 function formatPrice(value) {
@@ -135,23 +97,17 @@ function formatPrice(value) {
     }
 
     return number.toLocaleString(
-
         "en-IN",
-
         {
-
             minimumFractionDigits: 2,
-
             maximumFractionDigits: 2
-
         }
-
     );
 
 }
 
 
-function formatIndicator(value) {
+function formatNumber(value) {
 
     const number = Number(value);
 
@@ -166,7 +122,7 @@ function formatIndicator(value) {
 }
 
 
-function formatPoints(value) {
+function formatPercent(value) {
 
     const number = Number(value);
 
@@ -176,7 +132,100 @@ function formatPoints(value) {
 
     }
 
-    return number.toFixed(2);
+    return `${number.toFixed(2)}%`;
+
+}
+
+
+// ======================================================
+// API FETCH
+// ======================================================
+
+async function apiFetch(url) {
+
+    console.log(
+        "TradeMind API request:",
+        url
+    );
+
+    const response =
+        await fetch(
+            url,
+            {
+                method: "GET",
+                cache: "no-store",
+
+                headers: {
+                    "Accept":
+                        "application/json"
+                }
+            }
+        );
+
+
+    const text =
+        await response.text();
+
+
+    let data;
+
+
+    try {
+
+        data =
+            JSON.parse(text);
+
+    }
+
+    catch {
+
+        throw new Error(
+            `Invalid API response (${response.status})`
+        );
+
+    }
+
+
+    console.log(
+        "TradeMind API response:",
+        data
+    );
+
+
+    if (!response.ok) {
+
+        const message =
+            typeof data.error === "string"
+                ? data.error
+                : JSON.stringify(
+                    data.error || data
+                );
+
+
+        throw new Error(
+            message ||
+            `API error ${response.status}`
+        );
+
+    }
+
+
+    if (data.success === false) {
+
+        throw new Error(
+
+            typeof data.error === "string"
+                ? data.error
+                : JSON.stringify(
+                    data.error
+                )
+
+        );
+
+    }
+
+
+    return data;
 
 }
 
@@ -187,13 +236,19 @@ function formatPoints(value) {
 
 function extractPrice(quote) {
 
-    if (typeof quote === "number") {
+    if (
+        typeof quote === "number"
+    ) {
 
         return quote;
 
     }
 
-    if (!quote || typeof quote !== "object") {
+
+    if (
+        !quote ||
+        typeof quote !== "object"
+    ) {
 
         return null;
 
@@ -203,21 +258,32 @@ function extractPrice(quote) {
     const fields = [
 
         "ltp",
+
         "last_price",
+
         "lastPrice",
+
         "price",
+
         "close",
+
         "lp",
+
         "last_traded_price",
+
         "lastTradedPrice"
 
     ];
 
 
-    for (const field of fields) {
+    for (
+        const field of fields
+    ) {
 
         const value =
-            Number(quote[field]);
+            Number(
+                quote[field]
+            );
 
 
         if (
@@ -243,7 +309,9 @@ function extractPrice(quote) {
 
 function extractQuotes(data) {
 
-    if (Array.isArray(data)) {
+    if (
+        Array.isArray(data)
+    ) {
 
         return data;
 
@@ -260,38 +328,47 @@ function extractQuotes(data) {
     }
 
 
-    if (Array.isArray(data.data)) {
+    if (
+        Array.isArray(data.data)
+    ) {
 
         return data.data;
 
     }
 
 
-    if (Array.isArray(data.quotes)) {
+    if (
+        Array.isArray(data.quotes)
+    ) {
 
         return data.quotes;
 
     }
 
 
-    if (Array.isArray(data.results)) {
+    if (
+        Array.isArray(data.results)
+    ) {
 
         return data.results;
 
     }
 
 
-    if (Array.isArray(data.items)) {
+    if (
+        Array.isArray(data.items)
+    ) {
 
         return data.items;
 
     }
 
 
-    return Object.values(data).filter(
+    return Object.values(
+        data
+    ).filter(
 
         value =>
-
             value &&
             typeof value === "object" &&
             !Array.isArray(value)
@@ -334,15 +411,25 @@ function findInstrument(
                 ).toLowerCase();
 
 
-            if (wanted === "nifty") {
+            if (
+                wanted === "nifty"
+            ) {
 
                 return (
 
-                    text.includes("40000001") ||
+                    text.includes(
+                        "40000001"
+                    ) ||
 
                     (
-                        text.includes("nifty") &&
-                        !text.includes("banknifty")
+                        text.includes(
+                            "nifty"
+                        ) &&
+
+                        !text.includes(
+                            "banknifty"
+                        )
+
                     )
 
                 );
@@ -350,13 +437,19 @@ function findInstrument(
             }
 
 
-            if (wanted === "banknifty") {
+            if (
+                wanted === "banknifty"
+            ) {
 
                 return (
 
-                    text.includes("40000003") ||
+                    text.includes(
+                        "40000003"
+                    ) ||
 
-                    text.includes("banknifty")
+                    text.includes(
+                        "banknifty"
+                    )
 
                 );
 
@@ -368,118 +461,6 @@ function findInstrument(
         }
 
     ) || null;
-
-}
-
-
-// ======================================================
-// API FETCH
-// ======================================================
-
-async function apiFetch(url) {
-
-    console.log(
-        "TradeMind API request:",
-        url
-    );
-
-
-    const response =
-        await fetch(
-
-            url,
-
-            {
-
-                method: "GET",
-
-                cache: "no-store",
-
-                headers: {
-
-                    "Accept":
-                        "application/json"
-
-                }
-
-            }
-
-        );
-
-
-    const text =
-        await response.text();
-
-
-    let data;
-
-
-    try {
-
-        data =
-            JSON.parse(text);
-
-    }
-
-    catch {
-
-        throw new Error(
-
-            `Invalid API response (${response.status})`
-
-        );
-
-    }
-
-
-    console.log(
-        "TradeMind API response:",
-        url,
-        data
-    );
-
-
-    if (!response.ok) {
-
-        const message =
-
-            typeof data.error === "string"
-
-                ? data.error
-
-                : JSON.stringify(
-                    data.error || data
-                );
-
-
-        throw new Error(
-
-            message ||
-            `API error ${response.status}`
-
-        );
-
-    }
-
-
-    if (data.success === false) {
-
-        throw new Error(
-
-            typeof data.error === "string"
-
-                ? data.error
-
-                : JSON.stringify(
-                    data.error
-                )
-
-        );
-
-    }
-
-
-    return data;
 
 }
 
@@ -500,10 +481,8 @@ async function fetchMarketData() {
 
         const quotes =
             extractQuotes(
-
                 result.data ??
                 result
-
             );
 
 
@@ -531,6 +510,18 @@ async function fetchMarketData() {
             extractPrice(
                 bankQuote
             );
+
+
+        console.log(
+            "NIFTY live price:",
+            niftyPrice
+        );
+
+
+        console.log(
+            "BANKNIFTY live price:",
+            bankPrice
+        );
 
 
         if (
@@ -597,20 +588,26 @@ async function fetchMarketData() {
         );
 
 
-        updateBankTrend();
-
-
         updateTime();
+
+
+        updateBankTrend();
 
     }
 
     catch (error) {
 
         console.error(
-            "TradeMind quote error:",
+            "TradeMind market error:",
             error
         );
 
+
+        /*
+        Do not destroy
+        historical indicator data
+        if quotes temporarily fail.
+        */
 
         setText(
             "marketStatus",
@@ -621,11 +618,6 @@ async function fetchMarketData() {
         setText(
             "dataStatus",
             "INDSTOCKS / FALLBACK"
-        );
-
-
-        updateStatusDot(
-            true
         );
 
     }
@@ -639,16 +631,15 @@ async function fetchMarketData() {
 
 function renderMarket() {
 
-    if (state.nifty) {
+    if (
+        state.nifty
+    ) {
 
         setText(
-
             "niftyPrice",
-
             formatPrice(
                 state.nifty.price
             )
-
         );
 
 
@@ -665,16 +656,15 @@ function renderMarket() {
     }
 
 
-    if (state.banknifty) {
+    if (
+        state.banknifty
+    ) {
 
         setText(
-
             "bankPrice",
-
             formatPrice(
                 state.banknifty.price
             )
-
         );
 
 
@@ -715,17 +705,12 @@ function renderChange(
 
 
     if (
-
         !Number.isFinite(current) ||
         !Number.isFinite(previous)
-
     ) {
 
         element.textContent =
             "Waiting for data";
-
-        element.className =
-            "change";
 
         return;
 
@@ -733,10 +718,13 @@ function renderChange(
 
 
     const difference =
-        current - previous;
+        current -
+        previous;
 
 
-    if (difference === 0) {
+    if (
+        difference === 0
+    ) {
 
         element.textContent =
             "No change";
@@ -750,31 +738,25 @@ function renderChange(
 
 
     const percent =
-
         previous !== 0
-
             ? (
                 difference /
                 previous
             ) * 100
-
             : 0;
 
 
     const direction =
-
         difference > 0
             ? "▲"
             : "▼";
 
 
     element.textContent =
-
         `${direction} ${Math.abs(difference).toFixed(2)} (${Math.abs(percent).toFixed(2)}%)`;
 
 
     element.className =
-
         difference > 0
             ? "change up"
             : "change down";
@@ -783,7 +765,7 @@ function renderChange(
 
 
 // ======================================================
-// FETCH INDICATORS
+// HISTORICAL INDICATORS
 // ======================================================
 
 async function fetchIndicatorData() {
@@ -798,9 +780,7 @@ async function fetchIndicatorData() {
 
         const result =
             await apiFetch(
-
                 "/api/indicators?interval=5minute"
-
             );
 
 
@@ -809,7 +789,7 @@ async function fetchIndicatorData() {
 
 
         console.log(
-            "TradeMind V9 indicators:",
+            "V9 indicators:",
             result
         );
 
@@ -823,65 +803,63 @@ async function fetchIndicatorData() {
 
 
         // ==================================================
-        // FALLBACK PRICE
+        // NIFTY FALLBACK
         // ==================================================
 
-        const niftyFallback =
+        const niftyClose =
             Number(
                 nifty.lastCandle?.c
             );
 
 
-        const bankFallback =
-            Number(
-                bank.lastCandle?.c
-            );
-
-
         if (
-
             !Number.isFinite(
                 state.nifty?.price
             ) &&
-
             Number.isFinite(
-                niftyFallback
+                niftyClose
             )
-
         ) {
 
             state.nifty = {
 
                 price:
-                    niftyFallback,
+                    niftyClose,
 
                 previous:
-                    niftyFallback
+                    niftyClose
 
             };
 
         }
 
 
-        if (
+        // ==================================================
+        // BANKNIFTY FALLBACK
+        // ==================================================
 
+        const bankClose =
+            Number(
+                bank.lastCandle?.c
+            );
+
+
+        if (
             !Number.isFinite(
                 state.banknifty?.price
             ) &&
-
             Number.isFinite(
-                bankFallback
+                bankClose
             )
-
         ) {
 
             state.banknifty = {
 
                 price:
-                    bankFallback,
+                    bankClose,
 
                 previous:
-                    bankFallback
+                    bankClose
 
             };
 
@@ -896,7 +874,7 @@ async function fetchIndicatorData() {
 
         renderV9Diagnostics();
 
-        inspectHistoricalData();
+        updateBankTrend();
 
 
         setText(
@@ -919,36 +897,26 @@ async function fetchIndicatorData() {
             "INDICATOR ERROR"
         );
 
-
-        setText(
-            "lastUpdate",
-            error.message
-        );
-
     }
 
 }
 
 
 // ======================================================
-// RENDER INDICATORS
+// INDICATORS
 // ======================================================
 
 function renderIndicators() {
 
-    const data =
-        state.indicators;
+    const nifty =
+        state.indicators?.nifty;
 
 
-    if (!data) {
+    if (!nifty) {
 
         return;
 
     }
-
-
-    const nifty =
-        data.nifty || {};
 
 
     const ema9 =
@@ -975,15 +943,16 @@ function renderIndicators() {
         );
 
 
-    if (
+    // ==================================================
+    // TREND
+    // ==================================================
 
+    if (
         Number.isFinite(ema9) &&
         Number.isFinite(ema21)
-
     ) {
 
         const trend =
-
             ema9 > ema21
                 ? "BULLISH"
                 : ema9 < ema21
@@ -1005,12 +974,15 @@ function renderIndicators() {
     }
 
 
+    // ==================================================
+    // RSI
+    // ==================================================
+
     if (
         Number.isFinite(rsi)
     ) {
 
         const momentum =
-
             rsi >= 60
                 ? "STRONG"
                 : rsi >= 50
@@ -1021,29 +993,29 @@ function renderIndicators() {
 
 
         setText(
-
             "momentum",
-
             `${momentum} (${rsi.toFixed(1)})`
-
         );
 
     }
 
 
+    // ==================================================
+    // VWAP
+    // ==================================================
+
     const price =
-        state.nifty?.price;
+        Number(
+            state.nifty?.price
+        );
 
 
     if (
-
         Number.isFinite(price) &&
         Number.isFinite(vwap)
-
     ) {
 
         setText(
-
             "volatility",
 
             price > vwap
@@ -1055,28 +1027,26 @@ function renderIndicators() {
     }
 
 
-    const candleCount =
+    // ==================================================
+    // CANDLES
+    // ==================================================
+
+    const count =
         Number(
             nifty.candleCount
         );
 
 
     if (
-        Number.isFinite(candleCount)
+        Number.isFinite(count)
     ) {
 
         setText(
-
             "candleStatus",
-
-            `${candleCount} CANDLES`
-
+            `${count} CANDLES`
         );
 
     }
-
-
-    updateBankTrend();
 
 }
 
@@ -1111,10 +1081,8 @@ function updateBankTrend() {
 
 
     if (
-
         !Number.isFinite(ema9) ||
         !Number.isFinite(ema21)
-
     ) {
 
         setText(
@@ -1128,7 +1096,6 @@ function updateBankTrend() {
 
 
     const trend =
-
         ema9 > ema21
             ? "BULLISH"
             : ema9 < ema21
@@ -1145,7 +1112,7 @@ function updateBankTrend() {
 
 
 // ======================================================
-// V8 LIVE STRATEGY
+// V8 STRATEGY
 // ======================================================
 
 function analyzeMarket() {
@@ -1185,6 +1152,12 @@ function analyzeMarket() {
         );
 
 
+    const atr =
+        Number(
+            nifty.atr14
+        );
+
+
     const price =
         Number(
             state.nifty?.price
@@ -1220,19 +1193,42 @@ function analyzeMarket() {
 
 
     if (
-
         !Number.isFinite(price) ||
         !Number.isFinite(ema9) ||
         !Number.isFinite(ema21) ||
         !Number.isFinite(rsi) ||
         !Number.isFinite(vwap)
-
     ) {
 
         setText(
             "signal",
             "WAIT"
         );
+
+
+        setText(
+            "strategyStatus",
+            "WAITING FOR DATA"
+        );
+
+
+        setText(
+            "buyScore",
+            "--"
+        );
+
+
+        setText(
+            "sellScore",
+            "--"
+        );
+
+
+        setText(
+            "confidence",
+            "--"
+        );
+
 
         return;
 
@@ -1246,9 +1242,13 @@ function analyzeMarket() {
     const reasons = [];
 
 
+    // ==================================================
     // EMA
+    // ==================================================
 
-    if (ema9 > ema21) {
+    if (
+        ema9 > ema21
+    ) {
 
         buyScore++;
 
@@ -1258,7 +1258,9 @@ function analyzeMarket() {
 
     }
 
-    else if (ema9 < ema21) {
+    else if (
+        ema9 < ema21
+    ) {
 
         sellScore++;
 
@@ -1269,7 +1271,9 @@ function analyzeMarket() {
     }
 
 
+    // ==================================================
     // RSI
+    // ==================================================
 
     if (
         rsi >= 55 &&
@@ -1298,9 +1302,13 @@ function analyzeMarket() {
     }
 
 
+    // ==================================================
     // VWAP
+    // ==================================================
 
-    if (price > vwap) {
+    if (
+        price > vwap
+    ) {
 
         buyScore++;
 
@@ -1310,7 +1318,9 @@ function analyzeMarket() {
 
     }
 
-    else if (price < vwap) {
+    else if (
+        price < vwap
+    ) {
 
         sellScore++;
 
@@ -1321,34 +1331,37 @@ function analyzeMarket() {
     }
 
 
-    // Candle direction
+    // ==================================================
+    // CANDLE
+    // ==================================================
 
     let candleBullish =
         false;
 
-
     let candleBearish =
+        false;
+
+    let candleStrong =
         false;
 
 
     if (
-
         Number.isFinite(open) &&
         Number.isFinite(high) &&
         Number.isFinite(low) &&
         Number.isFinite(close)
-
     ) {
 
         candleBullish =
             close > open;
 
-
         candleBearish =
             close < open;
 
 
-        if (candleBullish) {
+        if (
+            candleBullish
+        ) {
 
             buyScore++;
 
@@ -1358,7 +1371,9 @@ function analyzeMarket() {
 
         }
 
-        else if (candleBearish) {
+        else if (
+            candleBearish
+        ) {
 
             sellScore++;
 
@@ -1368,23 +1383,6 @@ function analyzeMarket() {
 
         }
 
-    }
-
-
-    // Candle strength
-
-    let candleStrong =
-        false;
-
-
-    if (
-
-        Number.isFinite(open) &&
-        Number.isFinite(high) &&
-        Number.isFinite(low) &&
-        Number.isFinite(close)
-
-    ) {
 
         const range =
             high - low;
@@ -1396,32 +1394,24 @@ function analyzeMarket() {
             );
 
 
-        if (
-
+        candleStrong =
             range > 0 &&
-            body / range >= 0.50
-
-        ) {
-
-            candleStrong =
-                true;
-
-        }
+            body / range >= 0.50;
 
     }
 
 
-    // Signal
+    // ==================================================
+    // SIGNAL
+    // ==================================================
 
     let signal =
         "WAIT";
 
 
     if (
-
         buyScore >= 4 &&
         buyScore > sellScore
-
     ) {
 
         signal =
@@ -1432,10 +1422,8 @@ function analyzeMarket() {
     }
 
     else if (
-
         sellScore >= 4 &&
         sellScore > buyScore
-
     ) {
 
         signal =
@@ -1446,10 +1434,8 @@ function analyzeMarket() {
     }
 
     else if (
-
         buyScore >= 3 &&
         buyScore > sellScore
-
     ) {
 
         signal =
@@ -1458,10 +1444,8 @@ function analyzeMarket() {
     }
 
     else if (
-
         sellScore >= 3 &&
         sellScore > buyScore
-
     ) {
 
         signal =
@@ -1470,7 +1454,9 @@ function analyzeMarket() {
     }
 
 
-    // Confidence
+    // ==================================================
+    // CONFIDENCE
+    // ==================================================
 
     const confidenceMap = {
 
@@ -1489,13 +1475,16 @@ function analyzeMarket() {
     };
 
 
-    let confidence =
+    const maximum =
+        Math.max(
+            buyScore,
+            sellScore
+        );
 
+
+    let confidence =
         confidenceMap[
-            Math.max(
-                buyScore,
-                sellScore
-            )
+            maximum
         ] ?? 0;
 
 
@@ -1526,6 +1515,10 @@ function analyzeMarket() {
     }
 
 
+    // ==================================================
+    // DISPLAY
+    // ==================================================
+
     setText(
         "buyScore",
         buyScore
@@ -1544,13 +1537,15 @@ function analyzeMarket() {
     );
 
 
-    const fill =
+    const confidenceFill =
         $("confidenceFill");
 
 
-    if (fill) {
+    if (
+        confidenceFill
+    ) {
 
-        fill.style.width =
+        confidenceFill.style.width =
             `${confidence}%`;
 
     }
@@ -1567,9 +1562,7 @@ function analyzeMarket() {
         "signalReason",
 
         signal === "WAIT"
-
             ? "Waiting for stronger confirmation"
-
             : reasons.join(" + ")
 
     );
@@ -1580,9 +1573,7 @@ function analyzeMarket() {
         "strategyStatus",
 
         signal === "WAIT"
-
             ? "WAITING FOR CONFIRMATION"
-
             : "ACTIVE — PAPER ANALYSIS"
 
     );
@@ -1590,125 +1581,8 @@ function analyzeMarket() {
 
     updateTradeSetup(
         price,
-        signal
-    );
-
-}
-
-
-// ======================================================
-// V9 DIAGNOSTICS
-// ======================================================
-
-function renderV9Diagnostics() {
-
-    const nifty =
-        state.indicators?.nifty;
-
-
-    if (!nifty) {
-
-        return;
-
-    }
-
-
-    setText(
-
-        "diagPrice",
-
-        formatPrice(
-            state.nifty?.price
-        )
-
-    );
-
-
-    setText(
-
-        "diagEma9",
-
-        formatPrice(
-            nifty.ema9
-        )
-
-    );
-
-
-    setText(
-
-        "diagEma21",
-
-        formatPrice(
-            nifty.ema21
-        )
-
-    );
-
-
-    setText(
-
-        "diagRsi",
-
-        formatIndicator(
-            nifty.rsi14
-        )
-
-    );
-
-
-    setText(
-
-        "diagVwap",
-
-        formatPrice(
-            nifty.vwap
-        )
-
-    );
-
-
-    setText(
-
-        "diagAtr",
-
-        formatIndicator(
-            nifty.atr14 ??
-            nifty.atr
-        )
-
-    );
-
-
-    const swingHigh =
-        nifty.swingHigh;
-
-
-    const swingLow =
-        nifty.swingLow;
-
-
-    setText(
-
-        "diagSwingHigh",
-
-        formatPrice(
-            swingHigh?.price ??
-            swingHigh
-        )
-
-    );
-
-
-    setText(
-
-        "diagSwingLow",
-
-        formatPrice(
-            swingLow?.price ??
-            swingLow
-        )
-
+        signal,
+        atr
     );
 
 }
@@ -1720,14 +1594,13 @@ function renderV9Diagnostics() {
 
 function updateTradeSetup(
     price,
-    signal
+    signal,
+    atr
 ) {
 
     if (
-
         !Number.isFinite(price) ||
         signal === "WAIT"
-
     ) {
 
         setText(
@@ -1735,50 +1608,45 @@ function updateTradeSetup(
             "--"
         );
 
-
         setText(
             "stoploss",
             "--"
         );
-
 
         setText(
             "target",
             "--"
         );
 
-
         setText(
             "riskReward",
             "--"
         );
-
 
         return;
 
     }
 
 
-    const nifty =
-        state.indicators?.nifty ||
-        {};
+    let risk;
 
 
-    const atr =
-        Number(
-            nifty.atr14 ??
-            nifty.atr
-        );
-
-
-    const risk =
-
+    if (
         Number.isFinite(atr) &&
         atr > 0
+    ) {
 
-            ? atr * 1.5
+        risk =
+            atr * 1.5;
 
-            : price * 0.001;
+    }
+
+    else {
+
+        risk =
+            price * 0.001;
+
+    }
 
 
     const reward =
@@ -1786,20 +1654,17 @@ function updateTradeSetup(
 
 
     const bullish =
-
         signal === "BUY BIAS" ||
         signal === "STRONG BUY";
 
 
     const stop =
-
         bullish
             ? price - risk
             : price + risk;
 
 
     const target =
-
         bullish
             ? price + reward
             : price - reward;
@@ -1832,10 +1697,10 @@ function updateTradeSetup(
 
 
 // ======================================================
-// V9 HISTORICAL DATA CHECK
+// V9 DIAGNOSTICS
 // ======================================================
 
-function getHistoricalCandles() {
+function renderV9Diagnostics() {
 
     const nifty =
         state.indicators?.nifty;
@@ -1843,1408 +1708,174 @@ function getHistoricalCandles() {
 
     if (!nifty) {
 
-        return [];
+        return;
 
     }
 
 
-    const possibleArrays = [
-
-        nifty.candles,
-
-        nifty.historicalCandles,
-
-        nifty.history,
-
-        nifty.data
-
-    ];
-
-
-    for (
-        const candles of possibleArrays
-    ) {
-
-        if (
-            Array.isArray(candles) &&
-            candles.length > 0
-        ) {
-
-            return candles;
-
-        }
-
-    }
-
-
-    return [];
-
-}
-
-
-// ======================================================
-// INSPECT HISTORICAL DATA
-// ======================================================
-
-function inspectHistoricalData() {
-
-    const candles =
-        getHistoricalCandles();
-
-
-    console.log(
-
-        "V9 historical candle count:",
-
-        candles.length
-
-    );
-
-
-    if (candles.length > 0) {
-
-        setTextAny(
-
-            [
-                "backtestStatus",
-                "v9BacktestStatus"
-            ],
-
-            `${candles.length} historical candles available`
-
-        );
-
-    }
-
-}
-
-
-// ======================================================
-// BACKTEST EMA
-// ======================================================
-
-function calculateEMA(
-    values,
-    period
-) {
-
-    if (
-        values.length < period
-    ) {
-
-        return null;
-
-    }
-
-
-    const multiplier =
-        2 / (period + 1);
-
-
-    let value =
-
-        values
-            .slice(0, period)
-            .reduce(
-                (sum, item) =>
-                    sum + item,
-                0
-            ) / period;
-
-
-    for (
-        let i = period;
-        i < values.length;
-        i++
-    ) {
-
-        value =
-
-            (
-                values[i] - value
-            ) *
-            multiplier +
-            value;
-
-    }
-
-
-    return value;
-
-}
-
-
-// ======================================================
-// BACKTEST RSI
-// ======================================================
-
-function calculateRSI(
-    values,
-    period = 14
-) {
-
-    if (
-        values.length <
-        period + 1
-    ) {
-
-        return null;
-
-    }
-
-
-    let gains = 0;
-
-    let losses = 0;
-
-
-    for (
-        let i = 1;
-        i <= period;
-        i++
-    ) {
-
-        const change =
-            values[i] -
-            values[i - 1];
-
-
-        if (change > 0) {
-
-            gains += change;
-
-        }
-
-        else {
-
-            losses +=
-                Math.abs(change);
-
-        }
-
-    }
-
-
-    let averageGain =
-        gains / period;
-
-
-    let averageLoss =
-        losses / period;
-
-
-    for (
-        let i = period + 1;
-        i < values.length;
-        i++
-    ) {
-
-        const change =
-            values[i] -
-            values[i - 1];
-
-
-        const gain =
-            Math.max(
-                change,
-                0
-            );
-
-
-        const loss =
-            Math.max(
-                -change,
-                0
-            );
-
-
-        averageGain =
-
-            (
-                averageGain *
-                (period - 1) +
-                gain
-            ) / period;
-
-
-        averageLoss =
-
-            (
-                averageLoss *
-                (period - 1) +
-                loss
-            ) / period;
-
-    }
-
-
-    if (
-        averageLoss === 0
-    ) {
-
-        return 100;
-
-    }
-
-
-    const rs =
-        averageGain /
-        averageLoss;
-
-
-    return (
-
-        100 -
-        100 /
-        (1 + rs)
-
-    );
-
-}
-
-
-// ======================================================
-// IST SESSION DATE
-// ======================================================
-
-function getISTDate(ts) {
-
-    const date =
-        new Date(
-            Number(ts) * 1000
-        );
-
-
-    const utc =
-        date.getTime();
-
-
-    return new Date(
-
-        utc +
-        (
-            5.5 *
-            60 *
-            60 *
-            1000
+    setText(
+        "diagPrice",
+        formatPrice(
+            state.nifty?.price
         )
-
-    )
-        .toISOString()
-        .slice(0, 10);
-
-}
+    );
 
 
-// ======================================================
-// BACKTEST VWAP
-// ======================================================
-
-function calculateVWAP(
-    candles
-) {
-
-    if (
-        !candles.length
-    ) {
-
-        return null;
-
-    }
+    setText(
+        "diagEma9",
+        formatPrice(
+            nifty.ema9
+        )
+    );
 
 
-    const latest =
-        candles[
-            candles.length - 1
-        ];
+    setText(
+        "diagEma21",
+        formatPrice(
+            nifty.ema21
+        )
+    );
 
 
-    const sessionDate =
-        getISTDate(
-            latest.ts
-        );
+    setText(
+        "diagRsi",
+        formatNumber(
+            nifty.rsi14
+        )
+    );
 
 
-    let totalTPV = 0;
-
-    let totalVolume = 0;
-
-
-    for (
-        const candle of candles
-    ) {
-
-        if (
-            getISTDate(
-                candle.ts
-            ) !== sessionDate
-        ) {
-
-            continue;
-
-        }
+    setText(
+        "diagVwap",
+        formatPrice(
+            nifty.vwap
+        )
+    );
 
 
-        const high =
-            Number(candle.h);
+    setText(
+        "diagAtr",
+        formatNumber(
+            nifty.atr14
+        )
+    );
 
 
-        const low =
-            Number(candle.l);
+    setText(
+        "diagSwingHigh",
+        formatPrice(
+            nifty.swingHigh?.price ??
+            nifty.swingHigh
+        )
+    );
 
 
-        const close =
-            Number(candle.c);
-
-
-        const volume =
-            Number(candle.v);
-
-
-        if (
-
-            !Number.isFinite(high) ||
-            !Number.isFinite(low) ||
-            !Number.isFinite(close) ||
-            !Number.isFinite(volume)
-
-        ) {
-
-            continue;
-
-        }
-
-
-        const typicalPrice =
-
-            (
-                high +
-                low +
-                close
-            ) / 3;
-
-
-        totalTPV +=
-
-            typicalPrice *
-            volume;
-
-
-        totalVolume +=
-            volume;
-
-    }
-
-
-    if (
-        totalVolume === 0
-    ) {
-
-        return null;
-
-    }
-
-
-    return (
-        totalTPV /
-        totalVolume
+    setText(
+        "diagSwingLow",
+        formatPrice(
+            nifty.swingLow?.price ??
+            nifty.swingLow
+        )
     );
 
 }
 
 
 // ======================================================
-// BACKTEST ATR
-// ======================================================
-
-function calculateATR(
-    candles,
-    period = 14
-) {
-
-    if (
-        candles.length <
-        period + 1
-    ) {
-
-        return null;
-
-    }
-
-
-    const ranges = [];
-
-
-    for (
-        let i = 1;
-        i < candles.length;
-        i++
-    ) {
-
-        const current =
-            candles[i];
-
-
-        const previous =
-            candles[i - 1];
-
-
-        const high =
-            Number(current.h);
-
-
-        const low =
-            Number(current.l);
-
-
-        const previousClose =
-            Number(previous.c);
-
-
-        if (
-
-            !Number.isFinite(high) ||
-            !Number.isFinite(low)
-
-        ) {
-
-            continue;
-
-        }
-
-
-        const range1 =
-            high - low;
-
-
-        const range2 =
-
-            Number.isFinite(
-                previousClose
-            )
-
-                ? Math.abs(
-                    high -
-                    previousClose
-                )
-
-                : range1;
-
-
-        const range3 =
-
-            Number.isFinite(
-                previousClose
-            )
-
-                ? Math.abs(
-                    low -
-                    previousClose
-                )
-
-                : range1;
-
-
-        ranges.push(
-
-            Math.max(
-                range1,
-                range2,
-                range3
-            )
-
-        );
-
-    }
-
-
-    if (
-        ranges.length < period
-    ) {
-
-        return null;
-
-    }
-
-
-    let atrValue =
-
-        ranges
-            .slice(0, period)
-            .reduce(
-                (sum, value) =>
-                    sum + value,
-                0
-            ) / period;
-
-
-    for (
-        let i = period;
-        i < ranges.length;
-        i++
-    ) {
-
-        atrValue =
-
-            (
-                atrValue *
-                (period - 1) +
-                ranges[i]
-            ) / period;
-
-    }
-
-
-    return atrValue;
-
-}
-
-
-// ======================================================
-// HISTORICAL STRATEGY
-// ======================================================
-
-function evaluateHistoricalCandle(
-    candles,
-    index
-) {
-
-    if (
-        index < 21
-    ) {
-
-        return null;
-
-    }
-
-
-    const history =
-        candles.slice(
-            0,
-            index + 1
-        );
-
-
-    const candle =
-        candles[index];
-
-
-    const closes =
-        history.map(
-            item =>
-                Number(item.c)
-        );
-
-
-    const ema9 =
-        calculateEMA(
-            closes,
-            9
-        );
-
-
-    const ema21 =
-        calculateEMA(
-            closes,
-            21
-        );
-
-
-    const rsi =
-        calculateRSI(
-            closes,
-            14
-        );
-
-
-    const vwap =
-        calculateVWAP(
-            history
-        );
-
-
-    const atr =
-        calculateATR(
-            history,
-            14
-        );
-
-
-    const open =
-        Number(candle.o);
-
-
-    const high =
-        Number(candle.h);
-
-
-    const low =
-        Number(candle.l);
-
-
-    const close =
-        Number(candle.c);
-
-
-    if (
-
-        !Number.isFinite(ema9) ||
-        !Number.isFinite(ema21) ||
-        !Number.isFinite(rsi) ||
-        !Number.isFinite(vwap) ||
-        !Number.isFinite(close)
-
-    ) {
-
-        return null;
-
-    }
-
-
-    let buyScore = 0;
-
-    let sellScore = 0;
-
-
-    // EMA
-
-    if (ema9 > ema21) {
-
-        buyScore++;
-
-    }
-
-    else if (ema9 < ema21) {
-
-        sellScore++;
-
-    }
-
-
-    // RSI
-
-    if (
-        rsi >= 55 &&
-        rsi < 70
-    ) {
-
-        buyScore++;
-
-    }
-
-    else if (
-        rsi <= 45 &&
-        rsi > 30
-    ) {
-
-        sellScore++;
-
-    }
-
-
-    // VWAP
-
-    if (close > vwap) {
-
-        buyScore++;
-
-    }
-
-    else if (close < vwap) {
-
-        sellScore++;
-
-    }
-
-
-    // Candle
-
-    const bullishCandle =
-        close > open;
-
-
-    const bearishCandle =
-        close < open;
-
-
-    if (bullishCandle) {
-
-        buyScore++;
-
-    }
-
-    else if (bearishCandle) {
-
-        sellScore++;
-
-    }
-
-
-    // Candle strength
-
-    let strongCandle =
-        false;
-
-
-    const range =
-        high - low;
-
-
-    const body =
-        Math.abs(
-            close - open
-        );
-
-
-    if (
-        range > 0 &&
-        body / range >= 0.50
-    ) {
-
-        strongCandle =
-            true;
-
-    }
-
-
-    // Signal
-
-    let signal =
-        "WAIT";
-
-
-    if (
-
-        buyScore >= 4 &&
-        buyScore > sellScore
-
-    ) {
-
-        signal =
-            strongCandle
-                ? "STRONG BUY"
-                : "BUY BIAS";
-
-    }
-
-    else if (
-
-        sellScore >= 4 &&
-        sellScore > buyScore
-
-    ) {
-
-        signal =
-            strongCandle
-                ? "STRONG SELL"
-                : "SELL BIAS";
-
-    }
-
-    else if (
-
-        buyScore >= 3 &&
-        buyScore > sellScore
-
-    ) {
-
-        signal =
-            "BUY BIAS";
-
-    }
-
-    else if (
-
-        sellScore >= 3 &&
-        sellScore > buyScore
-
-    ) {
-
-        signal =
-            "SELL BIAS";
-
-    }
-
-
-    return {
-
-        signal,
-
-        buyScore,
-
-        sellScore,
-
-        confidence:
-            signal === "WAIT"
-                ? 0
-                : Math.max(
-                    buyScore,
-                    sellScore
-                ),
-
-        entry:
-            close,
-
-        atr
-
-    };
-
-}
-
-
-// ======================================================
-// SIMULATE TRADE
-// ======================================================
-
-function simulateTrade(
-    candles,
-    entryIndex,
-    strategy
-) {
-
-    if (
-        !strategy ||
-        strategy.signal === "WAIT"
-    ) {
-
-        return null;
-
-    }
-
-
-    const entry =
-        Number(
-            strategy.entry
-        );
-
-
-    const atr =
-        Number(
-            strategy.atr
-        );
-
-
-    if (
-        !Number.isFinite(entry)
-    ) {
-
-        return null;
-
-    }
-
-
-    const risk =
-
-        Number.isFinite(atr) &&
-        atr > 0
-
-            ? atr * 1.5
-
-            : entry * 0.001;
-
-
-    const reward =
-        risk * 2;
-
-
-    const bullish =
-
-        strategy.signal === "BUY BIAS" ||
-        strategy.signal === "STRONG BUY";
-
-
-    const stop =
-
-        bullish
-            ? entry - risk
-            : entry + risk;
-
-
-    const target =
-
-        bullish
-            ? entry + reward
-            : entry - reward;
-
-
-    for (
-
-        let i =
-            entryIndex + 1;
-
-        i < candles.length;
-
-        i++
-
-    ) {
-
-        const candle =
-            candles[i];
-
-
-        const high =
-            Number(candle.h);
-
-
-        const low =
-            Number(candle.l);
-
-
-        const close =
-            Number(candle.c);
-
-
-        if (
-
-            !Number.isFinite(high) ||
-            !Number.isFinite(low) ||
-            !Number.isFinite(close)
-
-        ) {
-
-            continue;
-
-        }
-
-
-        // ==================================================
-        // BUY
-        // ==================================================
-
-        if (bullish) {
-
-            const stopHit =
-                low <= stop;
-
-
-            const targetHit =
-                high >= target;
-
-
-            /*
-            Conservative rule:
-            if both are hit in the same
-            candle, assume STOP first.
-            */
-
-            if (stopHit) {
-
-                return {
-
-                    signal:
-                        strategy.signal,
-
-                    entry,
-
-                    stop,
-
-                    target,
-
-                    exit:
-                        stop,
-
-                    points:
-                        stop - entry,
-
-                    result:
-                        "LOSS",
-
-                    entryIndex,
-
-                    exitIndex:
-                        i
-
-                };
-
-            }
-
-
-            if (targetHit) {
-
-                return {
-
-                    signal:
-                        strategy.signal,
-
-                    entry,
-
-                    stop,
-
-                    target,
-
-                    exit:
-                        target,
-
-                    points:
-                        target - entry,
-
-                    result:
-                        "WIN",
-
-                    entryIndex,
-
-                    exitIndex:
-                        i
-
-                };
-
-            }
-
-        }
-
-
-        // ==================================================
-        // SELL
-        // ==================================================
-
-        else {
-
-            const stopHit =
-                high >= stop;
-
-
-            const targetHit =
-                low <= target;
-
-
-            /*
-            Conservative:
-            STOP first if both touched.
-            */
-
-            if (stopHit) {
-
-                return {
-
-                    signal:
-                        strategy.signal,
-
-                    entry,
-
-                    stop,
-
-                    target,
-
-                    exit:
-                        stop,
-
-                    points:
-                        entry - stop,
-
-                    result:
-                        "LOSS",
-
-                    entryIndex,
-
-                    exitIndex:
-                        i
-
-                };
-
-            }
-
-
-            if (targetHit) {
-
-                return {
-
-                    signal:
-                        strategy.signal,
-
-                    entry,
-
-                    stop,
-
-                    target,
-
-                    exit:
-                        target,
-
-                    points:
-                        entry - target,
-
-                    result:
-                        "WIN",
-
-                    entryIndex,
-
-                    exitIndex:
-                        i
-
-                };
-
-            }
-
-        }
-
-    }
-
-
-    // ==================================================
-    // END OF DATA
-    // ==================================================
-
-    const finalCandle =
-        candles[
-            candles.length - 1
-        ];
-
-
-    const finalClose =
-        Number(
-            finalCandle.c
-        );
-
-
-    if (
-        !Number.isFinite(
-            finalClose
-        )
-    ) {
-
-        return null;
-
-    }
-
-
-    const points =
-
-        bullish
-
-            ? finalClose - entry
-
-            : entry - finalClose;
-
-
-    return {
-
-        signal:
-            strategy.signal,
-
-        entry,
-
-        stop,
-
-        target,
-
-        exit:
-            finalClose,
-
-        points,
-
-        result:
-            points >= 0
-                ? "WIN"
-                : "LOSS",
-
-        entryIndex,
-
-        exitIndex:
-            candles.length - 1
-
-    };
-
-}
-
-
-// ======================================================
-// RUN V9 BACKTEST
+// V9 BACKTEST
 // ======================================================
 
 async function runV9Backtest() {
 
-    const button =
-        getElementAny(
+    if (
+        state.backtestRunning
+    ) {
 
-            [
-                "runV9Backtest",
-                "v9BacktestBtn",
-                "backtestBtn"
-            ]
-
+        console.log(
+            "V9 backtest already running."
         );
 
+        return;
 
-    if (button) {
+    }
 
-        button.disabled =
+
+    state.backtestRunning =
+        true;
+
+
+    const button =
+        $("runBacktestBtn");
+
+
+    /*
+    Support alternate ID in case
+    the HTML uses runV9Backtest.
+    */
+
+    const actualButton =
+        button ||
+        $("runV9Backtest");
+
+
+    if (
+        actualButton
+    ) {
+
+        actualButton.disabled =
             true;
 
-
-        button.textContent =
+        actualButton.textContent =
             "RUNNING V9 BACKTEST...";
 
     }
 
 
-    setTextAny(
+    // ==================================================
+    // RESET UI
+    // ==================================================
 
-        [
-            "backtestStatus",
-            "v9BacktestStatus"
-        ],
+    resetBacktestDisplay();
 
-        "Loading historical candles..."
 
+    setText(
+        "backtestStatus",
+        "Running historical simulation..."
     );
 
 
     try {
 
-        /*
-        Make sure fresh indicator
-        data exists.
-        */
-
-        await fetchIndicatorData();
-
-
-        const candles =
-            getHistoricalCandles();
-
-
         console.log(
-            "V9 BACKTEST CANDLES:",
-            candles
+            "================================"
         );
 
 
-        if (
-            !Array.isArray(candles) ||
-            candles.length < 30
-        ) {
-
-            throw new Error(
-
-                "Historical candle data unavailable. The API must return nifty.candles."
-
-            );
-
-        }
+        console.log(
+            "TradeMind V9 BACKTEST START"
+        );
 
 
-        /*
-        Sort chronologically.
-        */
-
-        const sortedCandles =
-            [...candles].sort(
-
-                (a, b) =>
-
-                    Number(a.ts) -
-                    Number(b.ts)
-
+        const result =
+            await apiFetch(
+                "/api/backtest?interval=5minute"
             );
 
 
-        const trades = [];
-
-
-        /*
-        Only one trade at a time.
-        */
-
-        let index = 21;
-
-
-        while (
-            index <
-            sortedCandles.length - 1
-        ) {
-
-            const strategy =
-                evaluateHistoricalCandle(
-
-                    sortedCandles,
-
-                    index
-
-                );
-
-
-            if (
-                strategy &&
-                strategy.signal !== "WAIT"
-            ) {
-
-                const trade =
-                    simulateTrade(
-
-                        sortedCandles,
-
-                        index,
-
-                        strategy
-
-                    );
-
-
-                if (trade) {
-
-                    trades.push(
-                        trade
-                    );
-
-
-                    /*
-                    Jump to the candle
-                    after the trade exits.
-                    */
-
-                    index =
-                        trade.exitIndex + 1;
-
-
-                    continue;
-
-                }
-
-            }
-
-
-            index++;
-
-        }
-
-
-        const stats =
-            calculateBacktestStats(
-
-                sortedCandles,
-
-                trades
-
-            );
+        console.log(
+            "V9 BACKTEST RESULT:",
+            result
+        );
 
 
         state.backtest =
-            stats;
+            result;
 
 
         renderBacktest(
-            stats
+            result
         );
 
-
-        console.log(
-            "================================"
-        );
-
-
-        console.log(
-            "V9 BACKTEST COMPLETE"
-        );
-
-
-        console.log(
-            stats
-        );
-
-
-        console.log(
-            "================================"
-        );
 
     }
 
@@ -3256,28 +1887,27 @@ async function runV9Backtest() {
         );
 
 
-        setTextAny(
-
-            [
-                "backtestStatus",
-                "v9BacktestStatus"
-            ],
-
+        setText(
+            "backtestStatus",
             `Backtest Error: ${error.message}`
-
         );
 
     }
 
     finally {
 
-        if (button) {
+        state.backtestRunning =
+            false;
 
-            button.disabled =
+
+        if (
+            actualButton
+        ) {
+
+            actualButton.disabled =
                 false;
 
-
-            button.textContent =
+            actualButton.textContent =
                 "RUN V9 BACKTEST";
 
         }
@@ -3288,213 +1918,50 @@ async function runV9Backtest() {
 
 
 // ======================================================
-// BACKTEST STATISTICS
+// RESET BACKTEST
 // ======================================================
 
-function calculateBacktestStats(
-    candles,
-    trades
-) {
+function resetBacktestDisplay() {
 
-    const totalTrades =
-        trades.length;
+    const fields = [
 
+        "candlesTested",
 
-    const buyTrades =
-        trades.filter(
+        "totalTrades",
 
-            trade =>
+        "buyTrades",
 
-                trade.signal === "BUY BIAS" ||
-                trade.signal === "STRONG BUY"
+        "sellTrades",
 
-        );
+        "winningTrades",
 
+        "losingTrades",
 
-    const sellTrades =
-        trades.filter(
+        "winRate",
 
-            trade =>
+        "totalPoints",
 
-                trade.signal === "SELL BIAS" ||
-                trade.signal === "STRONG SELL"
+        "averageWin",
 
-        );
+        "averageLoss",
 
+        "profitFactor",
 
-    const winningTrades =
-        trades.filter(
+        "maxDrawdown"
 
-            trade =>
-                trade.result === "WIN"
-
-        );
-
-
-    const losingTrades =
-        trades.filter(
-
-            trade =>
-                trade.result === "LOSS"
-
-        );
-
-
-    const totalPoints =
-        trades.reduce(
-
-            (sum, trade) =>
-                sum + trade.points,
-
-            0
-
-        );
-
-
-    const winningPoints =
-        winningTrades.reduce(
-
-            (sum, trade) =>
-                sum + trade.points,
-
-            0
-
-        );
-
-
-    const losingPoints =
-        losingTrades.reduce(
-
-            (sum, trade) =>
-                sum + trade.points,
-
-            0
-
-        );
-
-
-    const averageWin =
-
-        winningTrades.length > 0
-
-            ? winningPoints /
-              winningTrades.length
-
-            : 0;
-
-
-    const averageLoss =
-
-        losingTrades.length > 0
-
-            ? Math.abs(
-                losingPoints /
-                losingTrades.length
-            )
-
-            : 0;
-
-
-    const profitFactor =
-
-        losingPoints < 0
-
-            ? winningPoints /
-              Math.abs(losingPoints)
-
-            : winningPoints > 0
-                ? Infinity
-                : 0;
-
-
-    const winRate =
-
-        totalTrades > 0
-
-            ? (
-                winningTrades.length /
-                totalTrades
-            ) * 100
-
-            : 0;
-
-
-    // ==================================================
-    // EQUITY / DRAWDOWN
-    // ==================================================
-
-    let equity = 0;
-
-    let peak = 0;
-
-    let maxDrawdown = 0;
+    ];
 
 
     for (
-        const trade of trades
+        const id of fields
     ) {
 
-        equity +=
-            trade.points;
-
-
-        peak =
-            Math.max(
-                peak,
-                equity
-            );
-
-
-        const drawdown =
-            peak - equity;
-
-
-        maxDrawdown =
-            Math.max(
-                maxDrawdown,
-                drawdown
-            );
+        setText(
+            id,
+            "--"
+        );
 
     }
-
-
-    return {
-
-        candlesTested:
-            candles.length,
-
-        totalTrades,
-
-        buyTrades:
-            buyTrades.length,
-
-        sellTrades:
-            sellTrades.length,
-
-        winningTrades:
-            winningTrades.length,
-
-        losingTrades:
-            losingTrades.length,
-
-        winRate,
-
-        totalPoints,
-
-        averageWin,
-
-        averageLoss,
-
-        profitFactor,
-
-        maxDrawdown,
-
-        finalEquity:
-            equity,
-
-        trades
-
-    };
 
 }
 
@@ -3504,214 +1971,253 @@ function calculateBacktestStats(
 // ======================================================
 
 function renderBacktest(
-    stats
+    result
 ) {
 
-    if (!stats) {
+    if (
+        !result
+    ) {
 
         return;
 
     }
 
 
-    setTextAny(
+    // ==================================================
+    // CANDLES
+    // ==================================================
 
-        [
-            "backtestCandles",
-            "candlesTested",
-            "v9Candles"
-        ],
-
-        stats.candlesTested
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestTrades",
-            "totalTrades",
-            "v9TotalTrades"
-        ],
-
-        stats.totalTrades
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestBuyTrades",
-            "buyTrades",
-            "v9BuyTrades"
-        ],
-
-        stats.buyTrades
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestSellTrades",
-            "sellTrades",
-            "v9SellTrades"
-        ],
-
-        stats.sellTrades
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestWinningTrades",
-            "winningTrades",
-            "v9WinningTrades"
-        ],
-
-        stats.winningTrades
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestLosingTrades",
-            "losingTrades",
-            "v9LosingTrades"
-        ],
-
-        stats.losingTrades
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestWinRate",
-            "winRate",
-            "v9WinRate"
-        ],
-
-        `${stats.winRate.toFixed(2)}%`
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestTotalPoints",
-            "totalPoints",
-            "v9TotalPoints"
-        ],
-
-        formatPoints(
-            stats.totalPoints
-        )
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestAverageWin",
-            "averageWin",
-            "v9AverageWin"
-        ],
-
-        formatPoints(
-            stats.averageWin
-        )
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestAverageLoss",
-            "averageLoss",
-            "v9AverageLoss"
-        ],
-
-        formatPoints(
-            stats.averageLoss
-        )
-
-    );
-
-
-    setTextAny(
-
-        [
-            "backtestProfitFactor",
-            "profitFactor",
-            "v9ProfitFactor"
-        ],
-
+    setText(
+        "candlesTested",
         Number.isFinite(
-            stats.profitFactor
+            Number(
+                result.candlesTested
+            )
         )
-
-            ? stats.profitFactor.toFixed(2)
-
-            : "∞"
-
+            ? result.candlesTested
+            : "--"
     );
 
 
-    setTextAny(
+    // ==================================================
+    // TRADES
+    // ==================================================
 
-        [
-            "backtestMaxDrawdown",
-            "maxDrawdown",
-            "v9MaxDrawdown"
-        ],
-
-        formatPoints(
-            stats.maxDrawdown
-        )
-
+    setText(
+        "totalTrades",
+        result.totalTrades ??
+        "--"
     );
 
 
-    setTextAny(
+    setText(
+        "buyTrades",
+        result.buyTrades ??
+        "--"
+    );
 
-        [
+
+    setText(
+        "sellTrades",
+        result.sellTrades ??
+        "--"
+    );
+
+
+    // ==================================================
+    // RESULTS
+    // ==================================================
+
+    setText(
+        "winningTrades",
+        result.winningTrades ??
+        "--"
+    );
+
+
+    setText(
+        "losingTrades",
+        result.losingTrades ??
+        "--"
+    );
+
+
+    // ==================================================
+    // WIN RATE
+    // ==================================================
+
+    setText(
+        "winRate",
+        formatPercent(
+            result.winRate
+        )
+    );
+
+
+    // ==================================================
+    // POINTS
+    // ==================================================
+
+    setText(
+        "totalPoints",
+        formatNumber(
+            result.totalPoints
+        )
+    );
+
+
+    // ==================================================
+    // AVERAGE WIN
+    // ==================================================
+
+    setText(
+        "averageWin",
+        formatNumber(
+            result.averageWin
+        )
+    );
+
+
+    // ==================================================
+    // AVERAGE LOSS
+    // ==================================================
+
+    setText(
+        "averageLoss",
+        formatNumber(
+            result.averageLoss
+        )
+    );
+
+
+    // ==================================================
+    // PROFIT FACTOR
+    // ==================================================
+
+    const pf =
+        Number(
+            result.profitFactor
+        );
+
+
+    if (
+        result.profitFactor === Infinity
+    ) {
+
+        setText(
+            "profitFactor",
+            "∞"
+        );
+
+    }
+
+    else {
+
+        setText(
+            "profitFactor",
+            Number.isFinite(pf)
+                ? pf.toFixed(2)
+                : "--"
+        );
+
+    }
+
+
+    // ==================================================
+    // DRAWDOWN
+    // ==================================================
+
+    setText(
+        "maxDrawdown",
+        formatNumber(
+            result.maxDrawdown
+        )
+    );
+
+
+    // ==================================================
+    // STATUS
+    // ==================================================
+
+    if (
+        result.status ===
+        "INSUFFICIENT_DATA"
+    ) {
+
+        setText(
             "backtestStatus",
-            "v9BacktestStatus"
-        ],
+            `Insufficient historical data — ${result.candlesTested ?? 0} candles`
+        );
 
-        `BACKTEST COMPLETE — ${stats.candlesTested} CANDLES TESTED`
+    }
 
-    );
+    else {
+
+        setText(
+            "backtestStatus",
+            `Completed — ${result.totalTrades ?? 0} trades simulated`
+        );
+
+    }
 
 
-    setTextAny(
-
-        [
-            "backtestEngine",
-            "v9BacktestEngine"
-        ],
-
+    setText(
+        "backtestEngine",
         "V9 Historical Simulation"
-
     );
 
 
     console.log(
-        "V9 rendered statistics:",
-        stats
+        "V9 Backtest statistics:",
+        {
+
+            candles:
+                result.candlesTested,
+
+            trades:
+                result.totalTrades,
+
+            wins:
+                result.winningTrades,
+
+            losses:
+                result.losingTrades,
+
+            winRate:
+                result.winRate,
+
+            points:
+                result.totalPoints,
+
+            profitFactor:
+                result.profitFactor,
+
+            drawdown:
+                result.maxDrawdown
+
+        }
     );
+
+
+    /*
+    Keep trade list in state.
+
+    We will use this in the next
+    V9 upgrade to create the
+    trade-history table.
+    */
+
+    if (
+        Array.isArray(
+            result.trades
+        )
+    ) {
+
+        console.table(
+            result.trades
+        );
+
+    }
 
 }
 
@@ -3723,23 +2229,17 @@ function renderBacktest(
 function setupBacktestButton() {
 
     const button =
-        getElementAny(
-
-            [
-                "runV9Backtest",
-                "v9BacktestBtn",
-                "backtestBtn"
-            ]
-
-        );
+        $("runBacktestBtn") ||
+        $("runV9Backtest");
 
 
-    if (!button) {
+    if (
+        !button
+    ) {
 
         console.warn(
             "V9 backtest button not found."
         );
-
 
         return;
 
@@ -3747,11 +2247,13 @@ function setupBacktestButton() {
 
 
     button.addEventListener(
-
         "click",
-
         runV9Backtest
+    );
 
+
+    console.log(
+        "V9 backtest button connected."
     );
 
 }
@@ -3767,7 +2269,9 @@ function setupPaperTradeButton() {
         $("paperTradeBtn");
 
 
-    if (!button) {
+    if (
+        !button
+    ) {
 
         return;
 
@@ -3775,9 +2279,7 @@ function setupPaperTradeButton() {
 
 
     button.addEventListener(
-
         "click",
-
         () => {
 
             const signal =
@@ -3785,18 +2287,13 @@ function setupPaperTradeButton() {
 
 
             if (
-
                 !signal ||
                 signal === "WAIT"
-
             ) {
 
                 alert(
-
                     "No valid paper trade signal yet."
-
                 );
-
 
                 return;
 
@@ -3867,7 +2364,9 @@ function updateStatusDot(
     }
 
 
-    if (connected) {
+    if (
+        connected
+    ) {
 
         dot.classList.remove(
             "closed"
@@ -3887,7 +2386,7 @@ function updateStatusDot(
 
 
 // ======================================================
-// TIME
+// CLOCK
 // ======================================================
 
 function updateTime() {
@@ -3898,11 +2397,8 @@ function updateTime() {
 
     const text =
         now.toLocaleTimeString(
-
             "en-IN",
-
             {
-
                 hour:
                     "2-digit",
 
@@ -3911,9 +2407,7 @@ function updateTime() {
 
                 second:
                     "2-digit"
-
             }
-
         );
 
 
@@ -3946,12 +2440,7 @@ async function initialize() {
 
 
     console.log(
-        "V8 Confirmation Strategy"
-    );
-
-
-    console.log(
-        "V9 Historical Backtest Engine"
+        "Historical Backtest Engine Ready"
     );
 
 
@@ -3977,7 +2466,20 @@ async function initialize() {
     );
 
 
+    setText(
+        "backtestStatus",
+        "Waiting for historical data"
+    );
+
+
+    setText(
+        "backtestEngine",
+        "V9 Historical Simulation"
+    );
+
+
     setupPaperTradeButton();
+
 
     setupBacktestButton();
 
@@ -4002,33 +2504,39 @@ async function initialize() {
 
 
 // ======================================================
-// REFRESH LOOPS
+// REFRESH
 // ======================================================
 
-setInterval(
+/*
+Live market prices:
+every 5 seconds
+*/
 
+setInterval(
     fetchMarketData,
-
     5000
-
 );
 
 
-setInterval(
+/*
+Indicators:
+every 30 seconds
+*/
 
+setInterval(
     fetchIndicatorData,
-
     30000
-
 );
 
 
+/*
+Clock:
+every second
+*/
+
 setInterval(
-
     updateTime,
-
     1000
-
 );
 
 
@@ -4037,18 +2545,13 @@ setInterval(
 // ======================================================
 
 if (
-
     document.readyState ===
     "loading"
-
 ) {
 
     document.addEventListener(
-
         "DOMContentLoaded",
-
         initialize
-
     );
 
 }
