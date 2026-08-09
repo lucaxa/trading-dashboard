@@ -71,14 +71,25 @@ function $(id) {
 
 function setText(id, value) {
 
-    const element = $(id);
+    const elements =
+        document.querySelectorAll(
+            `[id="${id}"]`
+        );
 
-    if (element) {
+    if (!elements.length) {
 
-        element.textContent =
-            value;
+        return;
 
     }
+
+    elements.forEach(
+        element => {
+
+            element.textContent =
+                value;
+
+        }
+    );
 
 }
 
