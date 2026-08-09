@@ -52,12 +52,13 @@ export default async function handler(req, res) {
         item.segment
       ).toUpperCase();
 
-      return (
-        text.includes("NIFTY 50") ||
-        text.includes("NIFTY50") ||
-        text.includes("BANKNIFTY") ||
-        text.includes("NIFTY BANK")
-      );
+    return (
+  text.includes("NIFTY 50") ||
+  text.includes("NIFTY50") ||
+  text.includes("BANK NIFTY") ||
+  text.includes("BANKNIFTY") ||
+  text.includes("NIFTY BANK")
+);
     });
 
     return res.status(200).json({
