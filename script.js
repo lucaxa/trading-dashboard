@@ -3,6 +3,17 @@ TradeMind Pro
 Frontend Controller
 INDstocks → Vercel → Dashboard
 
+V6 Strategy Engine
+
+Indicators:
+- EMA 9
+- EMA 21
+- RSI 14
+- VWAP
+- ATR 14
+- Swing High
+- Swing Low
+
 Paper trading only.
 No real orders.
 */
@@ -111,53 +122,32 @@ function extractPrice(quote) {
 
     }
 
-
     const possibleFields = [
 
         "ltp",
-
         "LTP",
-
         "last_price",
-
         "lastPrice",
-
         "LastPrice",
-
         "price",
-
         "Price",
-
         "close",
-
         "Close",
-
         "lp",
-
         "last_traded_price",
-
         "lastTradedPrice",
-
-        "lastTradedPrice",
-
         "last"
 
     ];
 
-
     for (const field of possibleFields) {
 
-        const value = Number(
-            quote[field]
-        );
-
+        const value =
+            Number(quote[field]);
 
         if (
-
             Number.isFinite(value) &&
-
             value > 0
-
         ) {
 
             return value;
@@ -165,7 +155,6 @@ function extractPrice(quote) {
         }
 
     }
-
 
     return null;
 
@@ -178,7 +167,10 @@ function extractPrice(quote) {
 
 function normalizeText(value) {
 
-    if (value === null || value === undefined) {
+    if (
+        value === null ||
+        value === undefined
+    ) {
 
         return "";
 
@@ -205,13 +197,14 @@ function extractQuotes(data) {
 
     }
 
-
-    if (!data || typeof data !== "object") {
+    if (
+        !data ||
+        typeof data !== "object"
+    ) {
 
         return [];
 
     }
-
 
     if (Array.isArray(data.data)) {
 
@@ -219,13 +212,11 @@ function extractQuotes(data) {
 
     }
 
-
     if (Array.isArray(data.quotes)) {
 
         return data.quotes;
 
     }
-
 
     if (Array.isArray(data.results)) {
 
@@ -233,22 +224,18 @@ function extractQuotes(data) {
 
     }
 
-
     if (Array.isArray(data.items)) {
 
         return data.items;
 
     }
 
-
     return Object.values(data).filter(
 
         value =>
 
             value &&
-
             typeof value === "object" &&
-
             !Array.isArray(value)
 
     );
@@ -260,32 +247,29 @@ function extractQuotes(data) {
 // FIND INSTRUMENT
 // ========================================
 
-function findInstrument(quotes, instrument) {
+function findInstrument(
+    quotes,
+    instrument
+) {
 
     const wanted =
         normalizeText(instrument);
 
-
     return quotes.find(quote => {
 
         if (
-
             !quote ||
-
             typeof quote !== "object"
-
         ) {
 
             return false;
 
         }
 
-
         const text =
             normalizeText(
                 JSON.stringify(quote)
             );
-
 
         // --------------------------------
         // NIFTY
@@ -296,13 +280,9 @@ function findInstrument(quotes, instrument) {
             const isBankNifty =
 
                 text.includes("banknifty") ||
-
                 text.includes("bank nifty") ||
-
                 text.includes("nifty bank") ||
-
                 text.includes("niftybank");
-
 
             if (isBankNifty) {
 
@@ -310,15 +290,11 @@ function findInstrument(quotes, instrument) {
 
             }
 
-
             return (
 
                 text.includes("40000001") ||
-
                 text.includes("nifty 50") ||
-
                 text.includes("nifty50") ||
-
                 (
                     text.includes("nifty") &&
                     !isBankNifty
@@ -327,7 +303,6 @@ function findInstrument(quotes, instrument) {
             );
 
         }
-
 
         // --------------------------------
         // BANKNIFTY
@@ -338,19 +313,14 @@ function findInstrument(quotes, instrument) {
             return (
 
                 text.includes("40000003") ||
-
                 text.includes("banknifty") ||
-
                 text.includes("bank nifty") ||
-
                 text.includes("nifty bank") ||
-
                 text.includes("niftybank")
 
             );
 
         }
-
 
         return false;
 
@@ -369,21 +339,16 @@ function findObjectByKey(
 ) {
 
     if (
-
         !object ||
-
         typeof object !== "object"
-
     ) {
 
         return null;
 
     }
 
-
     const keys =
         Object.keys(object);
-
 
     for (const key of keys) {
 
@@ -391,22 +356,24 @@ function findObjectByKey(
             normalizeText(key)
                 .replace(/\s/g, "");
 
-
-        for (const possibleKey of possibleKeys) {
+        for (
+            const possibleKey
+            of possibleKeys
+        ) {
 
             const wanted =
-                normalizeText(possibleKey)
-                    .replace(/\s/g, "");
+                normalizeText(
+                    possibleKey
+                )
+                .replace(/\s/g, "");
 
-
-            if (normalized === wanted) {
+            if (
+                normalized === wanted
+            ) {
 
                 if (
-
                     object[key] &&
-
                     typeof object[key] === "object"
-
                 ) {
 
                     return object[key];
@@ -418,7 +385,6 @@ function findObjectByKey(
         }
 
     }
-
 
     return null;
 
@@ -435,7 +401,6 @@ async function apiFetch(url) {
         "TradeMind API request:",
         url
     );
-
 
     const response =
         await fetch(
@@ -459,13 +424,10 @@ async function apiFetch(url) {
 
         );
 
-
     const text =
         await response.text();
 
-
     let data;
-
 
     try {
 
@@ -477,24 +439,16 @@ async function apiFetch(url) {
     catch {
 
         throw new Error(
-
             `Invalid API response (${response.status})`
-
         );
 
     }
 
-
     console.log(
-
         "TradeMind API response:",
-
         url,
-
         data
-
     );
-
 
     if (!response.ok) {
 
@@ -508,17 +462,14 @@ async function apiFetch(url) {
                     data.error || data
                 );
 
-
         throw new Error(
 
             message ||
-
             `API error ${response.status}`
 
         );
 
     }
-
 
     if (data.success === false) {
 
@@ -535,7 +486,6 @@ async function apiFetch(url) {
         );
 
     }
-
 
     return data;
 
@@ -555,34 +505,25 @@ async function fetchMarketData() {
             "CONNECTING"
         );
 
-
         setText(
             "analysisStatus",
             "CONNECTING"
         );
-
 
         const result =
             await apiFetch(
                 "/api/quotes"
             );
 
-
         const quotes =
             extractQuotes(
                 result.data ?? result
             );
 
-
         console.log(
             "TradeMind extracted quotes:",
             quotes
         );
-
-
-        // --------------------------------
-        // FIND NIFTY
-        // --------------------------------
 
         const niftyQuote =
             findInstrument(
@@ -590,49 +531,31 @@ async function fetchMarketData() {
                 "nifty"
             );
 
-
-        // --------------------------------
-        // FIND BANKNIFTY
-        // --------------------------------
-
         const bankQuote =
             findInstrument(
                 quotes,
                 "banknifty"
             );
 
-
         console.log(
             "TradeMind NIFTY quote:",
             niftyQuote
         );
-
 
         console.log(
             "TradeMind BANKNIFTY quote:",
             bankQuote
         );
 
-
-        // --------------------------------
-        // EXTRACT PRICES
-        // --------------------------------
-
         const niftyPrice =
             extractPrice(
                 niftyQuote
             );
 
-
         const bankPrice =
             extractPrice(
                 bankQuote
             );
-
-
-        // --------------------------------
-        // UPDATE NIFTY
-        // --------------------------------
 
         if (niftyPrice !== null) {
 
@@ -648,11 +571,6 @@ async function fetchMarketData() {
 
         }
 
-
-        // --------------------------------
-        // UPDATE BANKNIFTY
-        // --------------------------------
-
         if (bankPrice !== null) {
 
             state.banknifty = {
@@ -667,73 +585,56 @@ async function fetchMarketData() {
 
         }
 
-
         renderMarket();
 
-
         state.connected = true;
-
 
         setText(
             "marketStatus",
             "LIVE"
         );
 
-
         setText(
             "analysisStatus",
             "LIVE"
         );
-
 
         setText(
             "dataStatus",
             "INDSTOCKS"
         );
 
-
         updateStatusDot(true);
-
 
         updateTime();
 
     }
 
-
     catch (error) {
 
         console.error(
-
             "TradeMind market data error:",
-
             error
-
         );
 
-
         state.connected = false;
-
 
         setText(
             "marketStatus",
             "OFFLINE"
         );
 
-
         setText(
             "analysisStatus",
             "API ERROR"
         );
-
 
         setText(
             "dataStatus",
             "API ERROR"
         );
 
-
         updateStatusDot(false);
-
 
         setText(
             "lastUpdate",
@@ -751,62 +652,36 @@ async function fetchMarketData() {
 
 function renderMarket() {
 
-
-    // --------------------------------
-    // NIFTY
-    // --------------------------------
-
     if (state.nifty) {
 
         setText(
-
             "niftyPrice",
-
             formatPrice(
                 state.nifty.price
             )
-
         );
 
-
         renderChange(
-
             "niftyChange",
-
             state.nifty.price,
-
             state.nifty.previous
-
         );
 
     }
 
-
-    // --------------------------------
-    // BANKNIFTY
-    // --------------------------------
-
     if (state.banknifty) {
 
         setText(
-
             "bankPrice",
-
             formatPrice(
                 state.banknifty.price
             )
-
         );
 
-
         renderChange(
-
             "bankChange",
-
             state.banknifty.price,
-
             state.banknifty.previous
-
         );
 
     }
@@ -827,38 +702,29 @@ function renderChange(
     const el =
         $(elementId);
 
-
     if (!el) {
 
         return;
 
     }
 
-
     const difference =
         current - previous;
 
-
     if (
-
         !Number.isFinite(difference) ||
-
         difference === 0
-
     ) {
 
         el.textContent =
             "No change";
 
-
         el.className =
             "change";
-
 
         return;
 
     }
-
 
     const percent =
 
@@ -871,27 +737,20 @@ function renderChange(
 
             : 0;
 
-
     const direction =
 
         difference > 0
-
             ? "▲"
-
             : "▼";
-
 
     el.textContent =
 
         `${direction} ${Math.abs(difference).toFixed(2)} (${Math.abs(percent).toFixed(2)}%)`;
 
-
     el.className =
 
         difference > 0
-
             ? "change up"
-
             : "change down";
 
 }
@@ -910,23 +769,14 @@ async function fetchIndicatorData() {
             "CALCULATING"
         );
 
-
         const result =
-
             await apiFetch(
-
                 "/api/indicators?interval=5minute"
-
             );
 
-
-        state.indicators =
-            result;
-
-
-        // ====================================
-        // FIND NIFTY INDICATOR OBJECT
-        // ====================================
+        // --------------------------------
+        // FIND NIFTY
+        // --------------------------------
 
         const niftyData =
 
@@ -935,24 +785,20 @@ async function fetchIndicatorData() {
             result.NIFTY ||
 
             findObjectByKey(
-
                 result,
-
                 [
                     "nifty",
                     "NIFTY",
                     "nifty50",
                     "NIFTY50"
                 ]
-
             ) ||
 
             {};
 
-
-        // ====================================
-        // FIND BANKNIFTY INDICATOR OBJECT
-        // ====================================
+        // --------------------------------
+        // FIND BANKNIFTY
+        // --------------------------------
 
         const bankData =
 
@@ -969,9 +815,7 @@ async function fetchIndicatorData() {
             result.NIFTYBANK ||
 
             findObjectByKey(
-
                 result,
-
                 [
                     "banknifty",
                     "BANKNIFTY",
@@ -979,15 +823,13 @@ async function fetchIndicatorData() {
                     "NIFTY BANK",
                     "niftybank"
                 ]
-
             ) ||
 
             {};
 
-
-        // ====================================
-        // STORE NORMALIZED INDICATORS
-        // ====================================
+        // --------------------------------
+        // STORE INDICATORS
+        // --------------------------------
 
         state.indicators = {
 
@@ -999,21 +841,18 @@ async function fetchIndicatorData() {
 
         };
 
-
         console.log(
-            "TradeMind NIFTY indicator data:",
+            "TradeMind NIFTY indicators:",
             niftyData
         );
 
-
         console.log(
-            "TradeMind BANKNIFTY indicator data:",
+            "TradeMind BANKNIFTY indicators:",
             bankData
         );
 
-
         // ====================================
-        // NIFTY LATEST CANDLE FALLBACK
+        // NIFTY CANDLE FALLBACK
         // ====================================
 
         const niftyCandle =
@@ -1036,7 +875,6 @@ async function fetchIndicatorData() {
 
             null;
 
-
         if (niftyCandle) {
 
             const candlePrice =
@@ -1044,22 +882,15 @@ async function fetchIndicatorData() {
                 Number(
 
                     niftyCandle.c ??
-
                     niftyCandle.close ??
-
                     niftyCandle.Close ??
-
                     niftyCandle.ltp
 
                 );
 
-
             if (
-
                 Number.isFinite(candlePrice) &&
-
                 candlePrice > 0
-
             ) {
 
                 state.nifty = {
@@ -1067,29 +898,22 @@ async function fetchIndicatorData() {
                     price: candlePrice,
 
                     previous:
-
                         state.nifty?.price ??
-
                         candlePrice
 
                 };
 
-
                 console.log(
-
                     "TradeMind NIFTY candle fallback:",
-
                     candlePrice
-
                 );
 
             }
 
         }
 
-
         // ====================================
-        // BANKNIFTY LATEST CANDLE FALLBACK
+        // BANKNIFTY CANDLE FALLBACK
         // ====================================
 
         const bankCandle =
@@ -1116,7 +940,6 @@ async function fetchIndicatorData() {
 
             null;
 
-
         if (bankCandle) {
 
             const candlePrice =
@@ -1124,22 +947,15 @@ async function fetchIndicatorData() {
                 Number(
 
                     bankCandle.c ??
-
                     bankCandle.close ??
-
                     bankCandle.Close ??
-
                     bankCandle.ltp
 
                 );
 
-
             if (
-
                 Number.isFinite(candlePrice) &&
-
                 candlePrice > 0
-
             ) {
 
                 state.banknifty = {
@@ -1147,82 +963,48 @@ async function fetchIndicatorData() {
                     price: candlePrice,
 
                     previous:
-
                         state.banknifty?.price ??
-
                         candlePrice
 
                 };
 
-
                 console.log(
-
                     "TradeMind BANKNIFTY candle fallback:",
-
                     candlePrice
-
                 );
 
             }
 
         }
 
-
         renderMarket();
-
-
-        console.log(
-
-            "TradeMind final indicators:",
-
-            state.indicators
-
-        );
-
 
         renderIndicators();
 
-
         analyzeMarket();
 
-
         setText(
-
             "analysisStatus",
-
             "LIVE"
-
         );
 
     }
 
-
     catch (error) {
 
         console.error(
-
             "TradeMind indicator error:",
-
             error
-
         );
 
-
         setText(
-
             "analysisStatus",
-
             "INDICATOR ERROR"
-
         );
 
-
         setText(
-
             "lastUpdate",
-
             error.message
-
         );
 
     }
@@ -1239,68 +1021,48 @@ function renderIndicators() {
     const data =
         state.indicators;
 
-
     if (!data) {
 
         return;
 
     }
 
-
     const nifty =
         data.nifty || {};
 
-
-    const bank =
-        data.banknifty || {};
-
-
-    // ------------------------------------
-    // NIFTY
-    // ------------------------------------
-
-    const niftyEma9 =
+    const ema9 =
         Number(nifty.ema9);
 
-
-    const niftyEma21 =
+    const ema21 =
         Number(nifty.ema21);
 
-
-    const niftyRsi =
+    const rsi =
         Number(nifty.rsi14);
 
-
-    const niftyVwap =
+    const vwap =
         Number(nifty.vwap);
 
+    // --------------------------------
+    // TREND
+    // --------------------------------
 
     if (
-
-        Number.isFinite(niftyEma9) &&
-
-        Number.isFinite(niftyEma21)
-
+        Number.isFinite(ema9) &&
+        Number.isFinite(ema21)
     ) {
 
         const trend =
 
-            niftyEma9 > niftyEma21
-
+            ema9 > ema21
                 ? "BULLISH"
-
-                : niftyEma9 < niftyEma21
-
+                : ema9 < ema21
                     ? "BEARISH"
-
                     : "SIDEWAYS";
-
 
         setText(
             "trend",
             trend
         );
-
 
         setText(
             "niftyTrend",
@@ -1309,93 +1071,73 @@ function renderIndicators() {
 
     }
 
+    // --------------------------------
+    // RSI
+    // --------------------------------
 
-    if (Number.isFinite(niftyRsi)) {
+    if (Number.isFinite(rsi)) {
 
         const momentum =
 
-            niftyRsi >= 60
-
+            rsi >= 60
                 ? "STRONG"
-
-                : niftyRsi >= 50
-
+                : rsi >= 50
                     ? "POSITIVE"
-
-                    : niftyRsi >= 40
-
+                    : rsi >= 40
                         ? "NEGATIVE"
-
                         : "WEAK";
 
-
         setText(
-
             "momentum",
-
-            `${momentum} (${niftyRsi.toFixed(1)})`
-
+            `${momentum} (${rsi.toFixed(1)})`
         );
 
     }
 
+    // --------------------------------
+    // VWAP
+    // --------------------------------
 
-    if (Number.isFinite(niftyVwap)) {
+    if (Number.isFinite(vwap)) {
 
         const price =
             state.nifty?.price;
-
 
         if (Number.isFinite(price)) {
 
             const vwapPosition =
 
-                price > niftyVwap
-
+                price > vwap
                     ? "ABOVE VWAP"
-
-                    : price < niftyVwap
-
+                    : price < vwap
                         ? "BELOW VWAP"
-
                         : "AT VWAP";
 
-
             setText(
-
                 "volatility",
-
                 vwapPosition
-
             );
 
         }
 
     }
 
-
-    // ------------------------------------
+    // --------------------------------
     // CANDLE COUNT
-    // ------------------------------------
+    // --------------------------------
 
     const candleCount =
         nifty.candleCount;
 
-
     if (
-
         Number.isFinite(
             Number(candleCount)
         )
-
     ) {
 
         setText(
-
             "candleStatus",
-
             `${candleCount} CANDLES`
-
         );
 
     }
@@ -1404,14 +1146,13 @@ function renderIndicators() {
 
 
 // ========================================
-// UNIFIED STRATEGY ENGINE
+// V6 STRATEGY ENGINE
 // ========================================
 
 function calculateStrategy() {
 
     const nifty =
         state.indicators?.nifty;
-
 
     if (!nifty) {
 
@@ -1426,43 +1167,53 @@ function calculateStrategy() {
 
     }
 
+    // --------------------------------
+    // INDICATORS
+    // --------------------------------
 
     const ema9 =
         Number(nifty.ema9);
 
-
     const ema21 =
         Number(nifty.ema21);
-
 
     const rsi =
         Number(nifty.rsi14);
 
-
     const vwap =
         Number(nifty.vwap);
 
+    const atr =
+        Number(nifty.atr14);
 
     const price =
         Number(
             state.nifty?.price
         );
 
+    // --------------------------------
+    // STRUCTURE
+    // --------------------------------
 
-    // ------------------------------------
-    // VALIDATE DATA
-    // ------------------------------------
+    const swingHigh =
+        Number(
+            nifty.swingHigh?.price
+        );
+
+    const swingLow =
+        Number(
+            nifty.swingLow?.price
+        );
+
+    // --------------------------------
+    // VALIDATION
+    // --------------------------------
 
     if (
-
         !Number.isFinite(price) ||
-
         !Number.isFinite(ema9) ||
-
         !Number.isFinite(ema21) ||
-
         !Number.isFinite(rsi)
-
     ) {
 
         return {
@@ -1473,144 +1224,198 @@ function calculateStrategy() {
                 "Insufficient indicator data",
 
             price,
-
             ema9,
-
             ema21,
-
             rsi,
-
-            vwap
+            vwap,
+            atr,
+            swingHigh,
+            swingLow
 
         };
 
     }
 
+    // ====================================
+    // SCORE SYSTEM
+    // ====================================
 
-    // ------------------------------------
-    // TREND
-    // ------------------------------------
+    let buyScore = 0;
 
-    const bullishTrend =
-        ema9 > ema21;
+    let sellScore = 0;
 
+    const reasons = [];
 
-    const bearishTrend =
-        ema9 < ema21;
+    // --------------------------------
+    // EMA TREND
+    // --------------------------------
 
+    if (ema9 > ema21) {
 
-    // ------------------------------------
-    // MOMENTUM
-    // ------------------------------------
+        buyScore += 2;
 
-    const bullishMomentum =
-        rsi >= 55;
+        reasons.push(
+            "EMA bullish"
+        );
 
+    }
 
-    const bearishMomentum =
-        rsi <= 45;
+    else if (ema9 < ema21) {
 
+        sellScore += 2;
 
-    // ------------------------------------
+        reasons.push(
+            "EMA bearish"
+        );
+
+    }
+
+    // --------------------------------
+    // RSI
+    // --------------------------------
+
+    if (rsi >= 55) {
+
+        buyScore += 2;
+
+        reasons.push(
+            "RSI bullish"
+        );
+
+    }
+
+    else if (rsi <= 45) {
+
+        sellScore += 2;
+
+        reasons.push(
+            "RSI bearish"
+        );
+
+    }
+
+    // --------------------------------
     // VWAP
-    // ------------------------------------
+    // --------------------------------
 
-    const aboveVWAP =
+    if (Number.isFinite(vwap)) {
 
-        !Number.isFinite(vwap) ||
+        if (price > vwap) {
 
-        price > vwap;
+            buyScore += 1;
 
+            reasons.push(
+                "Above VWAP"
+            );
 
-    const belowVWAP =
+        }
 
-        !Number.isFinite(vwap) ||
+        else if (price < vwap) {
 
-        price < vwap;
+            sellScore += 1;
 
+            reasons.push(
+                "Below VWAP"
+            );
 
-    // ------------------------------------
-    // BUY
-    // ------------------------------------
-
-    if (
-
-        bullishTrend &&
-
-        bullishMomentum &&
-
-        aboveVWAP
-
-    ) {
-
-        return {
-
-            signal: "BUY",
-
-            reason:
-                "Bullish trend + positive RSI + above VWAP",
-
-            price,
-
-            ema9,
-
-            ema21,
-
-            rsi,
-
-            vwap
-
-        };
+        }
 
     }
 
-
-    // ------------------------------------
-    // SELL
-    // ------------------------------------
+    // --------------------------------
+    // MARKET STRUCTURE
+    // --------------------------------
 
     if (
-
-        bearishTrend &&
-
-        bearishMomentum &&
-
-        belowVWAP
-
+        Number.isFinite(swingLow) &&
+        price > swingLow
     ) {
 
-        return {
-
-            signal: "SELL",
-
-            reason:
-                "Bearish trend + negative RSI + below VWAP",
-
-            price,
-
-            ema9,
-
-            ema21,
-
-            rsi,
-
-            vwap
-
-        };
+        buyScore += 1;
 
     }
 
+    if (
+        Number.isFinite(swingHigh) &&
+        price < swingHigh
+    ) {
 
-    // ------------------------------------
-    // WAIT
-    // ------------------------------------
+        sellScore += 1;
+
+    }
+
+    // ====================================
+    // FINAL SIGNAL
+    // ====================================
+
+    let signal = "WAIT";
+
+    let confidence = 0;
+
+    if (
+        buyScore >= 5 &&
+        buyScore > sellScore
+    ) {
+
+        signal =
+            buyScore >= 6
+                ? "STRONG BUY"
+                : "BUY";
+
+        confidence =
+            Math.min(
+                95,
+                50 + buyScore * 7
+            );
+
+    }
+
+    else if (
+        sellScore >= 5 &&
+        sellScore > buyScore
+    ) {
+
+        signal =
+            sellScore >= 6
+                ? "STRONG SELL"
+                : "SELL";
+
+        confidence =
+            Math.min(
+                95,
+                50 + sellScore * 7
+            );
+
+    }
+
+    else {
+
+        signal =
+            "WAIT";
+
+        confidence =
+            Math.min(
+                49,
+                40 + Math.max(
+                    buyScore,
+                    sellScore
+                ) * 3
+            );
+
+    }
 
     return {
 
-        signal: "WAIT",
+        signal,
+
+        confidence,
+
+        buyScore,
+
+        sellScore,
 
         reason:
-            "Conditions not fully confirmed",
+            reasons.join(" + "),
 
         price,
 
@@ -1620,7 +1425,13 @@ function calculateStrategy() {
 
         rsi,
 
-        vwap
+        vwap,
+
+        atr,
+
+        swingHigh,
+
+        swingLow
 
     };
 
@@ -1636,47 +1447,49 @@ function analyzeMarket() {
     const strategy =
         calculateStrategy();
 
-
     console.log(
         "================================"
     );
 
-
     console.log(
-        "TradeMind Strategy Result:",
+        "TradeMind V6 Strategy:",
         strategy
     );
 
-
     console.log(
         "================================"
     );
 
+    // --------------------------------
+    // SIGNAL
+    // --------------------------------
 
     setText(
-
         "signal",
-
         strategy.signal
-
     );
 
+    // --------------------------------
+    // REASON
+    // --------------------------------
 
     const reasonElement =
         $("signalReason");
 
-
     if (reasonElement) {
 
         reasonElement.textContent =
-            strategy.reason;
+            strategy.reason ||
+            "Waiting for confirmation";
 
     }
 
+    // --------------------------------
+    // STRATEGY STATUS
+    // --------------------------------
 
     const strategyStatus =
         $("strategyStatus");
-
 
     if (strategyStatus) {
 
@@ -1690,6 +1503,9 @@ function analyzeMarket() {
 
     }
 
+    // --------------------------------
+    // TRADE SETUP
+    // --------------------------------
 
     updateTradeSetup(
         strategy
@@ -1699,7 +1515,7 @@ function analyzeMarket() {
 
 
 // ========================================
-// PAPER TRADE SETUP
+// V6 DYNAMIC TRADE SETUP
 // ========================================
 
 function updateTradeSetup(strategy) {
@@ -1707,17 +1523,25 @@ function updateTradeSetup(strategy) {
     const price =
         Number(strategy.price);
 
+    const atr =
+        Number(strategy.atr);
+
+    const swingHigh =
+        Number(strategy.swingHigh);
+
+    const swingLow =
+        Number(strategy.swingLow);
 
     const signal =
         strategy.signal;
 
+    // --------------------------------
+    // NO VALID TRADE
+    // --------------------------------
 
     if (
-
         !Number.isFinite(price) ||
-
         signal === "WAIT"
-
     ) {
 
         setText(
@@ -1725,109 +1549,241 @@ function updateTradeSetup(strategy) {
             "--"
         );
 
-
         setText(
             "stoploss",
             "--"
         );
-
 
         setText(
             "target",
             "--"
         );
 
+        setText(
+            "riskReward",
+            "--"
+        );
+
+        return;
+
+    }
+
+    // --------------------------------
+    // ATR VALIDATION
+    // --------------------------------
+
+    if (
+        !Number.isFinite(atr) ||
+        atr <= 0
+    ) {
+
+        setText(
+            "entry",
+            formatPrice(price)
+        );
+
+        setText(
+            "stoploss",
+            "--"
+        );
+
+        setText(
+            "target",
+            "--"
+        );
 
         setText(
             "riskReward",
             "--"
         );
 
+        return;
+
+    }
+
+    // --------------------------------
+    // ATR STOP DISTANCE
+    //
+    // Initial V6 model:
+    //
+    // 1.5 × ATR
+    //
+    // Structure is also considered.
+    // --------------------------------
+
+    const atrRisk =
+        atr * 1.5;
+
+    let stop = null;
+
+    let target = null;
+
+    // ====================================
+    // BUY
+    // ====================================
+
+    if (
+        signal === "BUY" ||
+        signal === "STRONG BUY"
+    ) {
+
+        let structureStop =
+            Number.isFinite(swingLow)
+                ? swingLow
+                : price - atrRisk;
+
+        /*
+        Never place a BUY stop above
+        the entry.
+        */
+
+        if (
+            structureStop >= price
+        ) {
+
+            structureStop =
+                price - atrRisk;
+
+        }
+
+        /*
+        Use the wider of ATR risk
+        and structure protection.
+        */
+
+        const atrStop =
+            price - atrRisk;
+
+        stop =
+            Math.min(
+                atrStop,
+                structureStop
+            );
+
+        const risk =
+            price - stop;
+
+        if (
+            !Number.isFinite(risk) ||
+            risk <= 0
+        ) {
+
+            return;
+
+        }
+
+        target =
+            price +
+            (
+                risk * 2
+            );
+
+    }
+
+    // ====================================
+    // SELL
+    // ====================================
+
+    else if (
+        signal === "SELL" ||
+        signal === "STRONG SELL"
+    ) {
+
+        let structureStop =
+            Number.isFinite(swingHigh)
+                ? swingHigh
+                : price + atrRisk;
+
+        /*
+        Never place a SELL stop
+        below the entry.
+        */
+
+        if (
+            structureStop <= price
+        ) {
+
+            structureStop =
+                price + atrRisk;
+
+        }
+
+        const atrStop =
+            price + atrRisk;
+
+        stop =
+            Math.max(
+                atrStop,
+                structureStop
+            );
+
+        const risk =
+            stop - price;
+
+        if (
+            !Number.isFinite(risk) ||
+            risk <= 0
+        ) {
+
+            return;
+
+        }
+
+        target =
+            price -
+            (
+                risk * 2
+            );
+
+    }
+
+    else {
 
         return;
 
     }
 
-
-    // ------------------------------------
-    // TEMPORARY RISK MODEL
-    //
-    // Stop = 0.10%
-    // Target = 0.20%
-    //
-    // Temporary paper-testing model.
-    // ------------------------------------
+    // --------------------------------
+    // FINAL RISK
+    // --------------------------------
 
     const risk =
-        price * 0.001;
-
+        Math.abs(
+            price - stop
+        );
 
     const reward =
-        risk * 2;
+        Math.abs(
+            target - price
+        );
 
+    const rr =
+        risk > 0
+            ? reward / risk
+            : 0;
 
-    let stop;
-
-    let target;
-
-
-    if (signal === "BUY") {
-
-        stop =
-            price - risk;
-
-
-        target =
-            price + reward;
-
-    }
-
-
-    else if (signal === "SELL") {
-
-        stop =
-            price + risk;
-
-
-        target =
-            price - reward;
-
-    }
-
+    // --------------------------------
+    // RENDER
+    // --------------------------------
 
     setText(
-
         "entry",
-
         formatPrice(price)
-
     );
 
-
     setText(
-
         "stoploss",
-
         formatPrice(stop)
-
     );
 
-
     setText(
-
         "target",
-
         formatPrice(target)
-
     );
 
-
     setText(
-
         "riskReward",
-
-        "1 : 2"
-
+        `1 : ${rr.toFixed(2)}`
     );
 
 }
@@ -1837,18 +1793,18 @@ function updateTradeSetup(strategy) {
 // STATUS DOT
 // ========================================
 
-function updateStatusDot(connected) {
+function updateStatusDot(
+    connected
+) {
 
     const dot =
         $("statusDot");
-
 
     if (!dot) {
 
         return;
 
     }
-
 
     if (connected) {
 
@@ -1878,7 +1834,6 @@ function updateTime() {
     const now =
         new Date();
 
-
     const text =
 
         now.toLocaleTimeString(
@@ -1897,13 +1852,9 @@ function updateTime() {
 
         );
 
-
     setText(
-
         "lastUpdate",
-
         text
-
     );
 
 }
@@ -1918,13 +1869,11 @@ function setupPaperTradeButton() {
     const button =
         $("paperTradeBtn");
 
-
     if (!button) {
 
         return;
 
     }
-
 
     button.addEventListener(
 
@@ -1935,45 +1884,34 @@ function setupPaperTradeButton() {
             const signal =
                 $("signal")?.textContent;
 
-
             if (
-
                 !signal ||
-
                 signal === "WAIT"
-
             ) {
 
                 alert(
-
                     "No valid paper trade signal yet."
-
                 );
 
                 return;
 
             }
 
-
             const entry =
                 $("entry")?.textContent ||
                 "--";
-
 
             const stoploss =
                 $("stoploss")?.textContent ||
                 "--";
 
-
             const target =
                 $("target")?.textContent ||
                 "--";
 
-
             const riskReward =
                 $("riskReward")?.textContent ||
                 "--";
-
 
             alert(
 
@@ -2010,48 +1948,37 @@ async function initialize() {
         "================================"
     );
 
-
     console.log(
-        "TradeMind Pro frontend started"
+        "TradeMind Pro V6 started"
     );
 
+    console.log(
+        "ATR + Market Structure enabled"
+    );
 
     console.log(
         "Paper Trading Only"
     );
 
-
     console.log(
         "================================"
     );
 
-
     setText(
-
         "marketStatus",
-
         "CONNECTING"
-
     );
-
 
     setText(
-
         "analysisStatus",
-
         "CONNECTING"
-
     );
-
 
     setupPaperTradeButton();
 
-
     await fetchMarketData();
 
-
     await fetchIndicatorData();
-
 
     updateTime();
 
@@ -2091,18 +2018,13 @@ setInterval(
 // ========================================
 
 if (
-
     document.readyState ===
     "loading"
-
 ) {
 
     document.addEventListener(
-
         "DOMContentLoaded",
-
         initialize
-
     );
 
 }
