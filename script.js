@@ -627,22 +627,169 @@ function calculateTrend(
 Market analysis.
 */
 
+/*
+REAL MARKET ANALYSIS
+
+Uses:
+EMA 9
+EMA 21
+RSI 14
+VWAP
+
+Strategy:
+strategy.js
+*/
+
 function analyzeMarket() {
 
-  const trend =
-    calculateTrend(
-      market.nifty.history
+  const indicators =
+    state.indicators;
+
+  if (
+    !indicators ||
+    !state.indicatorConnected ||
+    !window.TradeMindStrategy
+  ) {
+
+    setText(
+      "trend",
+      "BUILDING"
     );
 
-  const momentum =
-    calculateMomentum(
-      market.nifty.history
+    setText(
+      "momentum",
+      "BUILDING"
     );
+
+    setText(
+      "volatility",
+      "BUILDING"
+    );
+
+    setText(
+      "signal",
+      "WAIT"
+    );
+
+    return;
+
+  }
+
+
+  const price =
+    market.nifty.price;
+
+
+  /*
+  Determine trend from
+  real EMA values.
+  */
+
+  let trend =
+    "SIDEWAYS";
+
+  if (
+    indicators.ema9 >
+    indicators.ema21
+  ) {
+
+    trend =
+      "BULLISH";
+
+  }
+
+  else if (
+    indicators.ema9 <
+    indicators.ema21
+  ) {
+
+    trend =
+      "BEARISH";
+
+  }
+
+
+  /*
+  Determine momentum
+  from real RSI.
+  */
+
+  let momentum =
+    "NEUTRAL";
+
+  if (
+    indicators.rsi14 > 50
+  ) {
+
+    momentum =
+      "POSITIVE";
+
+  }
+
+  else if (
+    indicators.rsi14 < 50
+  ) {
+
+    momentum =
+      "NEGATIVE";
+
+  }
+
+
+  /*
+  Simple volatility label
+  for now.
+
+  We will replace this
+  with ATR later.
+  */
 
   const volatility =
     calculateVolatility(
       market.nifty.history
     );
+
+
+  /*
+  Run the REAL strategy.
+  */
+
+  const result =
+    window.TradeMindStrategy
+      .generateSignal(
+
+        {
+          c: price
+        },
+
+        {
+          ema9:
+            indicators.ema9,
+
+          ema21:
+            indicators.ema21,
+
+          rsi14:
+            indicators.rsi14,
+
+          vwap:
+            indicators.vwap
+        }
+
+      );
+
+
+  const signal =
+    result.signal;
+
+
+  state.signal =
+    signal;
+
+
+  /*
+  Update dashboard.
+  */
 
   setText(
     "trend",
@@ -658,6 +805,37 @@ function analyzeMarket() {
     "volatility",
     volatility
   );
+
+  setText(
+    "signal",
+    signal
+  );
+
+
+  setText(
+    "analysisStatus",
+    "LIVE"
+  );
+
+
+  /*
+  Existing trade setup
+  will now use the REAL
+  strategy signal.
+  */
+
+  calculateTradeSetup(
+    signal
+  );
+
+
+  console.log(
+    "REAL STRATEGY RESULT:",
+    result
+  );
+
+}
+
 
   /*
   Temporary signal engine.
