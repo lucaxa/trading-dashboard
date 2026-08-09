@@ -9,6 +9,8 @@ INDstocks → Vercel
        Technical Indicators
              ↓
        V9 Historical Backtest
+             ↓
+       backtest.js
 
 Features:
 - Live NIFTY 50
@@ -24,9 +26,9 @@ Features:
 - Buy / Sell score
 - Strategy confidence
 - Dynamic Entry / Stop Loss / Target
-- V9 Historical Backtest
-- Backtest statistics
-- Trade history
+
+V9 BACKTEST:
+Handled separately by backtest.js
 
 PAPER TRADING ONLY.
 NO REAL ORDERS.
@@ -47,13 +49,9 @@ const state = {
 
     indicators: null,
 
-    backtest: null,
-
     connected: false,
 
-    lastUpdate: null,
-
-    backtestRunning: false
+    lastUpdate: null
 
 };
 
@@ -122,21 +120,6 @@ function formatNumber(value) {
 }
 
 
-function formatPercent(value) {
-
-    const number = Number(value);
-
-    if (!Number.isFinite(number)) {
-
-        return "--";
-
-    }
-
-    return `${number.toFixed(2)}%`;
-
-}
-
-
 // ======================================================
 // API FETCH
 // ======================================================
@@ -148,11 +131,13 @@ async function apiFetch(url) {
         url
     );
 
+
     const response =
         await fetch(
             url,
             {
                 method: "GET",
+
                 cache: "no-store",
 
                 headers: {
@@ -196,7 +181,9 @@ async function apiFetch(url) {
 
         const message =
             typeof data.error === "string"
+
                 ? data.error
+
                 : JSON.stringify(
                     data.error || data
                 );
@@ -215,7 +202,9 @@ async function apiFetch(url) {
         throw new Error(
 
             typeof data.error === "string"
+
                 ? data.error
+
                 : JSON.stringify(
                     data.error
                 )
@@ -712,6 +701,9 @@ function renderChange(
         element.textContent =
             "Waiting for data";
 
+        element.className =
+            "change";
+
         return;
 
     }
@@ -739,10 +731,12 @@ function renderChange(
 
     const percent =
         previous !== 0
+
             ? (
                 difference /
                 previous
             ) * 100
+
             : 0;
 
 
@@ -954,9 +948,13 @@ function renderIndicators() {
 
         const trend =
             ema9 > ema21
+
                 ? "BULLISH"
+
                 : ema9 < ema21
+
                     ? "BEARISH"
+
                     : "SIDEWAYS";
 
 
@@ -984,11 +982,17 @@ function renderIndicators() {
 
         const momentum =
             rsi >= 60
+
                 ? "STRONG"
+
                 : rsi >= 50
+
                     ? "POSITIVE"
+
                     : rsi >= 40
+
                         ? "NEGATIVE"
+
                         : "WEAK";
 
 
@@ -1019,7 +1023,9 @@ function renderIndicators() {
             "volatility",
 
             price > vwap
+
                 ? "ABOVE VWAP"
+
                 : "BELOW VWAP"
 
         );
@@ -1028,7 +1034,7 @@ function renderIndicators() {
 
 
     // ==================================================
-    // CANDLES
+    // CANDLE COUNT
     // ==================================================
 
     const count =
@@ -1097,9 +1103,13 @@ function updateBankTrend() {
 
     const trend =
         ema9 > ema21
+
             ? "BULLISH"
+
             : ema9 < ema21
+
                 ? "BEARISH"
+
                 : "SIDEWAYS";
 
 
@@ -1228,6 +1238,20 @@ function analyzeMarket() {
             "confidence",
             "--"
         );
+
+
+        const confidenceFill =
+            $("confidenceFill");
+
+
+        if (
+            confidenceFill
+        ) {
+
+            confidenceFill.style.width =
+                "0%";
+
+        }
 
 
         return;
@@ -1562,7 +1586,9 @@ function analyzeMarket() {
         "signalReason",
 
         signal === "WAIT"
+
             ? "Waiting for stronger confirmation"
+
             : reasons.join(" + ")
 
     );
@@ -1573,7 +1599,9 @@ function analyzeMarket() {
         "strategyStatus",
 
         signal === "WAIT"
+
             ? "WAITING FOR CONFIRMATION"
+
             : "ACTIVE — PAPER ANALYSIS"
 
     );
@@ -1608,20 +1636,24 @@ function updateTradeSetup(
             "--"
         );
 
+
         setText(
             "stoploss",
             "--"
         );
+
 
         setText(
             "target",
             "--"
         );
 
+
         setText(
             "riskReward",
             "--"
         );
+
 
         return;
 
@@ -1660,13 +1692,17 @@ function updateTradeSetup(
 
     const stop =
         bullish
+
             ? price - risk
+
             : price + risk;
 
 
     const target =
         bullish
+
             ? price + reward
+
             : price - reward;
 
 
@@ -1776,484 +1812,6 @@ function renderV9Diagnostics() {
             nifty.swingLow?.price ??
             nifty.swingLow
         )
-    );
-
-}
-
-
-// ======================================================
-// V9 BACKTEST
-// ======================================================
-
-async function runV9Backtest() {
-
-    if (
-        state.backtestRunning
-    ) {
-
-        console.log(
-            "V9 backtest already running."
-        );
-
-        return;
-
-    }
-
-
-    state.backtestRunning =
-        true;
-
-
-    const button =
-        $("runBacktestBtn");
-
-
-    /*
-    Support alternate ID in case
-    the HTML uses runV9Backtest.
-    */
-
-    const actualButton =
-        button ||
-        $("runV9Backtest");
-
-
-    if (
-        actualButton
-    ) {
-
-        actualButton.disabled =
-            true;
-
-        actualButton.textContent =
-            "RUNNING V9 BACKTEST...";
-
-    }
-
-
-    // ==================================================
-    // RESET UI
-    // ==================================================
-
-    resetBacktestDisplay();
-
-
-    setText(
-        "backtestStatus",
-        "Running historical simulation..."
-    );
-
-
-    try {
-
-        console.log(
-            "================================"
-        );
-
-
-        console.log(
-            "TradeMind V9 BACKTEST START"
-        );
-
-
-        const result =
-            await apiFetch(
-                "/api/backtest?interval=5minute"
-            );
-
-
-        console.log(
-            "V9 BACKTEST RESULT:",
-            result
-        );
-
-
-        state.backtest =
-            result;
-
-
-        renderBacktest(
-            result
-        );
-
-
-    }
-
-    catch (error) {
-
-        console.error(
-            "V9 backtest error:",
-            error
-        );
-
-
-        setText(
-            "backtestStatus",
-            `Backtest Error: ${error.message}`
-        );
-
-    }
-
-    finally {
-
-        state.backtestRunning =
-            false;
-
-
-        if (
-            actualButton
-        ) {
-
-            actualButton.disabled =
-                false;
-
-            actualButton.textContent =
-                "RUN V9 BACKTEST";
-
-        }
-
-    }
-
-}
-
-
-// ======================================================
-// RESET BACKTEST
-// ======================================================
-
-function resetBacktestDisplay() {
-
-    const fields = [
-
-        "candlesTested",
-
-        "totalTrades",
-
-        "buyTrades",
-
-        "sellTrades",
-
-        "winningTrades",
-
-        "losingTrades",
-
-        "winRate",
-
-        "totalPoints",
-
-        "averageWin",
-
-        "averageLoss",
-
-        "profitFactor",
-
-        "maxDrawdown"
-
-    ];
-
-
-    for (
-        const id of fields
-    ) {
-
-        setText(
-            id,
-            "--"
-        );
-
-    }
-
-}
-
-
-// ======================================================
-// RENDER BACKTEST
-// ======================================================
-
-function renderBacktest(
-    result
-) {
-
-    if (
-        !result
-    ) {
-
-        return;
-
-    }
-
-
-    // ==================================================
-    // CANDLES
-    // ==================================================
-
-    setText(
-        "candlesTested",
-        Number.isFinite(
-            Number(
-                result.candlesTested
-            )
-        )
-            ? result.candlesTested
-            : "--"
-    );
-
-
-    // ==================================================
-    // TRADES
-    // ==================================================
-
-    setText(
-        "totalTrades",
-        result.totalTrades ??
-        "--"
-    );
-
-
-    setText(
-        "buyTrades",
-        result.buyTrades ??
-        "--"
-    );
-
-
-    setText(
-        "sellTrades",
-        result.sellTrades ??
-        "--"
-    );
-
-
-    // ==================================================
-    // RESULTS
-    // ==================================================
-
-    setText(
-        "winningTrades",
-        result.winningTrades ??
-        "--"
-    );
-
-
-    setText(
-        "losingTrades",
-        result.losingTrades ??
-        "--"
-    );
-
-
-    // ==================================================
-    // WIN RATE
-    // ==================================================
-
-    setText(
-        "winRate",
-        formatPercent(
-            result.winRate
-        )
-    );
-
-
-    // ==================================================
-    // POINTS
-    // ==================================================
-
-    setText(
-        "totalPoints",
-        formatNumber(
-            result.totalPoints
-        )
-    );
-
-
-    // ==================================================
-    // AVERAGE WIN
-    // ==================================================
-
-    setText(
-        "averageWin",
-        formatNumber(
-            result.averageWin
-        )
-    );
-
-
-    // ==================================================
-    // AVERAGE LOSS
-    // ==================================================
-
-    setText(
-        "averageLoss",
-        formatNumber(
-            result.averageLoss
-        )
-    );
-
-
-    // ==================================================
-    // PROFIT FACTOR
-    // ==================================================
-
-    const pf =
-        Number(
-            result.profitFactor
-        );
-
-
-    if (
-        result.profitFactor === Infinity
-    ) {
-
-        setText(
-            "profitFactor",
-            "∞"
-        );
-
-    }
-
-    else {
-
-        setText(
-            "profitFactor",
-            Number.isFinite(pf)
-                ? pf.toFixed(2)
-                : "--"
-        );
-
-    }
-
-
-    // ==================================================
-    // DRAWDOWN
-    // ==================================================
-
-    setText(
-        "maxDrawdown",
-        formatNumber(
-            result.maxDrawdown
-        )
-    );
-
-
-    // ==================================================
-    // STATUS
-    // ==================================================
-
-    if (
-        result.status ===
-        "INSUFFICIENT_DATA"
-    ) {
-
-        setText(
-            "backtestStatus",
-            `Insufficient historical data — ${result.candlesTested ?? 0} candles`
-        );
-
-    }
-
-    else {
-
-        setText(
-            "backtestStatus",
-            `Completed — ${result.totalTrades ?? 0} trades simulated`
-        );
-
-    }
-
-
-    setText(
-        "backtestEngine",
-        "V9 Historical Simulation"
-    );
-
-
-    console.log(
-        "V9 Backtest statistics:",
-        {
-
-            candles:
-                result.candlesTested,
-
-            trades:
-                result.totalTrades,
-
-            wins:
-                result.winningTrades,
-
-            losses:
-                result.losingTrades,
-
-            winRate:
-                result.winRate,
-
-            points:
-                result.totalPoints,
-
-            profitFactor:
-                result.profitFactor,
-
-            drawdown:
-                result.maxDrawdown
-
-        }
-    );
-
-
-    /*
-    Keep trade list in state.
-
-    We will use this in the next
-    V9 upgrade to create the
-    trade-history table.
-    */
-
-    if (
-        Array.isArray(
-            result.trades
-        )
-    ) {
-
-        console.table(
-            result.trades
-        );
-
-    }
-
-}
-
-
-// ======================================================
-// BACKTEST BUTTON
-// ======================================================
-
-function setupBacktestButton() {
-
-    const button =
-        $("runBacktestBtn") ||
-        $("runV9Backtest");
-
-
-    if (
-        !button
-    ) {
-
-        console.warn(
-            "V9 backtest button not found."
-        );
-
-        return;
-
-    }
-
-
-    button.addEventListener(
-        "click",
-        runV9Backtest
-    );
-
-
-    console.log(
-        "V9 backtest button connected."
     );
 
 }
@@ -2440,7 +1998,17 @@ async function initialize() {
 
 
     console.log(
-        "Historical Backtest Engine Ready"
+        "Live Market Engine Ready"
+    );
+
+
+    console.log(
+        "Historical Indicator Engine Ready"
+    );
+
+
+    console.log(
+        "V9 Backtest handled by backtest.js"
     );
 
 
@@ -2466,33 +2034,18 @@ async function initialize() {
     );
 
 
-    setText(
-        "backtestStatus",
-        "Waiting for historical data"
-    );
-
-
-    setText(
-        "backtestEngine",
-        "V9 Historical Simulation"
-    );
-
-
     setupPaperTradeButton();
 
 
-    setupBacktestButton();
-
-
     /*
-    Load indicators first.
+    Load historical indicators first.
     */
 
     await fetchIndicatorData();
 
 
     /*
-    Then live quotes.
+    Then load live quotes.
     */
 
     await fetchMarketData();
