@@ -101,15 +101,15 @@ NO REAL ORDERS
     // =========================
 
     const strategyTestCandle = {
-        c: 24580
-    };
+    c: 24520
+};
 
-    const strategyTestIndicators = {
-        ema9: 24570,
-        ema21: 24550,
-        rsi14: 58,
-        vwap: 24560
-    };
+const strategyTestIndicators = {
+    ema9: 24530,
+    ema21: 24550,
+    rsi14: 42,
+    vwap: 24540
+};
 
 
     // =========================
