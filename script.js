@@ -111,34 +111,53 @@ function extractPrice(quote) {
 
     }
 
+
     const possibleFields = [
 
         "ltp",
+
+        "LTP",
 
         "last_price",
 
         "lastPrice",
 
+        "LastPrice",
+
         "price",
 
+        "Price",
+
         "close",
+
+        "Close",
 
         "lp",
 
         "last_traded_price",
 
-        "lastTradedPrice"
+        "lastTradedPrice",
+
+        "lastTradedPrice",
+
+        "last"
 
     ];
 
 
     for (const field of possibleFields) {
 
-        const value = Number(quote[field]);
+        const value = Number(
+            quote[field]
+        );
+
 
         if (
+
             Number.isFinite(value) &&
+
             value > 0
+
         ) {
 
             return value;
@@ -147,7 +166,29 @@ function extractPrice(quote) {
 
     }
 
+
     return null;
+
+}
+
+
+// ========================================
+// TEXT NORMALIZATION
+// ========================================
+
+function normalizeText(value) {
+
+    if (value === null || value === undefined) {
+
+        return "";
+
+    }
+
+    return String(value)
+        .toLowerCase()
+        .replace(/[_-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
 }
 
@@ -164,11 +205,13 @@ function extractQuotes(data) {
 
     }
 
+
     if (!data || typeof data !== "object") {
 
         return [];
 
     }
+
 
     if (Array.isArray(data.data)) {
 
@@ -176,11 +219,13 @@ function extractQuotes(data) {
 
     }
 
+
     if (Array.isArray(data.quotes)) {
 
         return data.quotes;
 
     }
+
 
     if (Array.isArray(data.results)) {
 
@@ -188,11 +233,13 @@ function extractQuotes(data) {
 
     }
 
+
     if (Array.isArray(data.items)) {
 
         return data.items;
 
     }
+
 
     return Object.values(data).filter(
 
@@ -216,34 +263,65 @@ function extractQuotes(data) {
 function findInstrument(quotes, instrument) {
 
     const wanted =
-        instrument.toLowerCase();
+        normalizeText(instrument);
 
 
     return quotes.find(quote => {
 
         if (
+
             !quote ||
+
             typeof quote !== "object"
+
         ) {
 
             return false;
 
         }
 
-        const text =
-            JSON.stringify(quote)
-                .toLowerCase();
 
+        const text =
+            normalizeText(
+                JSON.stringify(quote)
+            );
+
+
+        // --------------------------------
+        // NIFTY
+        // --------------------------------
 
         if (wanted === "nifty") {
+
+            const isBankNifty =
+
+                text.includes("banknifty") ||
+
+                text.includes("bank nifty") ||
+
+                text.includes("nifty bank") ||
+
+                text.includes("niftybank");
+
+
+            if (isBankNifty) {
+
+                return false;
+
+            }
+
 
             return (
 
                 text.includes("40000001") ||
 
+                text.includes("nifty 50") ||
+
+                text.includes("nifty50") ||
+
                 (
                     text.includes("nifty") &&
-                    !text.includes("banknifty")
+                    !isBankNifty
                 )
 
             );
@@ -251,13 +329,23 @@ function findInstrument(quotes, instrument) {
         }
 
 
+        // --------------------------------
+        // BANKNIFTY
+        // --------------------------------
+
         if (wanted === "banknifty") {
 
             return (
 
                 text.includes("40000003") ||
 
-                text.includes("banknifty")
+                text.includes("banknifty") ||
+
+                text.includes("bank nifty") ||
+
+                text.includes("nifty bank") ||
+
+                text.includes("niftybank")
 
             );
 
@@ -267,6 +355,72 @@ function findInstrument(quotes, instrument) {
         return false;
 
     }) || null;
+
+}
+
+
+// ========================================
+// FIND OBJECT BY KEY
+// ========================================
+
+function findObjectByKey(
+    object,
+    possibleKeys
+) {
+
+    if (
+
+        !object ||
+
+        typeof object !== "object"
+
+    ) {
+
+        return null;
+
+    }
+
+
+    const keys =
+        Object.keys(object);
+
+
+    for (const key of keys) {
+
+        const normalized =
+            normalizeText(key)
+                .replace(/\s/g, "");
+
+
+        for (const possibleKey of possibleKeys) {
+
+            const wanted =
+                normalizeText(possibleKey)
+                    .replace(/\s/g, "");
+
+
+            if (normalized === wanted) {
+
+                if (
+
+                    object[key] &&
+
+                    typeof object[key] === "object"
+
+                ) {
+
+                    return object[key];
+
+                }
+
+            }
+
+        }
+
+    }
+
+
+    return null;
 
 }
 
@@ -358,6 +512,7 @@ async function apiFetch(url) {
         throw new Error(
 
             message ||
+
             `API error ${response.status}`
 
         );
@@ -425,6 +580,10 @@ async function fetchMarketData() {
         );
 
 
+        // --------------------------------
+        // FIND NIFTY
+        // --------------------------------
+
         const niftyQuote =
             findInstrument(
                 quotes,
@@ -432,12 +591,32 @@ async function fetchMarketData() {
             );
 
 
+        // --------------------------------
+        // FIND BANKNIFTY
+        // --------------------------------
+
         const bankQuote =
             findInstrument(
                 quotes,
                 "banknifty"
             );
 
+
+        console.log(
+            "TradeMind NIFTY quote:",
+            niftyQuote
+        );
+
+
+        console.log(
+            "TradeMind BANKNIFTY quote:",
+            bankQuote
+        );
+
+
+        // --------------------------------
+        // EXTRACT PRICES
+        // --------------------------------
 
         const niftyPrice =
             extractPrice(
@@ -452,7 +631,7 @@ async function fetchMarketData() {
 
 
         // --------------------------------
-        // NIFTY
+        // UPDATE NIFTY
         // --------------------------------
 
         if (niftyPrice !== null) {
@@ -471,7 +650,7 @@ async function fetchMarketData() {
 
 
         // --------------------------------
-        // BANK NIFTY
+        // UPDATE BANKNIFTY
         // --------------------------------
 
         if (bankPrice !== null) {
@@ -573,6 +752,10 @@ async function fetchMarketData() {
 function renderMarket() {
 
 
+    // --------------------------------
+    // NIFTY
+    // --------------------------------
+
     if (state.nifty) {
 
         setText(
@@ -598,6 +781,10 @@ function renderMarket() {
 
     }
 
+
+    // --------------------------------
+    // BANKNIFTY
+    // --------------------------------
 
     if (state.banknifty) {
 
@@ -653,8 +840,11 @@ function renderChange(
 
 
     if (
+
         !Number.isFinite(difference) ||
+
         difference === 0
+
     ) {
 
         el.textContent =
@@ -735,34 +925,131 @@ async function fetchIndicatorData() {
 
 
         // ====================================
-        // FALLBACK PRICE FROM LATEST CANDLE
+        // FIND NIFTY INDICATOR OBJECT
         // ====================================
 
         const niftyData =
-            result.nifty || {};
+
+            result.nifty ||
+
+            result.NIFTY ||
+
+            findObjectByKey(
+
+                result,
+
+                [
+                    "nifty",
+                    "NIFTY",
+                    "nifty50",
+                    "NIFTY50"
+                ]
+
+            ) ||
+
+            {};
 
 
-        const latestCandle =
+        // ====================================
+        // FIND BANKNIFTY INDICATOR OBJECT
+        // ====================================
+
+        const bankData =
+
+            result.banknifty ||
+
+            result.BANKNIFTY ||
+
+            result["bank nifty"] ||
+
+            result["NIFTY BANK"] ||
+
+            result.niftyBank ||
+
+            result.NIFTYBANK ||
+
+            findObjectByKey(
+
+                result,
+
+                [
+                    "banknifty",
+                    "BANKNIFTY",
+                    "bank nifty",
+                    "NIFTY BANK",
+                    "niftybank"
+                ]
+
+            ) ||
+
+            {};
+
+
+        // ====================================
+        // STORE NORMALIZED INDICATORS
+        // ====================================
+
+        state.indicators = {
+
+            ...result,
+
+            nifty: niftyData,
+
+            banknifty: bankData
+
+        };
+
+
+        console.log(
+            "TradeMind NIFTY indicator data:",
+            niftyData
+        );
+
+
+        console.log(
+            "TradeMind BANKNIFTY indicator data:",
+            bankData
+        );
+
+
+        // ====================================
+        // NIFTY LATEST CANDLE FALLBACK
+        // ====================================
+
+        const niftyCandle =
 
             niftyData.lastCandle ||
 
+            niftyData.last_candle ||
+
+            niftyData.latestCandle ||
+
+            niftyData.latest_candle ||
+
             result.lastCandle ||
+
+            result.last_candle ||
 
             result.data?.nifty?.lastCandle ||
 
-            result.data?.lastCandle ||
+            result.data?.NIFTY?.lastCandle ||
 
             null;
 
 
-        if (latestCandle) {
+        if (niftyCandle) {
 
             const candlePrice =
 
                 Number(
 
-                    latestCandle.c ??
-                    latestCandle.close
+                    niftyCandle.c ??
+
+                    niftyCandle.close ??
+
+                    niftyCandle.Close ??
+
+                    niftyCandle.ltp
 
                 );
 
@@ -790,25 +1077,105 @@ async function fetchIndicatorData() {
 
                 console.log(
 
-                    "TradeMind fallback NIFTY price:",
+                    "TradeMind NIFTY candle fallback:",
 
                     candlePrice
 
                 );
-
-
-                renderMarket();
 
             }
 
         }
 
 
+        // ====================================
+        // BANKNIFTY LATEST CANDLE FALLBACK
+        // ====================================
+
+        const bankCandle =
+
+            bankData.lastCandle ||
+
+            bankData.last_candle ||
+
+            bankData.latestCandle ||
+
+            bankData.latest_candle ||
+
+            result.banknifty?.lastCandle ||
+
+            result.BANKNIFTY?.lastCandle ||
+
+            result.data?.banknifty?.lastCandle ||
+
+            result.data?.BANKNIFTY?.lastCandle ||
+
+            result.data?.["NIFTY BANK"]?.lastCandle ||
+
+            result.data?.niftyBank?.lastCandle ||
+
+            null;
+
+
+        if (bankCandle) {
+
+            const candlePrice =
+
+                Number(
+
+                    bankCandle.c ??
+
+                    bankCandle.close ??
+
+                    bankCandle.Close ??
+
+                    bankCandle.ltp
+
+                );
+
+
+            if (
+
+                Number.isFinite(candlePrice) &&
+
+                candlePrice > 0
+
+            ) {
+
+                state.banknifty = {
+
+                    price: candlePrice,
+
+                    previous:
+
+                        state.banknifty?.price ??
+
+                        candlePrice
+
+                };
+
+
+                console.log(
+
+                    "TradeMind BANKNIFTY candle fallback:",
+
+                    candlePrice
+
+                );
+
+            }
+
+        }
+
+
+        renderMarket();
+
+
         console.log(
 
-            "TradeMind indicators:",
+            "TradeMind final indicators:",
 
-            result
+            state.indicators
 
         );
 
@@ -888,57 +1255,41 @@ function renderIndicators() {
         data.banknifty || {};
 
 
-    console.log(
-        "NIFTY indicators:",
-        nifty
-    );
-
-
-    console.log(
-        "BANKNIFTY indicators:",
-        bank
-    );
-
-
     // ------------------------------------
-    // PRIMARY ANALYSIS = NIFTY
+    // NIFTY
     // ------------------------------------
 
-    const ema9 =
+    const niftyEma9 =
         Number(nifty.ema9);
 
 
-    const ema21 =
+    const niftyEma21 =
         Number(nifty.ema21);
 
 
-    const rsi =
+    const niftyRsi =
         Number(nifty.rsi14);
 
 
-    const vwap =
+    const niftyVwap =
         Number(nifty.vwap);
 
 
-    // ------------------------------------
-    // TREND
-    // ------------------------------------
-
     if (
 
-        Number.isFinite(ema9) &&
+        Number.isFinite(niftyEma9) &&
 
-        Number.isFinite(ema21)
+        Number.isFinite(niftyEma21)
 
     ) {
 
         const trend =
 
-            ema9 > ema21
+            niftyEma9 > niftyEma21
 
                 ? "BULLISH"
 
-                : ema9 < ema21
+                : niftyEma9 < niftyEma21
 
                     ? "BEARISH"
 
@@ -959,23 +1310,19 @@ function renderIndicators() {
     }
 
 
-    // ------------------------------------
-    // MOMENTUM
-    // ------------------------------------
-
-    if (Number.isFinite(rsi)) {
+    if (Number.isFinite(niftyRsi)) {
 
         const momentum =
 
-            rsi >= 60
+            niftyRsi >= 60
 
                 ? "STRONG"
 
-                : rsi >= 50
+                : niftyRsi >= 50
 
                     ? "POSITIVE"
 
-                    : rsi >= 40
+                    : niftyRsi >= 40
 
                         ? "NEGATIVE"
 
@@ -986,18 +1333,14 @@ function renderIndicators() {
 
             "momentum",
 
-            `${momentum} (${rsi.toFixed(1)})`
+            `${momentum} (${niftyRsi.toFixed(1)})`
 
         );
 
     }
 
 
-    // ------------------------------------
-    // VWAP POSITION
-    // ------------------------------------
-
-    if (Number.isFinite(vwap)) {
+    if (Number.isFinite(niftyVwap)) {
 
         const price =
             state.nifty?.price;
@@ -1007,20 +1350,16 @@ function renderIndicators() {
 
             const vwapPosition =
 
-                price > vwap
+                price > niftyVwap
 
                     ? "ABOVE VWAP"
 
-                    : price < vwap
+                    : price < niftyVwap
 
                         ? "BELOW VWAP"
 
                         : "AT VWAP";
 
-
-            // Use existing HTML ID.
-            // We can rename the label in
-            // index.html later.
 
             setText(
 
@@ -1088,10 +1427,6 @@ function calculateStrategy() {
     }
 
 
-    // ------------------------------------
-    // REAL INDICATOR VALUES
-    // ------------------------------------
-
     const ema9 =
         Number(nifty.ema9);
 
@@ -1115,7 +1450,7 @@ function calculateStrategy() {
 
 
     // ------------------------------------
-    // VALIDATION
+    // VALIDATE DATA
     // ------------------------------------
 
     if (
@@ -1177,7 +1512,7 @@ function calculateStrategy() {
 
 
     // ------------------------------------
-    // VWAP CONFIRMATION
+    // VWAP
     // ------------------------------------
 
     const aboveVWAP =
@@ -1195,7 +1530,7 @@ function calculateStrategy() {
 
 
     // ------------------------------------
-    // BUY SIGNAL
+    // BUY
     // ------------------------------------
 
     if (
@@ -1231,7 +1566,7 @@ function calculateStrategy() {
 
 
     // ------------------------------------
-    // SELL SIGNAL
+    // SELL
     // ------------------------------------
 
     if (
@@ -1318,10 +1653,6 @@ function analyzeMarket() {
     );
 
 
-    // ------------------------------------
-    // SIGNAL
-    // ------------------------------------
-
     setText(
 
         "signal",
@@ -1330,10 +1661,6 @@ function analyzeMarket() {
 
     );
 
-
-    // ------------------------------------
-    // SIGNAL REASON
-    // ------------------------------------
 
     const reasonElement =
         $("signalReason");
@@ -1346,10 +1673,6 @@ function analyzeMarket() {
 
     }
 
-
-    // ------------------------------------
-    // STRATEGY STATUS
-    // ------------------------------------
 
     const strategyStatus =
         $("strategyStatus");
@@ -1367,10 +1690,6 @@ function analyzeMarket() {
 
     }
 
-
-    // ------------------------------------
-    // TRADE SETUP
-    // ------------------------------------
 
     updateTradeSetup(
         strategy
@@ -1392,10 +1711,6 @@ function updateTradeSetup(strategy) {
     const signal =
         strategy.signal;
 
-
-    // ------------------------------------
-    // NO TRADE
-    // ------------------------------------
 
     if (
 
@@ -1440,11 +1755,7 @@ function updateTradeSetup(strategy) {
     // Stop = 0.10%
     // Target = 0.20%
     //
-    // This is only for initial paper
-    // testing.
-    //
-    // Later we will replace this with
-    // ATR + market structure.
+    // Temporary paper-testing model.
     // ------------------------------------
 
     const risk =
@@ -1456,12 +1767,9 @@ function updateTradeSetup(strategy) {
 
 
     let stop;
+
     let target;
 
-
-    // ------------------------------------
-    // BUY
-    // ------------------------------------
 
     if (signal === "BUY") {
 
@@ -1475,10 +1783,6 @@ function updateTradeSetup(strategy) {
     }
 
 
-    // ------------------------------------
-    // SELL
-    // ------------------------------------
-
     else if (signal === "SELL") {
 
         stop =
@@ -1490,10 +1794,6 @@ function updateTradeSetup(strategy) {
 
     }
 
-
-    // ------------------------------------
-    // RENDER
-    // ------------------------------------
 
     setText(
 
@@ -1747,16 +2047,8 @@ async function initialize() {
     setupPaperTradeButton();
 
 
-    // ------------------------------------
-    // INITIAL MARKET DATA
-    // ------------------------------------
-
     await fetchMarketData();
 
-
-    // ------------------------------------
-    // INITIAL INDICATORS
-    // ------------------------------------
 
     await fetchIndicatorData();
 
@@ -1795,7 +2087,7 @@ setInterval(
 
 
 // ========================================
-// START APPLICATION
+// START
 // ========================================
 
 if (
