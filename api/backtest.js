@@ -2458,13 +2458,22 @@ export default async function handler(
         // ==================================================
         // EXTRACT CANDLES
         // ==================================================
-
+console.log(
+    "V10 INDstocks raw response:",
+    JSON.stringify(result).slice(0, 2000)
+);
+       
         const rawCandles =
             result
                 ?.data
                 ?.NIDX_40000001
                 ?.candles;
-
+console.log(
+    "V10 raw candle count:",
+    Array.isArray(rawCandles)
+        ? rawCandles.length
+        : "NOT_ARRAY"
+);
 
         const candles =
             normalizeCandles(
@@ -2477,7 +2486,10 @@ export default async function handler(
             candles.length
         );
 
-
+console.log(
+    "V10 normalized candle count:",
+    candles.length
+);
         // ==================================================
         // INSUFFICIENT DATA
         // ==================================================
