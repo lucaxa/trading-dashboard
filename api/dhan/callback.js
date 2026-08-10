@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Exchange Dhan tokenId for a 24-hour access token
+    // Exchange tokenId for access token
     const tokenResponse = await fetch(
       `https://auth.dhan.co/app/consumeApp-consent?tokenId=${encodeURIComponent(tokenId)}`,
       {
@@ -40,36 +40,46 @@ export default async function handler(req, res) {
       });
     }
 
-    // Immediately test the access token against Dhan Funds API
-    const fundResponse = await fetch(
-      "https://api.dhan.co/v2/fundlimit",
+    const accessToken = tokenData.accessToken;
+
+    // Verify token
+    const profileResponse = await fetch(
+      "https://api.dhan.co/v2/profile",
       {
         method: "GET",
         headers: {
-          "Content-Type": "application/json",
-          "access-token": tokenData.accessToken
+          "access-token": accessToken
         }
       }
     );
 
-    const fundData = await fundResponse.json();
+    const profileData = await profileResponse.json();
 
-    if (!fundResponse.ok) {
-      return res.status(fundResponse.status).json({
+    if (!profileResponse.ok) {
+      return res.status(500).json({
         success: false,
-        error: "Dhan authentication worked, but Fund API failed",
-        details: fundData
+        error: "Dhan profile verification failed"
       });
     }
 
-    // Never expose the access token
+    /*
+      Store token in a secure HttpOnly cookie.
+
+      The browser cannot read this cookie using JavaScript.
+      It is automatically sent back to our Vercel API.
+    */
+    const maxAge = 60 * 60 * 24;
+
+    res.setHeader(
+      "Set-Cookie",
+      `DHAN_ACCESS_TOKEN=${encodeURIComponent(accessToken)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`
+    );
+
     return res.status(200).json({
       success: true,
-      message: "Dhan authentication + Fund API successful",
-      dhanClientId: fundData.dhanClientId,
-      availableBalance: fundData.availabelBalance,
-      utilizedAmount: fundData.utilizedAmount,
-      withdrawableBalance: fundData.withdrawableBalance,
+      message: "Dhan session established",
+      dhanClientId: profileData.dhanClientId,
+      tokenValidity: profileData.tokenValidity,
       tokenExpiry: tokenData.expiryTime
     });
 
