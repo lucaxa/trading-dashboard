@@ -10,323 +10,182 @@ INDstocks → Vercel
              ↓
        V10.1 Historical Backtest
 
+Dhan → Vercel
+        ↓
+  5-minute Historical Candles
+        ↓
+Dhan vs INDstocks Comparison
+
 PAPER TRADING ONLY.
 NO REAL ORDERS.
 */
 
 "use strict";
 
-
-// ======================================================
-// V10.1 FRONTEND LOADED DIAGNOSTIC
-// ======================================================
-
 console.log("🔥 V10.1 SCRIPT LOADED");
 console.log("🔥 TradeMind Pro frontend controller starting");
-
 
 // ======================================================
 // STATE
 // ======================================================
 
 const state = {
-
     nifty: null,
-
     banknifty: null,
-
     indicators: null,
-
     backtest: null,
-
     connected: false,
-
     lastUpdate: null,
-
     backtestRunning: false
-
 };
-
 
 // ======================================================
 // DOM HELPERS
 // ======================================================
 
 function $(id) {
-
     return document.getElementById(id);
-
 }
-
 
 function setText(id, value) {
+    const elements = document.querySelectorAll(`[id="${id}"]`);
 
-    const elements =
-        document.querySelectorAll(
-            `[id="${id}"]`
-        );
+    if (!elements.length) return;
 
-    if (!elements.length) {
-
-        return;
-
-    }
-
-    elements.forEach(
-        element => {
-
-            element.textContent =
-                value;
-
-        }
-    );
-
+    elements.forEach(element => {
+        element.textContent = value;
+    });
 }
-
-
-// ======================================================
-// SET MULTIPLE POSSIBLE IDs
-// ======================================================
 
 function setMultipleText(ids, value) {
-
-    ids.forEach(
-        id => {
-
-            setText(
-                id,
-                value
-            );
-
-        }
-    );
-
+    ids.forEach(id => setText(id, value));
 }
-
 
 // ======================================================
 // FORMATTING
 // ======================================================
 
 function formatPrice(value) {
+    const number = Number(value);
 
-    const number =
-        Number(value);
+    if (!Number.isFinite(number)) return "--";
 
-    if (!Number.isFinite(number)) {
-
-        return "--";
-
-    }
-
-    return number.toLocaleString(
-        "en-IN",
-        {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }
-    );
-
+    return number.toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
 }
-
 
 function formatNumber(value) {
+    const number = Number(value);
 
-    const number =
-        Number(value);
-
-    if (!Number.isFinite(number)) {
-
-        return "--";
-
-    }
+    if (!Number.isFinite(number)) return "--";
 
     return number.toFixed(2);
-
 }
-
 
 function formatPercent(value) {
+    const number = Number(value);
 
-    const number =
-        Number(value);
-
-    if (!Number.isFinite(number)) {
-
-        return "--";
-
-    }
+    if (!Number.isFinite(number)) return "--";
 
     return `${number.toFixed(2)}%`;
-
 }
-
 
 // ======================================================
 // API FETCH
 // ======================================================
 
-async function apiFetch(
-    url,
-    timeoutMs = 15000
-) {
+async function apiFetch(url, timeoutMs = 15000) {
 
-    console.log(
-        "================================"
-    );
+    console.log("================================");
+    console.log("TradeMind API REQUEST:", url);
+    console.log("================================");
 
-    console.log(
-        "TradeMind API REQUEST:",
-        url
-    );
+    const controller = new AbortController();
 
-    console.log(
-        "================================"
-    );
-
-
-    const controller =
-        new AbortController();
-
-
-    const timeout =
-        setTimeout(
-            () => {
-
-                controller.abort();
-
-            },
-            timeoutMs
-        );
-
+    const timeout = setTimeout(() => {
+        controller.abort();
+    }, timeoutMs);
 
     try {
 
-        const response =
-            await fetch(
-                url,
-                {
-                    method: "GET",
+        const response = await fetch(url, {
+            method: "GET",
+            cache: "no-store",
 
-                    cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache"
+            },
 
-                    headers: {
+            signal: controller.signal
+        });
 
-                        "Accept":
-                            "application/json",
-
-                        "Cache-Control":
-                            "no-cache",
-
-                        "Pragma":
-                            "no-cache"
-
-                    },
-
-                    signal:
-                        controller.signal
-
-                }
-            );
-
-
-        const text =
-            await response.text();
-
+        const text = await response.text();
 
         console.log(
             "TradeMind API HTTP status:",
             response.status
         );
 
-
         console.log(
             "TradeMind API raw response:",
             text.slice(0, 5000)
         );
 
-
         let data;
 
-
         try {
-
-            data =
-                JSON.parse(text);
-
+            data = JSON.parse(text);
         }
 
         catch {
-
             throw new Error(
                 `Invalid JSON response from ${url} (HTTP ${response.status})`
             );
-
         }
-
 
         console.log(
             "TradeMind API parsed response:",
             data
         );
 
-
         if (!response.ok) {
 
             let message;
 
-
-            if (
-                typeof data?.error === "string"
-            ) {
-
-                message =
-                    data.error;
-
+            if (typeof data?.error === "string") {
+                message = data.error;
             }
 
             else {
-
-                message =
-                    JSON.stringify(
-                        data?.error ||
-                        data
-                    );
-
+                message = JSON.stringify(
+                    data?.error || data
+                );
             }
-
 
             throw new Error(
                 message ||
                 `API HTTP error ${response.status}`
             );
-
         }
 
-
-        if (
-            data &&
-            data.success === false
-        ) {
+        if (data && data.success === false) {
 
             const message =
                 typeof data.error === "string"
-
                     ? data.error
-
                     : JSON.stringify(
-                        data.error ||
-                        data
+                        data.error || data
                     );
-
 
             throw new Error(
                 message ||
                 "API returned success:false"
             );
-
         }
-
 
         return data;
 
@@ -334,32 +193,21 @@ async function apiFetch(
 
     catch (error) {
 
-        if (
-            error?.name ===
-            "AbortError"
-        ) {
+        if (error?.name === "AbortError") {
 
             throw new Error(
                 `API request timed out after ${timeoutMs / 1000} seconds`
             );
-
         }
-
 
         throw error;
 
     }
 
     finally {
-
-        clearTimeout(
-            timeout
-        );
-
+        clearTimeout(timeout);
     }
-
 }
-
 
 // ======================================================
 // PRICE EXTRACTION
@@ -367,72 +215,41 @@ async function apiFetch(
 
 function extractPrice(quote) {
 
-    if (
-        typeof quote === "number"
-    ) {
-
+    if (typeof quote === "number") {
         return quote;
-
     }
 
-
-    if (
-        !quote ||
-        typeof quote !== "object"
-    ) {
-
+    if (!quote || typeof quote !== "object") {
         return null;
-
     }
-
 
     const fields = [
-
         "ltp",
-
         "last_price",
-
         "lastPrice",
-
         "price",
-
         "close",
-
         "lp",
-
         "last_traded_price",
-
         "lastTradedPrice"
-
     ];
 
+    for (const field of fields) {
 
-    for (
-        const field of fields
-    ) {
-
-        const value =
-            Number(
-                quote[field]
-            );
-
+        const value = Number(
+            quote[field]
+        );
 
         if (
             Number.isFinite(value) &&
             value > 0
         ) {
-
             return value;
-
         }
-
     }
 
-
     return null;
-
 }
-
 
 // ======================================================
 // QUOTE EXTRACTION
@@ -440,74 +257,40 @@ function extractPrice(quote) {
 
 function extractQuotes(data) {
 
-    if (
-        Array.isArray(data)
-    ) {
-
+    if (Array.isArray(data)) {
         return data;
-
     }
-
 
     if (
         !data ||
         typeof data !== "object"
     ) {
-
         return [];
-
     }
 
-
-    if (
-        Array.isArray(data.data)
-    ) {
-
+    if (Array.isArray(data.data)) {
         return data.data;
-
     }
 
-
-    if (
-        Array.isArray(data.quotes)
-    ) {
-
+    if (Array.isArray(data.quotes)) {
         return data.quotes;
-
     }
 
-
-    if (
-        Array.isArray(data.results)
-    ) {
-
+    if (Array.isArray(data.results)) {
         return data.results;
-
     }
 
-
-    if (
-        Array.isArray(data.items)
-    ) {
-
+    if (Array.isArray(data.items)) {
         return data.items;
-
     }
 
-
-    return Object.values(
-        data
-    ).filter(
-
+    return Object.values(data).filter(
         value =>
             value &&
             typeof value === "object" &&
             !Array.isArray(value)
-
     );
-
 }
-
 
 // ======================================================
 // FIND INSTRUMENT
@@ -519,84 +302,46 @@ function findInstrument(
 ) {
 
     const wanted =
-        String(
-            instrument
-        ).toLowerCase();
-
+        String(instrument).toLowerCase();
 
     return quotes.find(
-
         quote => {
 
             if (
                 !quote ||
                 typeof quote !== "object"
             ) {
-
                 return false;
-
             }
-
 
             const text =
                 JSON.stringify(
                     quote
                 ).toLowerCase();
 
-
-            if (
-                wanted === "nifty"
-            ) {
+            if (wanted === "nifty") {
 
                 return (
-
-                    text.includes(
-                        "40000001"
-                    ) ||
-
+                    text.includes("40000001") ||
                     (
-                        text.includes(
-                            "nifty"
-                        ) &&
-
-                        !text.includes(
-                            "banknifty"
-                        )
-
+                        text.includes("nifty") &&
+                        !text.includes("banknifty")
                     )
-
                 );
-
             }
 
-
-            if (
-                wanted === "banknifty"
-            ) {
+            if (wanted === "banknifty") {
 
                 return (
-
-                    text.includes(
-                        "40000003"
-                    ) ||
-
-                    text.includes(
-                        "banknifty"
-                    )
-
+                    text.includes("40000003") ||
+                    text.includes("banknifty")
                 );
-
             }
-
 
             return false;
-
         }
-
     ) || null;
-
 }
-
 
 // ======================================================
 // LIVE MARKET DATA
@@ -612,13 +357,10 @@ async function fetchMarketData() {
                 10000
             );
 
-
         const quotes =
             extractQuotes(
-                result?.data ??
-                result
+                result?.data ?? result
             );
-
 
         const niftyQuote =
             findInstrument(
@@ -626,37 +368,31 @@ async function fetchMarketData() {
                 "nifty"
             );
 
-
         const bankQuote =
             findInstrument(
                 quotes,
                 "banknifty"
             );
 
-
         const niftyPrice =
             extractPrice(
                 niftyQuote
             );
-
 
         const bankPrice =
             extractPrice(
                 bankQuote
             );
 
-
         console.log(
             "NIFTY live price:",
             niftyPrice
         );
 
-
         console.log(
             "BANKNIFTY live price:",
             bankPrice
         );
-
 
         if (
             Number.isFinite(
@@ -665,18 +401,12 @@ async function fetchMarketData() {
         ) {
 
             state.nifty = {
-
-                price:
-                    niftyPrice,
-
+                price: niftyPrice,
                 previous:
                     state.nifty?.price ??
                     niftyPrice
-
             };
-
         }
-
 
         if (
             Number.isFinite(
@@ -685,42 +415,28 @@ async function fetchMarketData() {
         ) {
 
             state.banknifty = {
-
-                price:
-                    bankPrice,
-
+                price: bankPrice,
                 previous:
                     state.banknifty?.price ??
                     bankPrice
-
             };
-
         }
-
 
         renderMarket();
 
-
-        state.connected =
-            true;
-
+        state.connected = true;
 
         setText(
             "marketStatus",
             "LIVE"
         );
 
-
         setText(
             "dataStatus",
             "INDSTOCKS"
         );
 
-
-        updateStatusDot(
-            true
-        );
-
+        updateStatusDot(true);
 
         updateTime();
 
@@ -735,27 +451,19 @@ async function fetchMarketData() {
             error
         );
 
-
         setText(
             "marketStatus",
             "DATA ERROR"
         );
-
 
         setText(
             "dataStatus",
             "INDSTOCKS ERROR"
         );
 
-
-        updateStatusDot(
-            false
-        );
-
+        updateStatusDot(false);
     }
-
 }
-
 
 // ======================================================
 // MARKET RENDER
@@ -763,9 +471,7 @@ async function fetchMarketData() {
 
 function renderMarket() {
 
-    if (
-        state.nifty
-    ) {
+    if (state.nifty) {
 
         setText(
             "niftyPrice",
@@ -774,23 +480,14 @@ function renderMarket() {
             )
         );
 
-
         renderChange(
-
             "niftyChange",
-
             state.nifty.price,
-
             state.nifty.previous
-
         );
-
     }
 
-
-    if (
-        state.banknifty
-    ) {
+    if (state.banknifty) {
 
         setText(
             "bankPrice",
@@ -799,21 +496,13 @@ function renderMarket() {
             )
         );
 
-
         renderChange(
-
             "bankChange",
-
             state.banknifty.price,
-
             state.banknifty.previous
-
         );
-
     }
-
 }
-
 
 // ======================================================
 // CHANGE
@@ -828,15 +517,7 @@ function renderChange(
     const element =
         $(elementId);
 
-
-    if (
-        !element
-    ) {
-
-        return;
-
-    }
-
+    if (!element) return;
 
     if (
         !Number.isFinite(current) ||
@@ -847,18 +528,12 @@ function renderChange(
             "Waiting for data";
 
         return;
-
     }
 
-
     const difference =
-        current -
-        previous;
+        current - previous;
 
-
-    if (
-        difference === 0
-    ) {
+    if (difference === 0) {
 
         element.textContent =
             "No change";
@@ -867,38 +542,29 @@ function renderChange(
             "change";
 
         return;
-
     }
-
 
     const percent =
         previous !== 0
-
             ? (
                 difference /
                 previous
             ) * 100
-
             : 0;
-
 
     const direction =
         difference > 0
             ? "▲"
             : "▼";
 
-
     element.textContent =
         `${direction} ${Math.abs(difference).toFixed(2)} (${Math.abs(percent).toFixed(2)}%)`;
-
 
     element.className =
         difference > 0
             ? "change up"
             : "change down";
-
 }
-
 
 // ======================================================
 // HISTORICAL INDICATORS
@@ -913,39 +579,30 @@ async function fetchIndicatorData() {
             "CALCULATING"
         );
 
-
         const result =
             await apiFetch(
                 "/api/indicators?interval=5minute",
                 15000
             );
 
-
         state.indicators =
             result;
-
 
         console.log(
             "V10 indicators:",
             result
         );
 
-
         const nifty =
-            result?.nifty ||
-            {};
-
+            result?.nifty || {};
 
         const bank =
-            result?.banknifty ||
-            {};
-
+            result?.banknifty || {};
 
         const niftyClose =
             Number(
                 nifty.lastCandle?.c
             );
-
 
         if (
             !Number.isFinite(
@@ -957,23 +614,15 @@ async function fetchIndicatorData() {
         ) {
 
             state.nifty = {
-
-                price:
-                    niftyClose,
-
-                previous:
-                    niftyClose
-
+                price: niftyClose,
+                previous: niftyClose
             };
-
         }
-
 
         const bankClose =
             Number(
                 bank.lastCandle?.c
             );
-
 
         if (
             !Number.isFinite(
@@ -985,17 +634,10 @@ async function fetchIndicatorData() {
         ) {
 
             state.banknifty = {
-
-                price:
-                    bankClose,
-
-                previous:
-                    bankClose
-
+                price: bankClose,
+                previous: bankClose
             };
-
         }
-
 
         renderMarket();
 
@@ -1006,7 +648,6 @@ async function fetchIndicatorData() {
         renderV10Diagnostics();
 
         updateBankTrend();
-
 
         setText(
             "analysisStatus",
@@ -1022,16 +663,12 @@ async function fetchIndicatorData() {
             error
         );
 
-
         setText(
             "analysisStatus",
             "INDICATOR ERROR"
         );
-
     }
-
 }
-
 
 // ======================================================
 // INDICATORS
@@ -1042,37 +679,19 @@ function renderIndicators() {
     const nifty =
         state.indicators?.nifty;
 
-
-    if (!nifty) {
-
-        return;
-
-    }
-
+    if (!nifty) return;
 
     const ema9 =
-        Number(
-            nifty.ema9
-        );
-
+        Number(nifty.ema9);
 
     const ema21 =
-        Number(
-            nifty.ema21
-        );
-
+        Number(nifty.ema21);
 
     const rsi =
-        Number(
-            nifty.rsi14
-        );
-
+        Number(nifty.rsi14);
 
     const vwap =
-        Number(
-            nifty.vwap
-        );
-
+        Number(nifty.vwap);
 
     if (
         Number.isFinite(ema9) &&
@@ -1086,20 +705,16 @@ function renderIndicators() {
                     ? "BEARISH"
                     : "SIDEWAYS";
 
-
         setText(
             "trend",
             trend
         );
 
-
         setText(
             "niftyTrend",
             trend
         );
-
     }
-
 
     if (
         Number.isFinite(rsi)
@@ -1114,20 +729,16 @@ function renderIndicators() {
                         ? "NEGATIVE"
                         : "WEAK";
 
-
         setText(
             "momentum",
             `${momentum} (${rsi.toFixed(1)})`
         );
-
     }
-
 
     const price =
         Number(
             state.nifty?.price
         );
-
 
     if (
         Number.isFinite(price) &&
@@ -1136,21 +747,16 @@ function renderIndicators() {
 
         setText(
             "volatility",
-
             price > vwap
                 ? "ABOVE VWAP"
                 : "BELOW VWAP"
-
         );
-
     }
-
 
     const count =
         Number(
             nifty.candleCount
         );
-
 
     if (
         Number.isFinite(count)
@@ -1160,11 +766,8 @@ function renderIndicators() {
             "candleStatus",
             `${count} CANDLES`
         );
-
     }
-
 }
-
 
 // ======================================================
 // BANKNIFTY TREND
@@ -1175,25 +778,13 @@ function updateBankTrend() {
     const bank =
         state.indicators?.banknifty;
 
-
-    if (!bank) {
-
-        return;
-
-    }
-
+    if (!bank) return;
 
     const ema9 =
-        Number(
-            bank.ema9
-        );
-
+        Number(bank.ema9);
 
     const ema21 =
-        Number(
-            bank.ema21
-        );
-
+        Number(bank.ema21);
 
     if (
         !Number.isFinite(ema9) ||
@@ -1206,9 +797,7 @@ function updateBankTrend() {
         );
 
         return;
-
     }
-
 
     const trend =
         ema9 > ema21
@@ -1217,14 +806,11 @@ function updateBankTrend() {
                 ? "BEARISH"
                 : "SIDEWAYS";
 
-
     setText(
         "bankTrend",
         trend
     );
-
 }
-
 
 // ======================================================
 // STRATEGY
@@ -1235,13 +821,7 @@ function analyzeMarket() {
     const nifty =
         state.indicators?.nifty;
 
-
-    if (!nifty) {
-
-        return;
-
-    }
-
+    if (!nifty) return;
 
     const ema9 =
         Number(nifty.ema9);
@@ -1262,8 +842,7 @@ function analyzeMarket() {
         Number(state.nifty?.price);
 
     const candle =
-        nifty.lastCandle ||
-        {};
+        nifty.lastCandle || {};
 
     const open =
         Number(candle.o);
@@ -1277,7 +856,6 @@ function analyzeMarket() {
     const close =
         Number(candle.c);
 
-
     if (
         !Number.isFinite(price) ||
         !Number.isFinite(ema9) ||
@@ -1286,50 +864,23 @@ function analyzeMarket() {
         !Number.isFinite(vwap)
     ) {
 
-        setText(
-            "signal",
-            "WAIT"
-        );
-
-        setText(
-            "strategyStatus",
-            "WAITING FOR DATA"
-        );
-
-        setText(
-            "buyScore",
-            "--"
-        );
-
-        setText(
-            "sellScore",
-            "--"
-        );
-
-        setText(
-            "confidence",
-            "--"
-        );
+        setText("signal", "WAIT");
+        setText("strategyStatus", "WAITING FOR DATA");
+        setText("buyScore", "--");
+        setText("sellScore", "--");
+        setText("confidence", "--");
 
         return;
-
     }
 
-
     let buyScore = 0;
-
     let sellScore = 0;
 
     const reasons = [];
 
-
-    // ==================================================
     // EMA
-    // ==================================================
 
-    if (
-        ema9 > ema21
-    ) {
+    if (ema9 > ema21) {
 
         buyScore++;
 
@@ -1339,22 +890,16 @@ function analyzeMarket() {
 
     }
 
-    else if (
-        ema9 < ema21
-    ) {
+    else if (ema9 < ema21) {
 
         sellScore++;
 
         reasons.push(
             "EMA bearish"
         );
-
     }
 
-
-    // ==================================================
     // RSI
-    // ==================================================
 
     if (
         rsi >= 55 &&
@@ -1379,17 +924,11 @@ function analyzeMarket() {
         reasons.push(
             "RSI bearish"
         );
-
     }
 
-
-    // ==================================================
     // VWAP
-    // ==================================================
 
-    if (
-        price > vwap
-    ) {
+    if (price > vwap) {
 
         buyScore++;
 
@@ -1399,26 +938,18 @@ function analyzeMarket() {
 
     }
 
-    else if (
-        price < vwap
-    ) {
+    else if (price < vwap) {
 
         sellScore++;
 
         reasons.push(
             "Price below VWAP"
         );
-
     }
 
-
-    // ==================================================
     // CANDLE
-    // ==================================================
 
-    let candleStrong =
-        false;
-
+    let candleStrong = false;
 
     if (
         Number.isFinite(open) &&
@@ -1427,9 +958,7 @@ function analyzeMarket() {
         Number.isFinite(close)
     ) {
 
-        if (
-            close > open
-        ) {
+        if (close > open) {
 
             buyScore++;
 
@@ -1439,48 +968,33 @@ function analyzeMarket() {
 
         }
 
-        else if (
-            close < open
-        ) {
+        else if (close < open) {
 
             sellScore++;
 
             reasons.push(
                 "Bearish candle"
             );
-
         }
 
-
         const range =
-            high -
-            low;
-
+            high - low;
 
         const body =
             Math.abs(
-                close -
-                open
+                close - open
             );
-
 
         candleStrong =
             range > 0 &&
             (
-                body /
-                range
+                body / range
             ) >= 0.50;
-
     }
 
-
-    // ==================================================
     // SIGNAL
-    // ==================================================
 
-    let signal =
-        "WAIT";
-
+    let signal = "WAIT";
 
     if (
         buyScore >= 4 &&
@@ -1523,26 +1037,16 @@ function analyzeMarket() {
 
         signal =
             "SELL BIAS";
-
     }
 
-
     const confidenceMap = {
-
         0: 0,
-
         1: 20,
-
         2: 40,
-
         3: 60,
-
         4: 75,
-
         5: 90
-
     };
-
 
     const maximum =
         Math.max(
@@ -1550,12 +1054,8 @@ function analyzeMarket() {
             sellScore
         );
 
-
     let confidence =
-        confidenceMap[
-            maximum
-        ] ?? 0;
-
+        confidenceMap[maximum] ?? 0;
 
     if (
         buyScore > 0 &&
@@ -1567,95 +1067,66 @@ function analyzeMarket() {
                 confidence,
                 60
             );
-
     }
 
-
-    if (
-        signal === "WAIT"
-    ) {
+    if (signal === "WAIT") {
 
         confidence =
             Math.min(
                 confidence,
                 40
             );
-
     }
-
 
     setText(
         "buyScore",
         buyScore
     );
 
-
     setText(
         "sellScore",
         sellScore
     );
-
 
     setText(
         "confidence",
         `${confidence}%`
     );
 
-
     const confidenceFill =
         $("confidenceFill");
 
-
-    if (
-        confidenceFill
-    ) {
+    if (confidenceFill) {
 
         confidenceFill.style.width =
             `${confidence}%`;
-
     }
-
 
     setText(
         "signal",
         signal
     );
 
-
     setText(
-
         "signalReason",
-
         signal === "WAIT"
-
             ? "Waiting for stronger confirmation"
-
             : reasons.join(" + ")
-
     );
-
 
     setText(
-
         "strategyStatus",
-
         signal === "WAIT"
-
             ? "WAITING FOR CONFIRMATION"
-
             : "ACTIVE — PAPER ANALYSIS"
-
     );
-
 
     updateTradeSetup(
         price,
         signal,
         atr
     );
-
 }
-
 
 // ======================================================
 // TRADE SETUP
@@ -1672,33 +1143,15 @@ function updateTradeSetup(
         signal === "WAIT"
     ) {
 
-        setText(
-            "entry",
-            "--"
-        );
-
-        setText(
-            "stoploss",
-            "--"
-        );
-
-        setText(
-            "target",
-            "--"
-        );
-
-        setText(
-            "riskReward",
-            "--"
-        );
+        setText("entry", "--");
+        setText("stoploss", "--");
+        setText("target", "--");
+        setText("riskReward", "--");
 
         return;
-
     }
 
-
     let risk;
-
 
     if (
         Number.isFinite(atr) &&
@@ -1706,67 +1159,53 @@ function updateTradeSetup(
     ) {
 
         risk =
-            atr *
-            1.5;
+            atr * 1.5;
 
     }
 
     else {
 
         risk =
-            price *
-            0.001;
-
+            price * 0.001;
     }
 
-
     const reward =
-        risk *
-        2;
-
+        risk * 2;
 
     const bullish =
         signal === "BUY BIAS" ||
         signal === "STRONG BUY";
-
 
     const stop =
         bullish
             ? price - risk
             : price + risk;
 
-
     const target =
         bullish
             ? price + reward
             : price - reward;
-
 
     setText(
         "entry",
         formatPrice(price)
     );
 
-
     setText(
         "stoploss",
         formatPrice(stop)
     );
-
 
     setText(
         "target",
         formatPrice(target)
     );
 
-
     setText(
         "riskReward",
         "1 : 2.00"
     );
-
 }
-
 
 // ======================================================
 // V10 DIAGNOSTICS
@@ -1777,13 +1216,7 @@ function renderV10Diagnostics() {
     const nifty =
         state.indicators?.nifty;
 
-
-    if (!nifty) {
-
-        return;
-
-    }
-
+    if (!nifty) return;
 
     setText(
         "diagPrice",
@@ -1792,14 +1225,12 @@ function renderV10Diagnostics() {
         )
     );
 
-
     setText(
         "diagEma9",
         formatPrice(
             nifty.ema9
         )
     );
-
 
     setText(
         "diagEma21",
@@ -1808,14 +1239,12 @@ function renderV10Diagnostics() {
         )
     );
 
-
     setText(
         "diagRsi",
         formatNumber(
             nifty.rsi14
         )
     );
-
 
     setText(
         "diagVwap",
@@ -1824,14 +1253,12 @@ function renderV10Diagnostics() {
         )
     );
 
-
     setText(
         "diagAtr",
         formatNumber(
             nifty.atr14
         )
     );
-
 
     setText(
         "diagSwingHigh",
@@ -1841,7 +1268,6 @@ function renderV10Diagnostics() {
         )
     );
 
-
     setText(
         "diagSwingLow",
         formatPrice(
@@ -1849,9 +1275,7 @@ function renderV10Diagnostics() {
             nifty.swingLow
         )
     );
-
 }
-
 
 // ======================================================
 // BACKTEST ID COMPATIBILITY
@@ -1928,9 +1352,7 @@ const BACKTEST_IDS = {
         "btEngine",
         "backtestEngine"
     ]
-
 };
-
 
 // ======================================================
 // BACKTEST DISPLAY HELPER
@@ -1942,9 +1364,7 @@ function setBacktestField(
 ) {
 
     const ids =
-        BACKTEST_IDS[field] ||
-        [];
-
+        BACKTEST_IDS[field] || [];
 
     ids.forEach(
         id => {
@@ -1956,9 +1376,7 @@ function setBacktestField(
 
         }
     );
-
 }
-
 
 // ======================================================
 // V10.1 BACKTEST
@@ -1970,139 +1388,60 @@ async function runV10Backtest() {
         "🔥🔥🔥 V10.1 BACKTEST BUTTON CLICKED 🔥🔥🔥"
     );
 
-
-    if (
-        state.backtestRunning
-    ) {
+    if (state.backtestRunning) {
 
         console.log(
             "V10.1 backtest already running."
         );
 
         return;
-
     }
 
-
-    state.backtestRunning =
-        true;
-
+    state.backtestRunning = true;
 
     const button =
         $("runBacktestBtn") ||
         $("runV10Backtest") ||
         $("runV9Backtest");
 
+    if (button) {
 
-    console.log(
-        "🔥 BACKTEST BUTTON:",
-        button
-    );
-
-
-    if (
-        button
-    ) {
-
-        button.disabled =
-            true;
+        button.disabled = true;
 
         button.textContent =
             "RUNNING V10.1 BACKTEST...";
-
     }
 
-
     resetBacktestDisplay();
-
 
     setBacktestField(
         "status",
         "Fetching fresh V10.1 historical data..."
     );
 
-
     setBacktestField(
         "engine",
         "V10.1 Historical Simulation — RUNNING"
     );
 
-
-    console.log(
-        "================================"
-    );
-
-
-    console.log(
-        "🔥 TradeMind V10.1 BACKTEST START"
-    );
-
-
-    console.log(
-        "🔥 Historical interval: 5minute"
-    );
-
-
-    console.log(
-        "================================"
-    );
-
-
     try {
-
-        /*
-        CACHE BUSTER
-
-        This prevents browser/Vercel
-        caching from returning an old result.
-        */
 
         const cacheBust =
             Date.now();
 
-
         const apiUrl =
             `/api/backtest?interval=5minute&_t=${cacheBust}`;
-
-
-        console.log(
-            "🔥 V10.1 BACKTEST API URL:",
-            apiUrl
-        );
-
 
         setBacktestField(
             "status",
             "Calling V10.1 historical backtest API..."
         );
 
-
         const result =
             await apiFetch(
                 apiUrl,
                 30000
             );
-
-
-        console.log(
-            "================================"
-        );
-
-
-        console.log(
-            "🔥 V10.1 BACKTEST RESULT RECEIVED"
-        );
-
-
-        console.log(
-            result
-        );
-
-
-        console.log(
-            "================================"
-        );
-
 
         if (
             !result ||
@@ -2112,57 +1451,30 @@ async function runV10Backtest() {
             throw new Error(
                 "Backtest API returned an empty response"
             );
-
         }
-
 
         state.backtest =
             result;
 
-
-        renderBacktest(
-            result
-        );
-
-
-        console.log(
-            "🔥 V10.1 BACKTEST RENDER COMPLETE"
-        );
+        renderBacktest(result);
 
     }
 
     catch (error) {
 
         console.error(
-            "================================"
-        );
-
-
-        console.error(
-            "🔥 V10.1 BACKTEST ERROR"
-        );
-
-
-        console.error(
+            "🔥 V10.1 BACKTEST ERROR",
             error
         );
-
-
-        console.error(
-            "================================"
-        );
-
 
         const message =
             error?.message ||
             "Unknown backtest error";
 
-
         setBacktestField(
             "status",
             `BACKTEST ERROR: ${message}`
         );
-
 
         setBacktestField(
             "engine",
@@ -2173,31 +1485,17 @@ async function runV10Backtest() {
 
     finally {
 
-        state.backtestRunning =
-            false;
+        state.backtestRunning = false;
 
+        if (button) {
 
-        if (
-            button
-        ) {
-
-            button.disabled =
-                false;
+            button.disabled = false;
 
             button.textContent =
                 "RUN V10.1 BACKTEST";
-
         }
-
-
-        console.log(
-            "🔥 V10.1 backtest request finished."
-        );
-
     }
-
 }
-
 
 // ======================================================
 // RESET BACKTEST DISPLAY
@@ -2205,72 +1503,23 @@ async function runV10Backtest() {
 
 function resetBacktestDisplay() {
 
-    setBacktestField(
-        "candles",
-        "--"
-    );
-
-    setBacktestField(
-        "trades",
-        "--"
-    );
-
-    setBacktestField(
-        "buyTrades",
-        "--"
-    );
-
-    setBacktestField(
-        "sellTrades",
-        "--"
-    );
-
-    setBacktestField(
-        "wins",
-        "--"
-    );
-
-    setBacktestField(
-        "losses",
-        "--"
-    );
-
-    setBacktestField(
-        "winRate",
-        "--"
-    );
-
-    setBacktestField(
-        "points",
-        "--"
-    );
-
-    setBacktestField(
-        "avgWin",
-        "--"
-    );
-
-    setBacktestField(
-        "avgLoss",
-        "--"
-    );
-
-    setBacktestField(
-        "profitFactor",
-        "--"
-    );
-
-    setBacktestField(
-        "drawdown",
-        "--"
-    );
-
+    setBacktestField("candles", "--");
+    setBacktestField("trades", "--");
+    setBacktestField("buyTrades", "--");
+    setBacktestField("sellTrades", "--");
+    setBacktestField("wins", "--");
+    setBacktestField("losses", "--");
+    setBacktestField("winRate", "--");
+    setBacktestField("points", "--");
+    setBacktestField("avgWin", "--");
+    setBacktestField("avgLoss", "--");
+    setBacktestField("profitFactor", "--");
+    setBacktestField("drawdown", "--");
 
     const container =
         $("tradeHistory") ||
         $("tradeHistoryTable") ||
         $("tradeList");
-
 
     if (
         container &&
@@ -2281,193 +1530,120 @@ function resetBacktestDisplay() {
             `<div class="trade-history-row">
                 Waiting for V10.1 backtest...
             </div>`;
-
     }
-
 }
-
 
 // ======================================================
 // SAFE STATISTIC
 // ======================================================
 
-function safeStatistic(
-    value
-) {
+function safeStatistic(value) {
 
     if (
         value === null ||
         value === undefined
     ) {
-
         return null;
-
     }
-
 
     if (
         typeof value === "number" ||
         typeof value === "string"
     ) {
-
         return value;
-
     }
 
-
     return null;
-
 }
-
 
 // ======================================================
 // RENDER BACKTEST
 // ======================================================
 
-function renderBacktest(
-    result
-) {
+function renderBacktest(result) {
 
-    console.log(
-        "🔥 Rendering V10.1 backtest:",
-        result
-    );
-
-
-    if (
-        !result
-    ) {
-
-        return;
-
-    }
-
-
-    // ==================================================
-    // VERSION
-    // ==================================================
+    if (!result) return;
 
     const version =
         result.version ||
         "V10.1";
-
 
     setBacktestField(
         "engine",
         `${version} Historical Simulation`
     );
 
-
-    // ==================================================
-    // CANDLES
-    // ==================================================
-
     const candles =
         safeStatistic(
             result.candlesTested
         );
-
 
     setBacktestField(
         "candles",
         candles ?? "--"
     );
 
-
-    // ==================================================
-    // TRADE COUNTS
-    // ==================================================
-
     const totalTrades =
         safeStatistic(
             result.totalTrades
         );
-
 
     const buyTrades =
         safeStatistic(
             result.buyTrades
         );
 
-
     const sellTrades =
         safeStatistic(
             result.sellTrades
         );
-
 
     setBacktestField(
         "trades",
         totalTrades ?? "--"
     );
 
-
     setBacktestField(
         "buyTrades",
         buyTrades ?? "--"
     );
-
 
     setBacktestField(
         "sellTrades",
         sellTrades ?? "--"
     );
 
-
-    // ==================================================
-    // WINS / LOSSES
-    // ==================================================
-
     const winningTrades =
         safeStatistic(
             result.winningTrades
         );
-
 
     const losingTrades =
         safeStatistic(
             result.losingTrades
         );
 
-
     setBacktestField(
         "wins",
         winningTrades ?? "--"
     );
-
 
     setBacktestField(
         "losses",
         losingTrades ?? "--"
     );
 
-
-    // ==================================================
-    // WIN RATE
-    // ==================================================
-
     const winRate =
         Number(
             result.winRate
         );
 
-
     setBacktestField(
-
         "winRate",
-
         Number.isFinite(winRate)
-
             ? `${winRate.toFixed(2)}%`
-
             : "--"
-
     );
-
-
-    // ==================================================
-    // TOTAL POINTS
-    // ==================================================
 
     setBacktestField(
         "points",
@@ -2476,22 +1652,12 @@ function renderBacktest(
         )
     );
 
-
-    // ==================================================
-    // AVERAGE WIN
-    // ==================================================
-
     setBacktestField(
         "avgWin",
         formatNumber(
             result.averageWin
         )
     );
-
-
-    // ==================================================
-    // AVERAGE LOSS
-    // ==================================================
 
     setBacktestField(
         "avgLoss",
@@ -2500,16 +1666,10 @@ function renderBacktest(
         )
     );
 
-
-    // ==================================================
-    // PROFIT FACTOR
-    // ==================================================
-
     const pf =
         Number(
             result.profitFactor
         );
-
 
     if (
         result.profitFactor === Infinity ||
@@ -2540,13 +1700,7 @@ function renderBacktest(
             "profitFactor",
             "--"
         );
-
     }
-
-
-    // ==================================================
-    // MAX DRAWDOWN
-    // ==================================================
 
     setBacktestField(
         "drawdown",
@@ -2555,22 +1709,14 @@ function renderBacktest(
         )
     );
 
-
-    // ==================================================
-    // STATUS
-    // ==================================================
-
     if (
         result.status ===
         "INSUFFICIENT_DATA"
     ) {
 
         setBacktestField(
-
             "status",
-
             `INSUFFICIENT DATA — ${candles ?? 0} candles`
-
         );
 
     }
@@ -2581,11 +1727,8 @@ function renderBacktest(
     ) {
 
         setBacktestField(
-
             "status",
-
             `V10.1 BACKTEST COMPLETE — ${totalTrades ?? 0} trades simulated`
-
         );
 
     }
@@ -2593,29 +1736,15 @@ function renderBacktest(
     else {
 
         setBacktestField(
-
             "status",
-
             `V10.1 BACKTEST RESULT — ${totalTrades ?? 0} trades`
-
         );
-
     }
-
-
-    // ==================================================
-    // ENGINE
-    // ==================================================
 
     setBacktestField(
         "engine",
         `${version} Historical Simulation`
     );
-
-
-    // ==================================================
-    // TRADES
-    // ==================================================
 
     if (
         Array.isArray(
@@ -2626,117 +1755,30 @@ function renderBacktest(
         state.backtest =
             result;
 
-
-        console.log(
-            `🔥 V10.1 trade history: ${result.trades.length} trades`
-        );
-
-
         console.table(
             result.trades
         );
 
-
         renderTradeHistory(
             result.trades
         );
-
     }
-
-    else {
-
-        console.warn(
-            "V10.1 API returned no trade array."
-        );
-
-    }
-
-
-    console.log(
-        "🔥 V10.1 FINAL DISPLAY:",
-        {
-
-            candles:
-                result.candlesTested,
-
-            trades:
-                result.totalTrades,
-
-            buys:
-                result.buyTrades,
-
-            sells:
-                result.sellTrades,
-
-            wins:
-                result.winningTrades,
-
-            losses:
-                result.losingTrades,
-
-            winRate:
-                result.winRate,
-
-            points:
-                result.totalPoints,
-
-            averageWin:
-                result.averageWin,
-
-            averageLoss:
-                result.averageLoss,
-
-            profitFactor:
-                result.profitFactor,
-
-            maxDrawdown:
-                result.maxDrawdown
-
-        }
-    );
-
 }
-
 
 // ======================================================
 // TRADE HISTORY
 // ======================================================
 
-function renderTradeHistory(
-    trades
-) {
+function renderTradeHistory(trades) {
 
-    if (
-        !Array.isArray(trades)
-    ) {
-
-        return;
-
-    }
-
+    if (!Array.isArray(trades)) return;
 
     const container =
         $("tradeHistory") ||
         $("tradeHistoryTable") ||
         $("tradeList");
 
-
-    if (
-        !container
-    ) {
-
-        console.log(
-            "Trade history container not found."
-        );
-
-        return;
-
-    }
-
-
-    // ==================================================
-    // TABLE
-    // ==================================================
+    if (!container) return;
 
     if (
         container.tagName === "TABLE"
@@ -2746,7 +1788,6 @@ function renderTradeHistory(
             container.querySelector(
                 "tbody"
             );
-
 
         if (!tbody) {
 
@@ -2758,12 +1799,9 @@ function renderTradeHistory(
             container.appendChild(
                 tbody
             );
-
         }
 
-
         tbody.innerHTML = "";
-
 
         trades.forEach(
             (trade, index) => {
@@ -2772,7 +1810,6 @@ function renderTradeHistory(
                     document.createElement(
                         "tr"
                     );
-
 
                 row.innerHTML = `
 
@@ -2796,26 +1833,14 @@ function renderTradeHistory(
 
                 `;
 
-
-                tbody.appendChild(
-                    row
-                );
-
+                tbody.appendChild(row);
             }
         );
 
-
         return;
-
     }
 
-
-    // ==================================================
-    // DIV CONTAINER
-    // ==================================================
-
     container.innerHTML = "";
-
 
     trades.forEach(
         (trade, index) => {
@@ -2825,34 +1850,26 @@ function renderTradeHistory(
                     "div"
                 );
 
-
             row.className =
                 "trade-history-row";
-
 
             row.style.whiteSpace =
                 "pre-line";
 
-
             row.style.padding =
                 "16px";
-
 
             row.style.marginBottom =
                 "12px";
 
-
             row.style.border =
                 "1px solid #1e293b";
-
 
             row.style.borderRadius =
                 "12px";
 
-
             row.style.background =
                 "#0b1220";
-
 
             row.textContent =
 
@@ -2874,16 +1891,12 @@ function renderTradeHistory(
 
                 `${trade.reason ?? "--"}`;
 
-
             container.appendChild(
                 row
             );
-
         }
     );
-
 }
-
 
 // ======================================================
 // BACKTEST BUTTON
@@ -2891,65 +1904,29 @@ function renderTradeHistory(
 
 function setupBacktestButton() {
 
-    console.log(
-        "🔥 SETTING UP V10.1 BACKTEST BUTTON"
-    );
-
-
     const button =
         $("runBacktestBtn") ||
         $("runV10Backtest") ||
         $("runV9Backtest");
 
-
-    console.log(
-        "🔥 BACKTEST BUTTON:",
-        button
-    );
-
-
-    if (
-        !button
-    ) {
+    if (!button) {
 
         console.error(
             "🔥 V10.1 BACKTEST BUTTON NOT FOUND"
         );
 
-        console.error(
-            "Expected ID: runBacktestBtn"
-        );
-
         return;
-
     }
 
-
-    /*
-    Remove any existing onclick
-    and attach our handler.
-    */
-
-    button.onclick =
-        null;
-
+    button.onclick = null;
 
     button.onclick =
         runV10Backtest;
 
-
     console.log(
         "🔥 BACKTEST CLICK HANDLER ATTACHED"
     );
-
-
-    console.log(
-        "🔥 BUTTON ID:",
-        button.id
-    );
-
 }
-
 
 // ======================================================
 // PAPER TRADE BUTTON
@@ -2960,22 +1937,13 @@ function setupPaperTradeButton() {
     const button =
         $("paperTradeBtn");
 
-
-    if (
-        !button
-    ) {
-
-        return;
-
-    }
-
+    if (!button) return;
 
     button.onclick =
         () => {
 
             const signal =
                 $("signal")?.textContent;
-
 
             if (
                 !signal ||
@@ -2987,29 +1955,23 @@ function setupPaperTradeButton() {
                 );
 
                 return;
-
             }
-
 
             const entry =
                 $("entry")?.textContent ||
                 "--";
 
-
             const stop =
                 $("stoploss")?.textContent ||
                 "--";
-
 
             const target =
                 $("target")?.textContent ||
                 "--";
 
-
             const confidence =
                 $("confidence")?.textContent ||
                 "--";
-
 
             alert(
 
@@ -3028,11 +1990,8 @@ function setupPaperTradeButton() {
                 `No real order has been placed.`
 
             );
-
         };
-
 }
-
 
 // ======================================================
 // STATUS DOT
@@ -3045,19 +2004,9 @@ function updateStatusDot(
     const dot =
         $("statusDot");
 
+    if (!dot) return;
 
-    if (
-        !dot
-    ) {
-
-        return;
-
-    }
-
-
-    if (
-        connected
-    ) {
+    if (connected) {
 
         dot.classList.remove(
             "closed"
@@ -3070,11 +2019,8 @@ function updateStatusDot(
         dot.classList.add(
             "closed"
         );
-
     }
-
 }
-
 
 // ======================================================
 // CLOCK
@@ -3085,36 +2031,646 @@ function updateTime() {
     const now =
         new Date();
 
-
     const text =
         now.toLocaleTimeString(
             "en-IN",
             {
-
-                hour:
-                    "2-digit",
-
-                minute:
-                    "2-digit",
-
-                second:
-                    "2-digit"
-
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit"
             }
         );
-
 
     setText(
         "lastUpdate",
         text
     );
 
-
     state.lastUpdate =
         now;
-
 }
 
+// ======================================================
+// DATA SOURCE COMPARISON
+// DHAN vs INDSTOCKS
+// ======================================================
+
+function normalizeCandleTimestamp(ts) {
+
+    const number =
+        Number(ts);
+
+    if (!Number.isFinite(number)) {
+        return null;
+    }
+
+    // Milliseconds → seconds
+    if (number > 100000000000) {
+        return Math.floor(
+            number / 1000
+        );
+    }
+
+    return number;
+}
+
+function normalizeCandles(data) {
+
+    if (!data) {
+        return [];
+    }
+
+    if (Array.isArray(data.candles)) {
+        return data.candles;
+    }
+
+    if (
+        data.data &&
+        Array.isArray(
+            data.data.candles
+        )
+    ) {
+        return data.data.candles;
+    }
+
+    if (Array.isArray(data.data)) {
+        return data.data;
+    }
+
+    return [];
+}
+
+function normalizeOneCandle(row) {
+
+    if (!row) {
+        return null;
+    }
+
+    if (Array.isArray(row)) {
+
+        return {
+
+            ts:
+                normalizeCandleTimestamp(
+                    row[0]
+                ),
+
+            o:
+                Number(row[1]),
+
+            h:
+                Number(row[2]),
+
+            l:
+                Number(row[3]),
+
+            c:
+                Number(row[4]),
+
+            v:
+                Number(row[5])
+
+        };
+    }
+
+    return {
+
+        ts:
+            normalizeCandleTimestamp(
+                row.ts ??
+                row.timestamp ??
+                row.time
+            ),
+
+        o:
+            Number(
+                row.o ??
+                row.open
+            ),
+
+        h:
+            Number(
+                row.h ??
+                row.high
+            ),
+
+        l:
+            Number(
+                row.l ??
+                row.low
+            ),
+
+        c:
+            Number(
+                row.c ??
+                row.close
+            ),
+
+        v:
+            Number(
+                row.v ??
+                row.volume
+            )
+    };
+}
+
+function normalizeCandleList(data) {
+
+    return normalizeCandles(data)
+
+        .map(
+            normalizeOneCandle
+        )
+
+        .filter(
+            candle =>
+                candle &&
+                Number.isFinite(candle.ts) &&
+                Number.isFinite(candle.o) &&
+                Number.isFinite(candle.h) &&
+                Number.isFinite(candle.l) &&
+                Number.isFinite(candle.c)
+        )
+
+        .sort(
+            (a, b) =>
+                a.ts - b.ts
+        );
+}
+
+function candleTimeKey(ts) {
+
+    return Math.floor(
+        ts / 300
+    ) * 300;
+}
+
+function formatComparisonTime(ts) {
+
+    return new Date(
+        ts * 1000
+    ).toLocaleTimeString(
+        "en-IN",
+        {
+            timeZone:
+                "Asia/Kolkata",
+
+            hour:
+                "2-digit",
+
+            minute:
+                "2-digit"
+        }
+    );
+}
+
+function createComparisonPanel() {
+
+    let panel =
+        document.getElementById(
+            "dataComparisonPanel"
+        );
+
+    if (panel) {
+        return panel;
+    }
+
+    panel =
+        document.createElement(
+            "div"
+        );
+
+    panel.id =
+        "dataComparisonPanel";
+
+    panel.style.margin =
+        "20px 0";
+
+    panel.style.padding =
+        "20px";
+
+    panel.style.border =
+        "1px solid #334155";
+
+    panel.style.borderRadius =
+        "16px";
+
+    panel.style.background =
+        "#0f172a";
+
+    panel.style.color =
+        "#e2e8f0";
+
+    panel.innerHTML = `
+
+        <div style="
+            font-size:20px;
+            font-weight:700;
+            margin-bottom:15px;
+        ">
+            Dhan vs INDstocks
+        </div>
+
+        <div id="comparisonStatus">
+            Comparing data sources...
+        </div>
+
+        <div id="comparisonResults"
+             style="margin-top:12px;">
+        </div>
+    `;
+
+    document.body.prepend(
+        panel
+    );
+
+    return panel;
+}
+
+async function runDataComparison() {
+
+    console.log(
+        "================================"
+    );
+
+    console.log(
+        "🔥 DHAN vs INDSTOCKS COMPARISON"
+    );
+
+    console.log(
+        "================================"
+    );
+
+    createComparisonPanel();
+
+    const status =
+        document.getElementById(
+            "comparisonStatus"
+        );
+
+    const results =
+        document.getElementById(
+            "comparisonResults"
+        );
+
+    status.textContent =
+        "Fetching Dhan + INDstocks candles...";
+
+    results.innerHTML =
+        "";
+
+    try {
+
+        const [
+            indstocks,
+            dhan
+        ] = await Promise.all([
+
+            apiFetch(
+                `/api/candles?interval=5minute&_compare=${Date.now()}`,
+                20000
+            ),
+
+            apiFetch(
+                `/api/dhan/candles?_compare=${Date.now()}`,
+                20000
+            )
+
+        ]);
+
+        console.log(
+            "INDstocks raw:",
+            indstocks
+        );
+
+        console.log(
+            "Dhan raw:",
+            dhan
+        );
+
+        const indCandles =
+            normalizeCandleList(
+                indstocks
+            );
+
+        const dhanCandles =
+            normalizeCandleList(
+                dhan
+            );
+
+        console.log(
+            "INDstocks normalized:",
+            indCandles.length
+        );
+
+        console.log(
+            "Dhan normalized:",
+            dhanCandles.length
+        );
+
+        const indMap =
+            new Map();
+
+        indCandles.forEach(
+            candle => {
+
+                indMap.set(
+                    candleTimeKey(
+                        candle.ts
+                    ),
+                    candle
+                );
+            }
+        );
+
+        const dhanMap =
+            new Map();
+
+        dhanCandles.forEach(
+            candle => {
+
+                dhanMap.set(
+                    candleTimeKey(
+                        candle.ts
+                    ),
+                    candle
+                );
+            }
+        );
+
+        const matches = [];
+
+        for (
+            const [
+                key,
+                dhanCandle
+            ] of dhanMap
+        ) {
+
+            const indCandle =
+                indMap.get(key);
+
+            if (!indCandle) {
+                continue;
+            }
+
+            matches.push({
+
+                ts: key,
+
+                time:
+                    formatComparisonTime(
+                        key
+                    ),
+
+                dhanOpen:
+                    dhanCandle.o,
+
+                indstocksOpen:
+                    indCandle.o,
+
+                openDiff:
+                    Number(
+                        (
+                            dhanCandle.o -
+                            indCandle.o
+                        ).toFixed(2)
+                    ),
+
+                dhanHigh:
+                    dhanCandle.h,
+
+                indstocksHigh:
+                    indCandle.h,
+
+                highDiff:
+                    Number(
+                        (
+                            dhanCandle.h -
+                            indCandle.h
+                        ).toFixed(2)
+                    ),
+
+                dhanLow:
+                    dhanCandle.l,
+
+                indstocksLow:
+                    indCandle.l,
+
+                lowDiff:
+                    Number(
+                        (
+                            dhanCandle.l -
+                            indCandle.l
+                        ).toFixed(2)
+                    ),
+
+                dhanClose:
+                    dhanCandle.c,
+
+                indstocksClose:
+                    indCandle.c,
+
+                closeDiff:
+                    Number(
+                        (
+                            dhanCandle.c -
+                            indCandle.c
+                        ).toFixed(2)
+                    ),
+
+                volumeDiff:
+                    Number(
+                        (
+                            dhanCandle.v -
+                            indCandle.v
+                        ).toFixed(0)
+                    )
+            });
+        }
+
+        let totalCloseDifference = 0;
+
+        let maxCloseDifference = 0;
+
+        let exactCloseMatches = 0;
+
+        matches.forEach(
+            row => {
+
+                const difference =
+                    Math.abs(
+                        row.closeDiff
+                    );
+
+                totalCloseDifference +=
+                    difference;
+
+                maxCloseDifference =
+                    Math.max(
+                        maxCloseDifference,
+                        difference
+                    );
+
+                if (
+                    difference === 0
+                ) {
+
+                    exactCloseMatches++;
+                }
+            }
+        );
+
+        const averageCloseDifference =
+            matches.length
+                ? totalCloseDifference /
+                  matches.length
+                : 0;
+
+        const exactMatchRate =
+            matches.length
+                ? (
+                    exactCloseMatches /
+                    matches.length
+                ) * 100
+                : 0;
+
+        status.innerHTML =
+            "Comparison complete ✅";
+
+        results.innerHTML = `
+
+            <div style="
+                display:grid;
+                grid-template-columns:
+                    repeat(2,minmax(0,1fr));
+                gap:14px;
+            ">
+
+                <div>
+                    <strong>
+                        Dhan candles
+                    </strong>
+                    <br>
+                    ${dhanCandles.length}
+                </div>
+
+                <div>
+                    <strong>
+                        INDstocks candles
+                    </strong>
+                    <br>
+                    ${indCandles.length}
+                </div>
+
+                <div>
+                    <strong>
+                        Matching candles
+                    </strong>
+                    <br>
+                    ${matches.length}
+                </div>
+
+                <div>
+                    <strong>
+                        Exact close matches
+                    </strong>
+                    <br>
+                    ${exactMatchRate.toFixed(2)}%
+                </div>
+
+                <div>
+                    <strong>
+                        Avg close difference
+                    </strong>
+                    <br>
+                    ${averageCloseDifference.toFixed(2)}
+                </div>
+
+                <div>
+                    <strong>
+                        Max close difference
+                    </strong>
+                    <br>
+                    ${maxCloseDifference.toFixed(2)}
+                </div>
+
+            </div>
+        `;
+
+        console.log(
+            "🔥 COMPARISON SUMMARY"
+        );
+
+        console.log({
+
+            dhanCandles:
+                dhanCandles.length,
+
+            indstocksCandles:
+                indCandles.length,
+
+            matchingCandles:
+                matches.length,
+
+            exactCloseMatches:
+                exactCloseMatches,
+
+            exactMatchRate:
+                exactMatchRate.toFixed(2) + "%",
+
+            averageCloseDifference:
+                averageCloseDifference.toFixed(2),
+
+            maxCloseDifference:
+                maxCloseDifference.toFixed(2)
+        });
+
+        console.table(
+            matches.slice(
+                0,
+                20
+            )
+        );
+
+        console.log(
+            "🔥 First 5 matches:",
+            matches.slice(
+                0,
+                5
+            )
+        );
+
+        console.log(
+            "🔥 Last 5 matches:",
+            matches.slice(
+                -5
+            )
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "🔥 DATA COMPARISON ERROR:",
+            error
+        );
+
+        status.textContent =
+            "Comparison failed ❌";
+
+        results.innerHTML = `
+
+            <div style="
+                color:#f87171;
+                margin-top:10px;
+            ">
+                ${error.message}
+            </div>
+        `;
+    }
+}
 
 // ======================================================
 // INITIALIZE
@@ -3126,87 +2682,64 @@ async function initialize() {
         "================================"
     );
 
-
     console.log(
         "🔥 TradeMind Pro V10.1 STARTED"
     );
-
 
     console.log(
         "🔥 Frontend controller loaded"
     );
 
-
     console.log(
         "🔥 Paper Trading Only"
     );
 
-
     console.log(
         "================================"
     );
-
 
     setText(
         "marketStatus",
         "CONNECTING"
     );
 
-
     setText(
         "analysisStatus",
         "CONNECTING"
     );
-
 
     setBacktestField(
         "status",
         "Waiting for historical data"
     );
 
-
     setBacktestField(
         "engine",
         "V10.1 Historical Simulation"
     );
 
-
     setupPaperTradeButton();
-
-
-    /*
-    IMPORTANT:
-
-    Setup backtest button BEFORE
-    making API requests.
-    */
 
     setupBacktestButton();
 
-
-    /*
-    Load indicators.
-    */
-
+    // Load indicators
     await fetchIndicatorData();
 
-
-    /*
-    Load live market data.
-    */
-
+    // Load live market data
     await fetchMarketData();
-
 
     updateTime();
 
+    // ==================================================
+    // TEMPORARY DATA SOURCE COMPARISON
+    // ==================================================
+
+    await runDataComparison();
 
     console.log(
         "🔥 INITIALIZATION COMPLETE"
     );
-
 }
-
 
 // ======================================================
 // REFRESH TIMERS
@@ -3217,18 +2750,15 @@ setInterval(
     5000
 );
 
-
 setInterval(
     fetchIndicatorData,
     30000
 );
 
-
 setInterval(
     updateTime,
     1000
 );
-
 
 // ======================================================
 // START
