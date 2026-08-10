@@ -6,9 +6,7 @@ function getCookie(req, name) {
     .map(cookie => cookie.trim())
     .find(cookie => cookie.startsWith(`${name}=`));
 
-  if (!match) {
-    return null;
-  }
+  if (!match) return null;
 
   return decodeURIComponent(
     match.substring(name.length + 1)
@@ -17,24 +15,20 @@ function getCookie(req, name) {
 
 export default async function handler(req, res) {
   try {
-    const accessToken = getCookie(
-      req,
-      "DHAN_ACCESS_TOKEN"
-    );
+    const accessToken = getCookie(req, "DHAN_ACCESS_TOKEN");
 
     if (!accessToken) {
       return res.status(401).json({
         success: false,
-        error: "Dhan session not found. Please authenticate first."
+        error: "Dhan session not found"
       });
     }
 
     const response = await fetch(
-      "https://api.dhan.co/v2/fundlimit",
+      "https://api.dhan.co/v2/profile",
       {
         method: "GET",
         headers: {
-          "Content-Type": "application/json",
           "access-token": accessToken
         }
       }
@@ -45,18 +39,19 @@ export default async function handler(req, res) {
     if (!response.ok) {
       return res.status(response.status).json({
         success: false,
-        error: "Dhan Fund API request failed",
+        error: "Dhan profile request failed",
         details: data
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Dhan session is active",
+      message: "Dhan Data API status verified",
       dhanClientId: data.dhanClientId,
-      availableBalance: data.availabelBalance,
-      utilizedAmount: data.utilizedAmount,
-      withdrawableBalance: data.withdrawableBalance
+      tokenValidity: data.tokenValidity,
+      activeSegment: data.activeSegment,
+      dataPlan: data.dataPlan,
+      dataValidity: data.dataValidity
     });
 
   } catch (error) {
