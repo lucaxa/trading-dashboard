@@ -3318,19 +3318,22 @@ async function initialize() {
     await fetchIndicatorData();
 
     // Load live market data
-    await fetchMarketData();
+await fetchMarketData();
 
-    updateTime();
+updateTime();
 
-    // ==================================================
-    // TEMPORARY DATA SOURCE COMPARISON
-    // ==================================================
+/*
+Compare today's NIFTY 5-minute candles
+from Dhan and INDstocks.
 
-    await runDataComparison();
+Comparison only.
+No orders.
+*/
+await compareDhanVsINDstocks();
 
-    console.log(
-        "🔥 INITIALIZATION COMPLETE"
-    );
+console.log(
+    "🔥 INITIALIZATION COMPLETE"
+);
 }
 
 // ======================================================
