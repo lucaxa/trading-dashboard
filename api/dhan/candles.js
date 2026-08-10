@@ -15,9 +15,9 @@ function getCookie(req, name) {
 
 export default async function handler(req, res) {
   try {
-    // --------------------------------
+    // -------------------------------
     // 1. Get secure Dhan session
-    // --------------------------------
+    // -------------------------------
 
     const accessToken = getCookie(
       req,
@@ -31,73 +31,16 @@ export default async function handler(req, res) {
       });
     }
 
-    // --------------------------------
-    // 2. Find NIFTY 50 in Dhan instrument list
-    // --------------------------------
+    // -------------------------------
+    // 2. NIFTY 50 mapping
+    // -------------------------------
 
-    const instrumentResponse = await fetch(
-      "https://api.dhan.co/v2/instrument/IDX_I",
-      {
-        method: "GET",
-        headers: {
-          "access-token": accessToken
-        }
-      }
-    );
+    const securityId = "13";
 
-    const instruments = await instrumentResponse.json();
+    // -------------------------------
+    // 3. Today's date in India
+    // -------------------------------
 
-    if (!instrumentResponse.ok) {
-      return res.status(instrumentResponse.status).json({
-        success: false,
-        error: "Unable to retrieve Dhan index instruments",
-        details: instruments
-      });
-    }
-
-    // Dhan may return the instrument list as an array
-    const list = Array.isArray(instruments)
-      ? instruments
-      : instruments.data || [];
-
-    const nifty = list.find(item => {
-      const symbol =
-        item.SYMBOL_NAME ||
-        item.symbolName ||
-        item.tradingSymbol ||
-        item.TRADING_SYMBOL ||
-        "";
-
-      return String(symbol).toUpperCase() === "NIFTY";
-    });
-
-    if (!nifty) {
-      return res.status(404).json({
-        success: false,
-        error: "NIFTY 50 not found in Dhan IDX_I instrument list"
-      });
-    }
-
-    const securityId =
-      nifty.SECURITY_ID ||
-      nifty.securityId ||
-      nifty.SEM_SMST_SECURITY_ID;
-
-    if (!securityId) {
-      return res.status(500).json({
-        success: false,
-        error: "NIFTY instrument found but security ID is missing",
-        instrument: nifty
-      });
-    }
-
-    // --------------------------------
-    // 3. Request today's 5-minute candles
-    // --------------------------------
-
-    const now = new Date();
-
-    // Use today's date in India
     const indiaDate = new Intl.DateTimeFormat(
       "en-CA",
       {
@@ -106,19 +49,25 @@ export default async function handler(req, res) {
         month: "2-digit",
         day: "2-digit"
       }
-    ).format(now);
+    ).format(new Date());
+
+    // -------------------------------
+    // 4. Request 5-minute candles
+    // -------------------------------
 
     const candleResponse = await fetch(
       "https://api.dhan.co/v2/charts/intraday",
       {
         method: "POST",
+
         headers: {
           "Accept": "application/json",
           "Content-Type": "application/json",
           "access-token": accessToken
         },
+
         body: JSON.stringify({
-          securityId: String(securityId),
+          securityId: securityId,
           exchangeSegment: "IDX_I",
           instrument: "INDEX",
           interval: "5",
@@ -131,18 +80,25 @@ export default async function handler(req, res) {
 
     const candleData = await candleResponse.json();
 
+    // -------------------------------
+    // 5. Handle Dhan error
+    // -------------------------------
+
     if (!candleResponse.ok) {
       return res.status(candleResponse.status).json({
         success: false,
         error: "Dhan historical candle request failed",
-        securityId: String(securityId),
+        securityId,
+        exchangeSegment: "IDX_I",
+        instrument: "INDEX",
         details: candleData
       });
     }
 
-    // --------------------------------
-    // 4. Return a clean test response
-    // --------------------------------
+    // -------------------------------
+    // 6. Convert Dhan arrays
+    //    into our TradeMind format
+    // -------------------------------
 
     const timestamps = candleData.timestamp || [];
     const opens = candleData.open || [];
@@ -152,7 +108,7 @@ export default async function handler(req, res) {
     const volumes = candleData.volume || [];
 
     const candles = timestamps.map((ts, i) => ({
-      ts,
+      ts: ts,
       o: opens[i],
       h: highs[i],
       l: lows[i],
@@ -160,18 +116,22 @@ export default async function handler(req, res) {
       v: volumes[i]
     }));
 
+    // -------------------------------
+    // 7. Return test result
+    // -------------------------------
+
     return res.status(200).json({
       success: true,
       source: "Dhan",
       symbol: "NIFTY 50",
-      securityId: String(securityId),
+      securityId: securityId,
       exchangeSegment: "IDX_I",
       instrument: "INDEX",
       interval: "5",
       candleCount: candles.length,
       firstCandle: candles[0] || null,
       lastCandle: candles[candles.length - 1] || null,
-      candles
+      candles: candles
     });
 
   } catch (error) {
