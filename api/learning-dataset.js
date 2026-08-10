@@ -337,145 +337,148 @@ export default async function handler(req, res) {
         // VALIDATE RAW CANDLE
         // ==================================================
 
-        function validRawCandle(
-            candle
-        ) {
+        function validRawCandle(candle) {
 
-            if (
-                !Array.isArray(
-                    candle
-                )
-            ) {
+    // ==========================================
+    // ARRAY FORMAT
+    // ==========================================
 
-                return false;
+    if (Array.isArray(candle)) {
 
-            }
-
-
-            if (
-                candle.length <
-                6
-            ) {
-
-                return false;
-
-            }
-
-
-            const timestamp =
-                normalizeTimestamp(
-                    candle[0]
-                );
-
-
-            const open =
-                Number(
-                    candle[1]
-                );
-
-
-            const high =
-                Number(
-                    candle[2]
-                );
-
-
-            const low =
-                Number(
-                    candle[3]
-                );
-
-
-            const close =
-                Number(
-                    candle[4]
-                );
-
-
-            const volume =
-                Number(
-                    candle[5]
-                );
-
-
-            if (
-                !Number.isFinite(
-                    timestamp
-                )
-            ) {
-
-                return false;
-
-            }
-
-
-            if (
-                !Number.isFinite(
-                    open
-                )
-            ) {
-
-                return false;
-
-            }
-
-
-            if (
-                !Number.isFinite(
-                    high
-                )
-            ) {
-
-                return false;
-
-            }
-
-
-            if (
-                !Number.isFinite(
-                    low
-                )
-            ) {
-
-                return false;
-
-            }
-
-
-            if (
-                !Number.isFinite(
-                    close
-                )
-            ) {
-
-                return false;
-
-            }
-
-
-            if (
-                !Number.isFinite(
-                    volume
-                )
-            ) {
-
-                return false;
-
-            }
-
-
-            if (
-                high < low
-            ) {
-
-                return false;
-
-            }
-
-
-            return true;
-
+        if (candle.length < 6) {
+            return false;
         }
+
+        const timestamp =
+            normalizeTimestamp(candle[0]);
+
+        const open =
+            Number(candle[1]);
+
+        const high =
+            Number(candle[2]);
+
+        const low =
+            Number(candle[3]);
+
+        const close =
+            Number(candle[4]);
+
+        const volume =
+            Number(candle[5]);
+
+        if (!Number.isFinite(timestamp)) {
+            return false;
+        }
+
+        if (!Number.isFinite(open)) {
+            return false;
+        }
+
+        if (!Number.isFinite(high)) {
+            return false;
+        }
+
+        if (!Number.isFinite(low)) {
+            return false;
+        }
+
+        if (!Number.isFinite(close)) {
+            return false;
+        }
+
+        if (!Number.isFinite(volume)) {
+            return false;
+        }
+
+        if (high < low) {
+            return false;
+        }
+
+        return true;
+    }
+
+
+    // ==========================================
+    // OBJECT FORMAT
+    // ==========================================
+
+    if (
+        candle &&
+        typeof candle === "object"
+    ) {
+
+        const timestamp =
+            normalizeTimestamp(
+                candle.timestamp ??
+                candle.ts ??
+                candle.time
+            );
+
+        const open =
+            Number(
+                candle.open ??
+                candle.o
+            );
+
+        const high =
+            Number(
+                candle.high ??
+                candle.h
+            );
+
+        const low =
+            Number(
+                candle.low ??
+                candle.l
+            );
+
+        const close =
+            Number(
+                candle.close ??
+                candle.c
+            );
+
+        const volume =
+            Number(
+                candle.volume ??
+                candle.v
+            );
+
+        if (!Number.isFinite(timestamp)) {
+            return false;
+        }
+
+        if (!Number.isFinite(open)) {
+            return false;
+        }
+
+        if (!Number.isFinite(high)) {
+            return false;
+        }
+
+        if (!Number.isFinite(low)) {
+            return false;
+        }
+
+        if (!Number.isFinite(close)) {
+            return false;
+        }
+
+        if (!Number.isFinite(volume)) {
+            return false;
+        }
+
+        if (high < low) {
+            return false;
+        }
+
+        return true;
+    }
+
+
+    return false;
+}
 
 
         // ==================================================
