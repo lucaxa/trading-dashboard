@@ -485,53 +485,120 @@ export default async function handler(req, res) {
         // NORMALIZE CANDLE
         // ==================================================
 
-        function normalizeCandle(
-            candle
-        ) {
+        function normalizeCandle(candle) {
 
-            const timestamp =
-                normalizeTimestamp(
-                    candle[0]
-                );
+    let timestamp;
+    let open;
+    let high;
+    let low;
+    let close;
+    let volume;
 
 
-            return {
+    // ==========================================
+    // ARRAY FORMAT
+    // ==========================================
 
-                timestamp,
+    if (Array.isArray(candle)) {
 
-                date:
-                    getISTDate(
-                        timestamp
-                    ),
+        timestamp =
+            normalizeTimestamp(
+                candle[0]
+            );
 
-                open:
-                    Number(
-                        candle[1]
-                    ),
+        open =
+            Number(candle[1]);
 
-                high:
-                    Number(
-                        candle[2]
-                    ),
+        high =
+            Number(candle[2]);
 
-                low:
-                    Number(
-                        candle[3]
-                    ),
+        low =
+            Number(candle[3]);
 
-                close:
-                    Number(
-                        candle[4]
-                    ),
+        close =
+            Number(candle[4]);
 
-                volume:
-                    Number(
-                        candle[5]
-                    )
+        volume =
+            Number(candle[5]);
 
-            };
+    }
 
-        }
+
+    // ==========================================
+    // OBJECT FORMAT
+    // ==========================================
+
+    else if (
+        candle &&
+        typeof candle === "object"
+    ) {
+
+        timestamp =
+            normalizeTimestamp(
+                candle.timestamp ??
+                candle.ts ??
+                candle.time
+            );
+
+        open =
+            Number(
+                candle.open ??
+                candle.o
+            );
+
+        high =
+            Number(
+                candle.high ??
+                candle.h
+            );
+
+        low =
+            Number(
+                candle.low ??
+                candle.l
+            );
+
+        close =
+            Number(
+                candle.close ??
+                candle.c
+            );
+
+        volume =
+            Number(
+                candle.volume ??
+                candle.v
+            );
+
+    }
+
+
+    // ==========================================
+    // NORMALIZED OUTPUT
+    // ==========================================
+
+    return {
+
+        timestamp,
+
+        date:
+            getISTDate(
+                timestamp
+            ),
+
+        open,
+
+        high,
+
+        low,
+
+        close,
+
+        volume
+
+    };
+
+}
 
 
         // ==================================================
