@@ -1,11 +1,31 @@
+function getCookie(req, name) {
+  const cookies = req.headers.cookie || "";
+
+  const match = cookies
+    .split(";")
+    .map(cookie => cookie.trim())
+    .find(cookie => cookie.startsWith(`${name}=`));
+
+  if (!match) {
+    return null;
+  }
+
+  return decodeURIComponent(
+    match.substring(name.length + 1)
+  );
+}
+
 export default async function handler(req, res) {
   try {
-    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const accessToken = getCookie(
+      req,
+      "DHAN_ACCESS_TOKEN"
+    );
 
     if (!accessToken) {
-      return res.status(500).json({
+      return res.status(401).json({
         success: false,
-        error: "DHAN_ACCESS_TOKEN is not configured"
+        error: "Dhan session not found. Please authenticate first."
       });
     }
 
@@ -25,19 +45,18 @@ export default async function handler(req, res) {
     if (!response.ok) {
       return res.status(response.status).json({
         success: false,
-        error: "Dhan account API request failed",
+        error: "Dhan Fund API request failed",
         details: data
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Dhan account API connection successful",
+      message: "Dhan session is active",
       dhanClientId: data.dhanClientId,
       availableBalance: data.availabelBalance,
       utilizedAmount: data.utilizedAmount,
-      withdrawableBalance: data.withdrawableBalance,
-      currency: "INR"
+      withdrawableBalance: data.withdrawableBalance
     });
 
   } catch (error) {
