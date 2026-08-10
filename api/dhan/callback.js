@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Step 1: Exchange tokenId for Dhan access token
+    // Exchange Dhan tokenId for a 24-hour access token
     const tokenResponse = await fetch(
       `https://auth.dhan.co/app/consumeApp-consent?tokenId=${encodeURIComponent(tokenId)}`,
       {
@@ -40,40 +40,36 @@ export default async function handler(req, res) {
       });
     }
 
-    const accessToken = tokenData.accessToken;
-
-    // Step 2: Test the access token against Dhan Profile API
-    const profileResponse = await fetch(
-      "https://api.dhan.co/v2/profile",
+    // Immediately test the access token against Dhan Funds API
+    const fundResponse = await fetch(
+      "https://api.dhan.co/v2/fundlimit",
       {
         method: "GET",
         headers: {
-          "access-token": accessToken
+          "Content-Type": "application/json",
+          "access-token": tokenData.accessToken
         }
       }
     );
 
-    const profileData = await profileResponse.json();
+    const fundData = await fundResponse.json();
 
-    if (!profileResponse.ok) {
-      return res.status(500).json({
+    if (!fundResponse.ok) {
+      return res.status(fundResponse.status).json({
         success: false,
-        error: "Access token generated but profile test failed",
-        details: profileData
+        error: "Dhan authentication worked, but Fund API failed",
+        details: fundData
       });
     }
 
-    // Never send the actual access token to the browser
+    // Never expose the access token
     return res.status(200).json({
       success: true,
-      message: "Dhan authentication and API test successful",
-      dhanClientId: profileData.dhanClientId,
-      tokenValidity: profileData.tokenValidity,
-      activeSegment: profileData.activeSegment,
-      ddpi: profileData.ddpi,
-      mtf: profileData.mtf,
-      dataPlan: profileData.dataPlan,
-      dataValidity: profileData.dataValidity,
+      message: "Dhan authentication + Fund API successful",
+      dhanClientId: fundData.dhanClientId,
+      availableBalance: fundData.availabelBalance,
+      utilizedAmount: fundData.utilizedAmount,
+      withdrawableBalance: fundData.withdrawableBalance,
       tokenExpiry: tokenData.expiryTime
     });
 
