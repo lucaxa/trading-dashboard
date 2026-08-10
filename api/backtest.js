@@ -57,6 +57,15 @@ RISK:
 
 V10.20 goal:
 Improve BUY quality without over-filtering SELL.
+
+SHARED ENGINE:
+- CONFIG exported for live paper engine
+- normalizeCandles exported
+- calculateHistoricalIndicators exported
+- getSignal exported
+
+PAPER TRADING ONLY.
+NO REAL ORDERS.
 */
 
 
@@ -64,7 +73,7 @@ Improve BUY quality without over-filtering SELL.
 // CONFIGURATION
 // ======================================================
 
-const CONFIG = {
+export const CONFIG = {
 
     VERSION: "V10.20",
 
@@ -602,9 +611,10 @@ function vwap(
 
 // ======================================================
 // NORMALIZE CANDLES
+// EXPORTED FOR LIVE PAPER ENGINE
 // ======================================================
 
-function normalizeCandles(
+export function normalizeCandles(
     candles
 ) {
 
@@ -727,9 +737,10 @@ function normalizeCandles(
 
 // ======================================================
 // HISTORICAL INDICATORS
+// EXPORTED FOR LIVE PAPER ENGINE
 // ======================================================
 
-function calculateHistoricalIndicators(
+export function calculateHistoricalIndicators(
     candles,
     index
 ) {
@@ -1047,9 +1058,10 @@ function analyzeCandle(
 
 // ======================================================
 // V10.20 SIGNAL ENGINE
+// EXPORTED FOR LIVE PAPER ENGINE
 // ======================================================
 
-function getSignal(
+export function getSignal(
     candle,
     indicators,
     previousCandle,
@@ -2141,10 +2153,6 @@ function managePosition(
                 equityState
             );
         }
-
-        // Conservative:
-        // STOP is evaluated before TARGET
-        // when both are touched in same candle.
 
         if (
             low <=
@@ -3386,6 +3394,60 @@ function extractCandles(
             Array.isArray(candidate)
         ) {
             return candidate;
+        }
+    }
+
+    /*
+    Additional safe search for NIFTY
+    in case INDstocks changes response structure.
+    */
+
+    if (
+        result?.data &&
+        typeof result.data === "object"
+    ) {
+
+        for (
+            const key of Object.keys(
+                result.data
+            )
+        ) {
+
+            const lower =
+                key.toLowerCase();
+
+            if (
+                lower.includes("40000001") ||
+                lower.includes("nidx_40000001") ||
+                lower === "nifty" ||
+                lower === "nifty50"
+            ) {
+
+                const block =
+                    result.data[key];
+
+                if (
+                    Array.isArray(block)
+                ) {
+                    return block;
+                }
+
+                if (
+                    Array.isArray(
+                        block?.candles
+                    )
+                ) {
+                    return block.candles;
+                }
+
+                if (
+                    Array.isArray(
+                        block?.data
+                    )
+                ) {
+                    return block.data;
+                }
+            }
         }
     }
 
