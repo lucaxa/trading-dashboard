@@ -2671,7 +2671,599 @@ async function runDataComparison() {
         `;
     }
 }
+// ======================================================
+// DHAN vs INDSTOCKS DATA COMPARISON
+// ======================================================
 
+async function compareDhanVsINDstocks() {
+
+    console.log(
+        "================================"
+    );
+
+    console.log(
+        "🔥 DHAN vs INDSTOCKS COMPARISON START"
+    );
+
+    console.log(
+        "================================"
+    );
+
+
+    const statusElement =
+        $("comparisonStatus");
+
+    const detailsElement =
+        $("comparisonDetails");
+
+
+    if (statusElement) {
+        statusElement.textContent =
+            "Comparing market data...";
+    }
+
+
+    if (detailsElement) {
+        detailsElement.textContent =
+            "Fetching Dhan and INDstocks candles...";
+    }
+
+
+    try {
+
+        // ----------------------------------------------
+        // Fetch both sources at the same time
+        // ----------------------------------------------
+
+        const cacheBust =
+            Date.now();
+
+
+        const [dhanResult, indResult] =
+            await Promise.all([
+
+                apiFetch(
+                    `/api/dhan/candles?_t=${cacheBust}`,
+                    20000
+                ),
+
+                apiFetch(
+                    `/api/candles?interval=5minute&_t=${cacheBust}`,
+                    20000
+                )
+
+            ]);
+
+
+        console.log(
+            "🔥 Dhan comparison data:",
+            dhanResult
+        );
+
+
+        console.log(
+            "🔥 INDstocks comparison data:",
+            indResult
+        );
+
+
+        // ----------------------------------------------
+        // Dhan candles
+        // ----------------------------------------------
+
+        const dhanCandles =
+            Array.isArray(dhanResult?.candles)
+                ? dhanResult.candles
+                : [];
+
+
+        if (!dhanCandles.length) {
+
+            throw new Error(
+                "Dhan returned no NIFTY candles"
+            );
+
+        }
+
+
+        // ----------------------------------------------
+        // Extract INDstocks NIFTY candles
+        // ----------------------------------------------
+
+        const indData =
+            indResult?.data;
+
+
+        let indCandles = [];
+
+
+        /*
+        INDstocks responses have appeared in slightly
+        different structures during development.
+
+        Try to locate NIFTY safely.
+        */
+
+        if (Array.isArray(indData)) {
+
+            const niftyBlock =
+                indData.find(item => {
+
+                    const text =
+                        JSON.stringify(item)
+                            .toLowerCase();
+
+                    return (
+                        text.includes("40000001") ||
+                        text.includes("nidx_40000001")
+                    );
+
+                });
+
+
+            if (niftyBlock) {
+
+                indCandles =
+                    niftyBlock.candles ||
+                    niftyBlock.data ||
+                    niftyBlock.values ||
+                    [];
+
+            }
+
+        }
+
+        else if (
+            indData &&
+            typeof indData === "object"
+        ) {
+
+            const possibleKeys =
+                Object.keys(indData);
+
+
+            const niftyKey =
+                possibleKeys.find(key => {
+
+                    const lower =
+                        key.toLowerCase();
+
+                    return (
+                        lower.includes("40000001") ||
+                        lower.includes("nidx_40000001") ||
+                        lower === "nifty" ||
+                        lower === "nifty50"
+                    );
+
+                });
+
+
+            if (niftyKey) {
+
+                const niftyBlock =
+                    indData[niftyKey];
+
+
+                indCandles =
+                    Array.isArray(niftyBlock)
+                        ? niftyBlock
+                        : niftyBlock?.candles ||
+                          niftyBlock?.data ||
+                          niftyBlock?.values ||
+                          [];
+
+            }
+
+        }
+
+
+        console.log(
+            "🔥 Dhan candles:",
+            dhanCandles.length
+        );
+
+
+        console.log(
+            "🔥 INDstocks NIFTY candles:",
+            indCandles.length
+        );
+
+
+        if (!indCandles.length) {
+
+            throw new Error(
+                "Could not locate NIFTY candles in INDstocks response"
+            );
+
+        }
+
+
+        // ----------------------------------------------
+        // Normalize candles
+        // ----------------------------------------------
+
+        function normalizeCandle(candle) {
+
+            if (!candle) {
+                return null;
+            }
+
+
+            const ts =
+                Number(
+                    candle.ts ??
+                    candle.timestamp ??
+                    candle.time
+                );
+
+
+            const open =
+                Number(
+                    candle.o ??
+                    candle.open
+                );
+
+
+            const high =
+                Number(
+                    candle.h ??
+                    candle.high
+                );
+
+
+            const low =
+                Number(
+                    candle.l ??
+                    candle.low
+                );
+
+
+            const close =
+                Number(
+                    candle.c ??
+                    candle.close
+                );
+
+
+            if (
+                !Number.isFinite(ts) ||
+                !Number.isFinite(close)
+            ) {
+
+                return null;
+
+            }
+
+
+            /*
+            Convert millisecond timestamps to seconds
+            when necessary.
+            */
+
+            const timestamp =
+                ts > 100000000000
+                    ? Math.floor(ts / 1000)
+                    : Math.floor(ts);
+
+
+            return {
+
+                ts:
+                    timestamp,
+
+                o:
+                    open,
+
+                h:
+                    high,
+
+                l:
+                    low,
+
+                c:
+                    close
+
+            };
+
+        }
+
+
+        const normalizedDhan =
+            dhanCandles
+                .map(normalizeCandle)
+                .filter(Boolean);
+
+
+        const normalizedIND =
+            indCandles
+                .map(normalizeCandle)
+                .filter(Boolean);
+
+
+        // ----------------------------------------------
+        // Create INDstocks timestamp lookup
+        // ----------------------------------------------
+
+        const indMap =
+            new Map();
+
+
+        normalizedIND.forEach(candle => {
+
+            indMap.set(
+                candle.ts,
+                candle
+            );
+
+        });
+
+
+        // ----------------------------------------------
+        // Compare matching timestamps
+        // ----------------------------------------------
+
+        const matches = [];
+
+
+        normalizedDhan.forEach(dhanCandle => {
+
+            const indCandle =
+                indMap.get(
+                    dhanCandle.ts
+                );
+
+
+            if (!indCandle) {
+                return;
+            }
+
+
+            const closeDifference =
+                Math.abs(
+                    dhanCandle.c -
+                    indCandle.c
+                );
+
+
+            matches.push({
+
+                ts:
+                    dhanCandle.ts,
+
+                dhanClose:
+                    dhanCandle.c,
+
+                indClose:
+                    indCandle.c,
+
+                difference:
+                    closeDifference
+
+            });
+
+        });
+
+
+        console.log(
+            "🔥 Matching candles:",
+            matches.length
+        );
+
+
+        console.table(
+            matches.slice(-20)
+        );
+
+
+        // ----------------------------------------------
+        // No exact timestamp matches
+        // ----------------------------------------------
+
+        if (!matches.length) {
+
+            if (statusElement) {
+
+                statusElement.textContent =
+                    "Comparison needs timestamp alignment ⚠️";
+
+            }
+
+
+            if (detailsElement) {
+
+                detailsElement.textContent =
+                    `Dhan: ${normalizedDhan.length} candles | ` +
+                    `INDstocks: ${normalizedIND.length} candles | ` +
+                    `Exact timestamp matches: 0`;
+
+            }
+
+
+            console.warn(
+                "🔥 No exact timestamps matched."
+            );
+
+
+            console.log(
+                "Dhan sample:",
+                normalizedDhan.slice(0, 5)
+            );
+
+
+            console.log(
+                "INDstocks sample:",
+                normalizedIND.slice(0, 5)
+            );
+
+
+            return;
+
+        }
+
+
+        // ----------------------------------------------
+        // Statistics
+        // ----------------------------------------------
+
+        const averageDifference =
+            matches.reduce(
+                (sum, candle) =>
+                    sum + candle.difference,
+                0
+            ) /
+            matches.length;
+
+
+        const maxDifference =
+            Math.max(
+                ...matches.map(
+                    candle =>
+                        candle.difference
+                )
+            );
+
+
+        const lastMatch =
+            matches[
+                matches.length - 1
+            ];
+
+
+        // ----------------------------------------------
+        // Determine quality
+        // ----------------------------------------------
+
+        let quality;
+
+
+        if (averageDifference <= 1) {
+
+            quality =
+                "EXCELLENT";
+
+        }
+
+        else if (averageDifference <= 3) {
+
+            quality =
+                "GOOD";
+
+        }
+
+        else if (averageDifference <= 10) {
+
+            quality =
+                "ACCEPTABLE";
+
+        }
+
+        else {
+
+            quality =
+                "DATA MISMATCH";
+
+        }
+
+
+        // ----------------------------------------------
+        // Dashboard
+        // ----------------------------------------------
+
+        if (statusElement) {
+
+            statusElement.textContent =
+                `Comparison successful ✅ — ${quality}`;
+
+        }
+
+
+        if (detailsElement) {
+
+            detailsElement.textContent =
+
+                `Matched: ${matches.length} candles | ` +
+
+                `Dhan: ${normalizedDhan.length} | ` +
+
+                `INDstocks: ${normalizedIND.length} | ` +
+
+                `Avg close difference: ${averageDifference.toFixed(2)} pts | ` +
+
+                `Max difference: ${maxDifference.toFixed(2)} pts | ` +
+
+                `Latest Dhan: ${lastMatch.dhanClose.toFixed(2)} | ` +
+
+                `Latest INDstocks: ${lastMatch.indClose.toFixed(2)}`;
+
+        }
+
+
+        console.log(
+            "================================"
+        );
+
+
+        console.log(
+            "🔥 DHAN vs INDSTOCKS RESULT"
+        );
+
+
+        console.log({
+
+            quality,
+
+            dhanCandles:
+                normalizedDhan.length,
+
+            indCandles:
+                normalizedIND.length,
+
+            matchedCandles:
+                matches.length,
+
+            averageDifference,
+
+            maxDifference,
+
+            latest:
+                lastMatch
+
+        });
+
+
+        console.log(
+            "================================"
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "🔥 Dhan vs INDstocks comparison error:",
+            error
+        );
+
+
+        if (statusElement) {
+
+            statusElement.textContent =
+                "Comparison failed ❌";
+
+        }
+
+
+        if (detailsElement) {
+
+            detailsElement.textContent =
+                error?.message ||
+                "Unknown comparison error";
+
+        }
+
+    }
+
+}
 // ======================================================
 // INITIALIZE
 // ======================================================
