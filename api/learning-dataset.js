@@ -1,1802 +1,3081 @@
 /*
-===========================================================
+============================================================
 TradeMind Pro
 V11.1 LEARNING DATASET ENGINE
-===========================================================
+============================================================
 
-Purpose:
-- Build a larger historical learning dataset
-- Fetch INDstocks historical candles in <= 7-day chunks
-- Remove duplicate candles
-- Calculate technical/market features
-- Generate future outcomes
-- Prepare data for V11.2 learning engine
+PURPOSE
+------------------------------------------------------------
+Build a large historical learning dataset for NIFTY 50.
 
-IMPORTANT:
-- PAPER / LEARNING DATA ONLY
-- NO REAL ORDERS
-- NO ORDER API USED
-===========================================================
+V11.1 improvements:
+- Multi-request historical download
+- 6-day chunks
+- 30-day default dataset
+- Robust INDstocks candle extraction
+- Timestamp normalization
+- Duplicate removal
+- OHLCV validation
+- Technical feature generation
+- Future outcome generation
+- BUY / SELL outcome labels
+- Market regime classification
+- IST session/time features
+
+IMPORTANT
+------------------------------------------------------------
+PAPER / LEARNING DATA ONLY
+NO REAL ORDERS
+NO ORDER API
+NO LIVE TRADING
+
+============================================================
 */
+
+
+// ==========================================================
+// API HANDLER
+// ==========================================================
 
 export default async function handler(req, res) {
 
-  try {
+    try {
 
-    // =====================================================
-    // CONFIGURATION
-    // =====================================================
+        // ==================================================
+        // CONFIG
+        // ==================================================
 
-    const VERSION = "V11.1";
+        const VERSION = "V11.1";
 
-    const INTERVAL =
-      String(req.query.interval || "5minute");
+        const TOKEN =
+            process.env.INDSTOCKS_TOKEN;
 
-    const REQUESTED_DAYS =
-      Math.min(
-        Math.max(
-          Number(req.query.days || 30),
-          1
-        ),
-        60
-      );
+        if (!TOKEN) {
 
-    const INSTRUMENT =
-      String(
-        req.query.instrument ||
-        "NIDX_40000001"
-      );
+            return res.status(500).json({
 
-    const BASE_URL =
-      "https://api.indstocks.com";
+                success: false,
 
-    const TOKEN =
-      process.env.INDSTOCKS_TOKEN;
+                version: VERSION,
 
-    if (!TOKEN) {
+                error:
+                    "INDSTOCKS_TOKEN is not configured",
 
-      return res.status(500).json({
-        success: false,
-        version: VERSION,
-        error: "INDSTOCKS_TOKEN is not configured",
-        message:
-          "Add INDSTOCKS_TOKEN to Vercel Environment Variables."
-      });
+                mode:
+                    "LEARNING_DATASET_ONLY",
 
-    }
+                paperOnly: true,
 
-    // =====================================================
-    // SAFETY
-    // =====================================================
+                realOrders: false
 
-    const ALLOWED_INTERVALS = [
-      "1minute",
-      "2minute",
-      "3minute",
-      "4minute",
-      "5minute",
-      "10minute",
-      "15minute",
-      "30minute",
-      "60minute",
-      "120minute",
-      "180minute",
-      "240minute"
-    ];
-
-    if (!ALLOWED_INTERVALS.includes(INTERVAL)) {
-
-      return res.status(400).json({
-        success: false,
-        version: VERSION,
-        error: "Unsupported interval",
-        allowedIntervals: ALLOWED_INTERVALS
-      });
-
-    }
-
-    // =====================================================
-    // INTERVAL SIZE
-    // =====================================================
-
-    const INTERVAL_MINUTES = {
-
-      "1minute": 1,
-      "2minute": 2,
-      "3minute": 3,
-      "4minute": 4,
-      "5minute": 5,
-      "10minute": 10,
-      "15minute": 15,
-      "30minute": 30,
-      "60minute": 60,
-      "120minute": 120,
-      "180minute": 180,
-      "240minute": 240
-
-    };
-
-    const candleMinutes =
-      INTERVAL_MINUTES[INTERVAL];
-
-    // =====================================================
-    // INDSTOCKS MAX RANGE
-    //
-    // Intraday intervals support max 7 days/request.
-    // We deliberately use 6 days to leave a safety margin.
-    // =====================================================
-
-    const CHUNK_DAYS = 6;
-
-    // =====================================================
-    // HELPERS
-    // =====================================================
-
-    function sleep(ms) {
-
-      return new Promise(
-        resolve => setTimeout(resolve, ms)
-      );
-
-    }
-
-    function toNumber(value) {
-
-      const n = Number(value);
-
-      return Number.isFinite(n)
-        ? n
-        : null;
-
-    }
-
-    function validCandle(c) {
-
-      if (!Array.isArray(c)) {
-        return false;
-      }
-
-      if (c.length < 6) {
-        return false;
-      }
-
-      const [
-        ts,
-        open,
-        high,
-        low,
-        close,
-        volume
-      ] = c;
-
-      return (
-        Number.isFinite(Number(ts)) &&
-        Number.isFinite(Number(open)) &&
-        Number.isFinite(Number(high)) &&
-        Number.isFinite(Number(low)) &&
-        Number.isFinite(Number(close)) &&
-        Number.isFinite(Number(volume))
-      );
-
-    }
-
-    function candleObject(c) {
-
-      return {
-
-        timestamp: Number(c[0]),
-
-        date:
-          new Date(
-            Number(c[0])
-          ).toISOString()
-            .slice(0, 10),
-
-        open: Number(c[1]),
-        high: Number(c[2]),
-        low: Number(c[3]),
-        close: Number(c[4]),
-        volume: Number(c[5])
-
-      };
-
-    }
-
-    // =====================================================
-    // INDICATORS
-    // =====================================================
-
-    function ema(values, period) {
-
-      if (
-        !Array.isArray(values) ||
-        values.length < period
-      ) {
-
-        return null;
-
-      }
-
-      const multiplier =
-        2 / (period + 1);
-
-      let emaValue =
-        values
-          .slice(0, period)
-          .reduce(
-            (a, b) => a + b,
-            0
-          ) / period;
-
-      for (
-        let i = period;
-        i < values.length;
-        i++
-      ) {
-
-        emaValue =
-          (
-            values[i] -
-            emaValue
-          ) *
-          multiplier +
-          emaValue;
-
-      }
-
-      return emaValue;
-
-    }
-
-    function rsi(values, period = 14) {
-
-      if (
-        !Array.isArray(values) ||
-        values.length < period + 1
-      ) {
-
-        return null;
-
-      }
-
-      let gains = 0;
-      let losses = 0;
-
-      for (
-        let i = 1;
-        i <= period;
-        i++
-      ) {
-
-        const change =
-          values[i] -
-          values[i - 1];
-
-        if (change > 0) {
-
-          gains += change;
-
-        } else {
-
-          losses += Math.abs(change);
+            });
 
         }
 
-      }
 
-      let avgGain =
-        gains / period;
+        // ==================================================
+        // REQUEST PARAMETERS
+        // ==================================================
 
-      let avgLoss =
-        losses / period;
+        const interval =
+            String(
+                req.query?.interval ||
+                "5minute"
+            );
 
-      for (
-        let i = period + 1;
-        i < values.length;
-        i++
-      ) {
 
-        const change =
-          values[i] -
-          values[i - 1];
+        let requestedDays =
+            Number(
+                req.query?.days ||
+                30
+            );
 
-        const gain =
-          Math.max(change, 0);
 
-        const loss =
-          Math.max(-change, 0);
-
-        avgGain =
-          (
-            avgGain *
-            (period - 1) +
-            gain
-          ) / period;
-
-        avgLoss =
-          (
-            avgLoss *
-            (period - 1) +
-            loss
-          ) / period;
-
-      }
-
-      if (avgLoss === 0) {
-        return 100;
-      }
-
-      const rs =
-        avgGain / avgLoss;
-
-      return (
-        100 -
-        100 / (1 + rs)
-      );
-
-    }
-
-    function atr(candles, period = 14) {
-
-      if (
-        candles.length <
-        period + 1
-      ) {
-
-        return null;
-
-      }
-
-      const trs = [];
-
-      for (
-        let i = 1;
-        i < candles.length;
-        i++
-      ) {
-
-        const current =
-          candles[i];
-
-        const previous =
-          candles[i - 1];
-
-        const tr =
-          Math.max(
-
-            current.high -
-            current.low,
-
-            Math.abs(
-              current.high -
-              previous.close
-            ),
-
-            Math.abs(
-              current.low -
-              previous.close
+        if (
+            !Number.isFinite(
+                requestedDays
             )
+        ) {
 
-          );
+            requestedDays = 30;
 
-        trs.push(tr);
+        }
 
-      }
 
-      if (trs.length < period) {
-        return null;
-      }
+        requestedDays =
+            Math.min(
+                Math.max(
+                    Math.floor(
+                        requestedDays
+                    ),
+                    1
+                ),
+                60
+            );
 
-      let value =
-        trs
-          .slice(0, period)
-          .reduce(
-            (a, b) => a + b,
-            0
-          ) / period;
 
-      for (
-        let i = period;
-        i < trs.length;
-        i++
-      ) {
+        // ==================================================
+        // SUPPORTED INTERVALS
+        // ==================================================
 
-        value =
-          (
-            value *
-            (period - 1) +
-            trs[i]
-          ) / period;
+        const allowedIntervals = [
 
-      }
+            "1minute",
+            "2minute",
+            "3minute",
+            "4minute",
+            "5minute",
+            "10minute",
+            "15minute",
+            "30minute",
+            "60minute",
+            "120minute",
+            "180minute",
+            "240minute"
 
-      return value;
+        ];
 
-    }
 
-    function vwap(candles) {
+        if (
+            !allowedIntervals.includes(
+                interval
+            )
+        ) {
 
-      let pv = 0;
-      let volume = 0;
+            return res.status(400).json({
 
-      for (
-        const c of candles
-      ) {
+                success: false,
 
-        const typical =
-          (
-            c.high +
-            c.low +
-            c.close
-          ) / 3;
+                version: VERSION,
 
-        pv +=
-          typical *
-          c.volume;
+                error:
+                    "Invalid interval",
 
-        volume +=
-          c.volume;
+                allowedIntervals
 
-      }
+            });
 
-      if (volume === 0) {
-        return null;
-      }
+        }
 
-      return pv / volume;
 
-    }
+        // ==================================================
+        // NIFTY 50
+        // ==================================================
 
-    // =====================================================
-    // FETCH HISTORICAL DATA
-    // =====================================================
+        const NIFTY_ID =
+            "40000001";
 
-    async function fetchHistorical(
-      startMs,
-      endMs
-    ) {
 
-      const url =
-        `${BASE_URL}/market/historical/${INTERVAL}` +
-        `?scrip-codes=${encodeURIComponent(INSTRUMENT)}` +
-        `&start_time=${startMs}` +
-        `&end_time=${endMs}`;
+        const scripCode =
+            `NIDX_${NIFTY_ID}`;
 
-      const response =
-        await fetch(
-          url,
-          {
-            method: "GET",
-            headers: {
-              "Authorization": TOKEN,
-              "Content-Type":
-                "application/json"
+
+        const instrument =
+            "NIFTY 50";
+
+
+        // ==================================================
+        // BASE API
+        // ==================================================
+
+        const BASE_URL =
+            "https://api.indstocks.com";
+
+
+        // ==================================================
+        // CHUNK SIZE
+        //
+        // INDstocks allows up to 7 days for 5-minute data.
+        // We intentionally use 6 days.
+        // ==================================================
+
+        const CHUNK_DAYS = 6;
+
+
+        const DAY_MS =
+            24 *
+            60 *
+            60 *
+            1000;
+
+
+        const CHUNK_MS =
+            CHUNK_DAYS *
+            DAY_MS;
+
+
+        // ==================================================
+        // HELPER
+        // ==================================================
+
+        function sleep(ms) {
+
+            return new Promise(
+                resolve =>
+                    setTimeout(
+                        resolve,
+                        ms
+                    )
+            );
+
+        }
+
+
+        // ==================================================
+        // TIMESTAMP NORMALIZATION
+        // ==================================================
+
+        function normalizeTimestamp(
+            value
+        ) {
+
+            let timestamp =
+                Number(value);
+
+
+            if (
+                !Number.isFinite(
+                    timestamp
+                )
+            ) {
+
+                return null;
+
             }
-          }
-        );
 
-      const text =
-        await response.text();
 
-      let data;
+            /*
+            Official INDstocks documentation
+            uses milliseconds.
 
-      try {
+            Our previous working response
+            contained second-based values.
 
-        data =
-          JSON.parse(text);
+            Therefore this function safely
+            supports both formats.
+            */
 
-      } catch {
+            if (
+                timestamp <
+                100000000000
+            ) {
 
-        throw new Error(
-          `INDstocks returned non-JSON response: ${text.slice(0, 300)}`
-        );
+                timestamp *= 1000;
 
-      }
+            }
 
-      if (!response.ok) {
 
-        throw new Error(
-          `INDstocks HTTP ${response.status}: ` +
-          JSON.stringify(data)
-        );
+            return timestamp;
 
-      }
+        }
 
-      /*
-       Expected:
-       {
-         status: "success",
-         data: {
-           candles: [...]
-         }
-       }
-      */
 
-      let candles = [];
+        // ==================================================
+        // IST DATE
+        // ==================================================
 
-      if (
-        data &&
-        data.data &&
-        Array.isArray(
-          data.data.candles
-        )
-      ) {
+        function getISTDate(
+            timestamp
+        ) {
 
-        candles =
-          data.data.candles;
+            const date =
+                new Date(
+                    timestamp +
+                    (
+                        5.5 *
+                        60 *
+                        60 *
+                        1000
+                    )
+                );
 
-      } else if (
-        data &&
-        Array.isArray(data.candles)
-      ) {
 
-        candles =
-          data.candles;
+            return date
+                .toISOString()
+                .slice(
+                    0,
+                    10
+                );
 
-      }
+        }
 
-      return candles;
 
-    }
+        // ==================================================
+        // IST TIME
+        // ==================================================
 
-    // =====================================================
-    // DETERMINE TIME RANGE
-    // =====================================================
+        function getISTTime(
+            timestamp
+        ) {
 
-    const now =
-      Date.now();
+            const date =
+                new Date(
+                    timestamp +
+                    (
+                        5.5 *
+                        60 *
+                        60 *
+                        1000
+                    )
+                );
 
-    const requestedStart =
-      now -
-      REQUESTED_DAYS *
-      24 *
-      60 *
-      60 *
-      1000;
 
-    // =====================================================
-    // FETCH IN CHUNKS
-    // =====================================================
+            return {
 
-    const allRawCandles = [];
+                hour:
+                    date.getUTCHours(),
 
-    let chunkEnd = now;
+                minute:
+                    date.getUTCMinutes()
 
-    let chunksRequested = 0;
+            };
 
-    const chunkMs =
-      CHUNK_DAYS *
-      24 *
-      60 *
-      60 *
-      1000;
+        }
 
-    while (
-      chunkEnd >
-      requestedStart
-    ) {
 
-      const chunkStart =
-        Math.max(
-          requestedStart,
-          chunkEnd - chunkMs
-        );
+        // ==================================================
+        // VALIDATE RAW CANDLE
+        // ==================================================
 
-      chunksRequested++;
+        function validRawCandle(
+            candle
+        ) {
 
-      try {
+            if (
+                !Array.isArray(
+                    candle
+                )
+            ) {
+
+                return false;
+
+            }
+
+
+            if (
+                candle.length <
+                6
+            ) {
+
+                return false;
+
+            }
+
+
+            const timestamp =
+                normalizeTimestamp(
+                    candle[0]
+                );
+
+
+            const open =
+                Number(
+                    candle[1]
+                );
+
+
+            const high =
+                Number(
+                    candle[2]
+                );
+
+
+            const low =
+                Number(
+                    candle[3]
+                );
+
+
+            const close =
+                Number(
+                    candle[4]
+                );
+
+
+            const volume =
+                Number(
+                    candle[5]
+                );
+
+
+            if (
+                !Number.isFinite(
+                    timestamp
+                )
+            ) {
+
+                return false;
+
+            }
+
+
+            if (
+                !Number.isFinite(
+                    open
+                )
+            ) {
+
+                return false;
+
+            }
+
+
+            if (
+                !Number.isFinite(
+                    high
+                )
+            ) {
+
+                return false;
+
+            }
+
+
+            if (
+                !Number.isFinite(
+                    low
+                )
+            ) {
+
+                return false;
+
+            }
+
+
+            if (
+                !Number.isFinite(
+                    close
+                )
+            ) {
+
+                return false;
+
+            }
+
+
+            if (
+                !Number.isFinite(
+                    volume
+                )
+            ) {
+
+                return false;
+
+            }
+
+
+            if (
+                high < low
+            ) {
+
+                return false;
+
+            }
+
+
+            return true;
+
+        }
+
+
+        // ==================================================
+        // NORMALIZE CANDLE
+        // ==================================================
+
+        function normalizeCandle(
+            candle
+        ) {
+
+            const timestamp =
+                normalizeTimestamp(
+                    candle[0]
+                );
+
+
+            return {
+
+                timestamp,
+
+                date:
+                    getISTDate(
+                        timestamp
+                    ),
+
+                open:
+                    Number(
+                        candle[1]
+                    ),
+
+                high:
+                    Number(
+                        candle[2]
+                    ),
+
+                low:
+                    Number(
+                        candle[3]
+                    ),
+
+                close:
+                    Number(
+                        candle[4]
+                    ),
+
+                volume:
+                    Number(
+                        candle[5]
+                    )
+
+            };
+
+        }
+
+
+        // ==================================================
+        // ROBUST CANDLE EXTRACTION
+        // ==================================================
+
+        function extractCandles(
+            result
+        ) {
+
+            const directCandidates = [
+
+                result
+                    ?.data
+                    ?.candles,
+
+                result
+                    ?.candles,
+
+                result
+                    ?.data
+                    ?.NIDX_40000001
+                    ?.candles,
+
+                result
+                    ?.data
+                    ?.[scripCode]
+                    ?.candles,
+
+                result
+                    ?.data
+                    ?.NIDX_40000001,
+
+                result
+                    ?.data
+                    ?.[scripCode],
+
+                result
+                    ?.data
+                    ?.NIDX_40000001
+                    ?.data,
+
+                result
+                    ?.data
+                    ?.[scripCode]
+                    ?.data
+
+            ];
+
+
+            for (
+                const candidate
+                of directCandidates
+            ) {
+
+                if (
+                    Array.isArray(
+                        candidate
+                    ) &&
+                    candidate.length > 0
+                ) {
+
+                    return candidate;
+
+                }
+
+            }
+
+
+            // ==================================================
+            // RECURSIVE SEARCH
+            // ==================================================
+
+            function recursiveSearch(
+                node,
+                depth = 0
+            ) {
+
+                if (
+                    depth > 6
+                ) {
+
+                    return [];
+
+                }
+
+
+                if (
+                    Array.isArray(
+                        node
+                    )
+                ) {
+
+                    /*
+                    Candle arrays look like:
+
+                    [
+                        timestamp,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume
+                    ]
+                    */
+
+                    if (
+                        node.length > 0 &&
+                        Array.isArray(
+                            node[0]
+                        ) &&
+                        node[0].length >= 6
+                    ) {
+
+                        return node;
+
+                    }
+
+
+                    return [];
+
+                }
+
+
+                if (
+                    !node ||
+                    typeof node !==
+                    "object"
+                ) {
+
+                    return [];
+
+                }
+
+
+                const keys =
+                    Object.keys(
+                        node
+                    );
+
+
+                /*
+                Prefer candle-related keys.
+                */
+
+                const preferredKeys =
+                    keys.filter(
+                        key => {
+
+                            const lower =
+                                key.toLowerCase();
+
+                            return (
+                                lower.includes(
+                                    "candle"
+                                ) ||
+                                lower.includes(
+                                    "nidx"
+                                ) ||
+                                lower.includes(
+                                    "40000001"
+                                ) ||
+                                lower ===
+                                    "data"
+                            );
+
+                        }
+                    );
+
+
+                const remainingKeys =
+                    keys.filter(
+                        key =>
+                            !preferredKeys.includes(
+                                key
+                            )
+                    );
+
+
+                const orderedKeys =
+                    [
+                        ...preferredKeys,
+                        ...remainingKeys
+                    ];
+
+
+                for (
+                    const key
+                    of orderedKeys
+                ) {
+
+                    const found =
+                        recursiveSearch(
+                            node[key],
+                            depth + 1
+                        );
+
+
+                    if (
+                        found.length > 0
+                    ) {
+
+                        return found;
+
+                    }
+
+                }
+
+
+                return [];
+
+            }
+
+
+            return recursiveSearch(
+                result
+            );
+
+        }
+
+
+        // ==================================================
+        // FETCH ONE CHUNK
+        // ==================================================
+
+        async function fetchChunk(
+            startTime,
+            endTime
+        ) {
+
+            const url =
+                BASE_URL +
+                `/market/historical/${interval}` +
+                `?scrip-codes=${encodeURIComponent(
+                    scripCode
+                )}` +
+                `&start_time=${startTime}` +
+                `&end_time=${endTime}`;
+
+
+            console.log(
+                "================================"
+            );
+
+
+            console.log(
+                `${VERSION} CHUNK REQUEST`
+            );
+
+
+            console.log(
+                "Interval:",
+                interval
+            );
+
+
+            console.log(
+                "Scrip:",
+                scripCode
+            );
+
+
+            console.log(
+                "Start:",
+                new Date(
+                    startTime
+                ).toISOString()
+            );
+
+
+            console.log(
+                "End:",
+                new Date(
+                    endTime
+                ).toISOString()
+            );
+
+
+            console.log(
+                "================================"
+            );
+
+
+            const response =
+                await fetch(
+                    url,
+                    {
+
+                        method:
+                            "GET",
+
+                        headers: {
+
+                            Authorization:
+                                TOKEN,
+
+                            Accept:
+                                "application/json"
+
+                        }
+
+                    }
+                );
+
+
+            const text =
+                await response.text();
+
+
+            let result;
+
+
+            try {
+
+                result =
+                    JSON.parse(
+                        text
+                    );
+
+            } catch {
+
+                throw new Error(
+                    "INDstocks returned invalid JSON: " +
+                    text.slice(
+                        0,
+                        1000
+                    )
+                );
+
+            }
+
+
+            console.log(
+                `${VERSION} HTTP STATUS:`,
+                response.status
+            );
+
+
+            if (
+                !response.ok
+            ) {
+
+                throw new Error(
+                    `INDstocks HTTP ${response.status}: ` +
+                    JSON.stringify(
+                        result
+                    )
+                );
+
+            }
+
+
+            const candles =
+                extractCandles(
+                    result
+                );
+
+
+            console.log(
+                `${VERSION} EXTRACTED CANDLES:`,
+                candles.length
+            );
+
+
+            /*
+            Debug only.
+
+            This helps us identify the actual
+            response structure if extraction
+            fails again.
+            */
+
+            if (
+                candles.length === 0
+            ) {
+
+                console.log(
+                    `${VERSION} NO CANDLES FOUND`
+                );
+
+
+                console.log(
+                    `${VERSION} RESPONSE PREVIEW:`,
+                    JSON.stringify(
+                        result
+                    ).slice(
+                        0,
+                        5000
+                    )
+                );
+
+            }
+
+
+            return candles;
+
+        }
+
+
+        // ==================================================
+        // HISTORICAL WINDOW
+        // ==================================================
+
+        const endTime =
+            Date.now();
+
+
+        const requestedStartTime =
+            endTime -
+            (
+                requestedDays *
+                DAY_MS
+            );
+
+
+        // ==================================================
+        // FETCH ALL CHUNKS
+        // ==================================================
+
+        const allRawCandles = [];
+
+
+        const chunkInformation = [];
+
+
+        let chunkEnd =
+            endTime;
+
+
+        let chunksRequested =
+            0;
+
+
+        while (
+            chunkEnd >
+            requestedStartTime
+        ) {
+
+            const chunkStart =
+                Math.max(
+                    requestedStartTime,
+                    chunkEnd -
+                    CHUNK_MS
+                );
+
+
+            chunksRequested++;
+
+
+            try {
+
+                const chunkCandles =
+                    await fetchChunk(
+                        chunkStart,
+                        chunkEnd
+                    );
+
+
+                allRawCandles.push(
+                    ...chunkCandles
+                );
+
+
+                chunkInformation.push({
+
+                    start:
+                        new Date(
+                            chunkStart
+                        ).toISOString(),
+
+                    end:
+                        new Date(
+                            chunkEnd
+                        ).toISOString(),
+
+                    candles:
+                        chunkCandles.length
+
+                });
+
+
+            } catch (
+                error
+            ) {
+
+                console.error(
+                    `${VERSION} CHUNK ERROR:`,
+                    error
+                );
+
+
+                return res.status(502).json({
+
+                    success: false,
+
+                    version: VERSION,
+
+                    error:
+                        "Historical data fetch failed",
+
+                    details:
+                        error?.message ||
+                        "Unknown error",
+
+                    failedChunk: {
+
+                        start:
+                            new Date(
+                                chunkStart
+                            ).toISOString(),
+
+                        end:
+                            new Date(
+                                chunkEnd
+                            ).toISOString()
+
+                    },
+
+                    chunksCompleted:
+                        chunkInformation,
+
+                    mode:
+                        "LEARNING_DATASET_ONLY",
+
+                    paperOnly: true,
+
+                    realOrders: false
+
+                });
+
+            }
+
+
+            /*
+            Small pause to avoid sending
+            requests back-to-back.
+            */
+
+            await sleep(
+                150
+            );
+
+
+            chunkEnd =
+                chunkStart;
+
+        }
+
+
+        // ==================================================
+        // RAW DATA QUALITY
+        // ==================================================
+
+        const rawCandleCount =
+            allRawCandles.length;
+
+
+        const validRawCandles =
+            allRawCandles.filter(
+                validRawCandle
+            );
+
+
+        const invalidCandles =
+            rawCandleCount -
+            validRawCandles.length;
+
+
+        // ==================================================
+        // NORMALIZE + DEDUPLICATE
+        // ==================================================
+
+        const candleMap =
+            new Map();
+
+
+        for (
+            const raw
+            of validRawCandles
+        ) {
+
+            const normalized =
+                normalizeCandle(
+                    raw
+                );
+
+
+            /*
+            Timestamp is the unique candle
+            identifier.
+            */
+
+            candleMap.set(
+                normalized.timestamp,
+                normalized
+            );
+
+        }
+
+
+        const duplicateCandles =
+            validRawCandles.length -
+            candleMap.size;
+
 
         const candles =
-          await fetchHistorical(
-            chunkStart,
-            chunkEnd
-          );
+            Array.from(
+                candleMap.values()
+            )
+            .sort(
+                (
+                    a,
+                    b
+                ) =>
+                    a.timestamp -
+                    b.timestamp
+            );
 
-        allRawCandles.push(
-          ...candles
-        );
 
-      } catch (error) {
+        // ==================================================
+        // TRADING DAYS
+        // ==================================================
 
-        return res.status(502).json({
+        const tradingDaySet =
+            new Set();
 
-          success: false,
 
-          version: VERSION,
+        for (
+            const candle
+            of candles
+        ) {
 
-          error:
-            "Historical data fetch failed",
+            tradingDaySet.add(
+                candle.date
+            );
 
-          details:
-            error.message,
+        }
 
-          chunk: {
-            start:
-              new Date(
-                chunkStart
-              ).toISOString(),
 
-            end:
-              new Date(
-                chunkEnd
-              ).toISOString()
-          }
+        const tradingDays =
+            tradingDaySet.size;
+
+
+        // ==================================================
+        // INDICATOR FUNCTIONS
+        // ==================================================
+
+        function ema(
+            values,
+            period
+        ) {
+
+            if (
+                !Array.isArray(
+                    values
+                ) ||
+                values.length <
+                period
+            ) {
+
+                return null;
+
+            }
+
+
+            const multiplier =
+                2 /
+                (
+                    period +
+                    1
+                );
+
+
+            let value =
+                values
+                    .slice(
+                        0,
+                        period
+                    )
+                    .reduce(
+                        (
+                            sum,
+                            item
+                        ) =>
+                            sum +
+                            Number(
+                                item
+                            ),
+                        0
+                    ) /
+                    period;
+
+
+            for (
+                let i =
+                    period;
+                i <
+                    values.length;
+                i++
+            ) {
+
+                const current =
+                    Number(
+                        values[i]
+                    );
+
+
+                value =
+                    (
+                        (
+                            current -
+                            value
+                        ) *
+                        multiplier
+                    ) +
+                    value;
+
+            }
+
+
+            return value;
+
+        }
+
+
+        // ==================================================
+        // RSI
+        // ==================================================
+
+        function rsi(
+            values,
+            period = 14
+        ) {
+
+            if (
+                !Array.isArray(
+                    values
+                ) ||
+                values.length <
+                    period +
+                    1
+            ) {
+
+                return null;
+
+            }
+
+
+            let gains = 0;
+
+            let losses = 0;
+
+
+            for (
+                let i = 1;
+                i <= period;
+                i++
+            ) {
+
+                const change =
+                    Number(
+                        values[i]
+                    ) -
+                    Number(
+                        values[
+                            i - 1
+                        ]
+                    );
+
+
+                if (
+                    change > 0
+                ) {
+
+                    gains +=
+                        change;
+
+                } else {
+
+                    losses +=
+                        Math.abs(
+                            change
+                        );
+
+                }
+
+            }
+
+
+            let averageGain =
+                gains /
+                period;
+
+
+            let averageLoss =
+                losses /
+                period;
+
+
+            for (
+                let i =
+                    period + 1;
+                i <
+                    values.length;
+                i++
+            ) {
+
+                const change =
+                    Number(
+                        values[i]
+                    ) -
+                    Number(
+                        values[
+                            i - 1
+                        ]
+                    );
+
+
+                const gain =
+                    Math.max(
+                        change,
+                        0
+                    );
+
+
+                const loss =
+                    Math.max(
+                        -change,
+                        0
+                    );
+
+
+                averageGain =
+                    (
+                        averageGain *
+                        (
+                            period -
+                            1
+                        ) +
+                        gain
+                    ) /
+                    period;
+
+
+                averageLoss =
+                    (
+                        averageLoss *
+                        (
+                            period -
+                            1
+                        ) +
+                        loss
+                    ) /
+                    period;
+
+            }
+
+
+            if (
+                averageLoss === 0
+            ) {
+
+                return 100;
+
+            }
+
+
+            const rs =
+                averageGain /
+                averageLoss;
+
+
+            return (
+                100 -
+                (
+                    100 /
+                    (
+                        1 +
+                        rs
+                    )
+                )
+            );
+
+        }
+
+
+        // ==================================================
+        // ATR
+        // ==================================================
+
+        function atr(
+            history,
+            period = 14
+        ) {
+
+            if (
+                !Array.isArray(
+                    history
+                ) ||
+                history.length <
+                    period +
+                    1
+            ) {
+
+                return null;
+
+            }
+
+
+            const ranges = [];
+
+
+            for (
+                let i = 1;
+                i <
+                    history.length;
+                i++
+            ) {
+
+                const current =
+                    history[i];
+
+
+                const previous =
+                    history[
+                        i - 1
+                    ];
+
+
+                const trueRange =
+                    Math.max(
+
+                        current.high -
+                        current.low,
+
+                        Math.abs(
+                            current.high -
+                            previous.close
+                        ),
+
+                        Math.abs(
+                            current.low -
+                            previous.close
+                        )
+
+                    );
+
+
+                if (
+                    Number.isFinite(
+                        trueRange
+                    )
+                ) {
+
+                    ranges.push(
+                        trueRange
+                    );
+
+                }
+
+            }
+
+
+            if (
+                ranges.length <
+                period
+            ) {
+
+                return null;
+
+            }
+
+
+            let value =
+                ranges
+                    .slice(
+                        0,
+                        period
+                    )
+                    .reduce(
+                        (
+                            sum,
+                            item
+                        ) =>
+                            sum +
+                            item,
+                        0
+                    ) /
+                    period;
+
+
+            for (
+                let i =
+                    period;
+                i <
+                    ranges.length;
+                i++
+            ) {
+
+                value =
+                    (
+                        value *
+                        (
+                            period -
+                            1
+                        ) +
+                        ranges[i]
+                    ) /
+                    period;
+
+            }
+
+
+            return value;
+
+        }
+
+
+        // ==================================================
+        // SESSION VWAP
+        // ==================================================
+
+        function sessionVWAP(
+            history
+        ) {
+
+            if (
+                history.length === 0
+            ) {
+
+                return null;
+
+            }
+
+
+            const latest =
+                history[
+                    history.length -
+                    1
+                ];
+
+
+            const sessionDate =
+                latest.date;
+
+
+            let totalPV = 0;
+
+            let totalVolume = 0;
+
+
+            for (
+                const candle
+                of history
+            ) {
+
+                if (
+                    candle.date !==
+                    sessionDate
+                ) {
+
+                    continue;
+
+                }
+
+
+                const typicalPrice =
+                    (
+                        candle.high +
+                        candle.low +
+                        candle.close
+                    ) /
+                    3;
+
+
+                const volume =
+                    Number(
+                        candle.volume
+                    );
+
+
+                if (
+                    !Number.isFinite(
+                        typicalPrice
+                    ) ||
+                    !Number.isFinite(
+                        volume
+                    )
+                ) {
+
+                    continue;
+
+                }
+
+
+                totalPV +=
+                    typicalPrice *
+                    volume;
+
+
+                totalVolume +=
+                    volume;
+
+            }
+
+
+            if (
+                totalVolume <= 0
+            ) {
+
+                return null;
+
+            }
+
+
+            return (
+                totalPV /
+                totalVolume
+            );
+
+        }
+
+
+        // ==================================================
+        // LEARNING DATA
+        // ==================================================
+
+        const rows = [];
+
+
+        /*
+        Minimum historical candles required.
+        */
+
+        const LOOKBACK =
+            40;
+
+
+        /*
+        Future horizon:
+
+        12 x 5-minute candles
+        = approximately 60 minutes.
+        */
+
+        const FUTURE_CANDLES =
+            interval === "5minute"
+                ? 12
+                : 12;
+
+
+        // ==================================================
+        // BUILD DATASET
+        // ==================================================
+
+        for (
+            let i =
+                LOOKBACK;
+
+            i <
+                candles.length -
+                FUTURE_CANDLES;
+
+            i++
+        ) {
+
+            const current =
+                candles[i];
+
+
+            const history =
+                candles.slice(
+                    0,
+                    i + 1
+                );
+
+
+            const closes =
+                history.map(
+                    candle =>
+                        candle.close
+                );
+
+
+            // ==============================================
+            // EMA
+            // ==============================================
+
+            const ema9 =
+                ema(
+                    closes,
+                    9
+                );
+
+
+            const ema21 =
+                ema(
+                    closes,
+                    21
+                );
+
+
+            const previousCloses =
+                closes.slice(
+                    0,
+                    -1
+                );
+
+
+            const previousEMA9 =
+                ema(
+                    previousCloses,
+                    9
+                );
+
+
+            const previousEMA21 =
+                ema(
+                    previousCloses,
+                    21
+                );
+
+
+            // ==============================================
+            // RSI
+            // ==============================================
+
+            const rsi14 =
+                rsi(
+                    closes,
+                    14
+                );
+
+
+            const previousRSI =
+                rsi(
+                    previousCloses,
+                    14
+                );
+
+
+            // ==============================================
+            // ATR
+            // ==============================================
+
+            const atr14 =
+                atr(
+                    history,
+                    14
+                );
+
+
+            // ==============================================
+            // VWAP
+            // ==============================================
+
+            const vwap =
+                sessionVWAP(
+                    history
+                );
+
+
+            if (
+                !Number.isFinite(
+                    ema9
+                ) ||
+                !Number.isFinite(
+                    ema21
+                ) ||
+                !Number.isFinite(
+                    previousEMA9
+                ) ||
+                !Number.isFinite(
+                    previousEMA21
+                ) ||
+                !Number.isFinite(
+                    rsi14
+                ) ||
+                !Number.isFinite(
+                    previousRSI
+                ) ||
+                !Number.isFinite(
+                    atr14
+                ) ||
+                !Number.isFinite(
+                    vwap
+                ) ||
+                atr14 <= 0
+            ) {
+
+                continue;
+
+            }
+
+
+            // ==============================================
+            // EMA SLOPES
+            // ==============================================
+
+            const ema9Slope =
+                ema9 -
+                previousEMA9;
+
+
+            const ema21Slope =
+                ema21 -
+                previousEMA21;
+
+
+            const emaSpread =
+                ema9 -
+                ema21;
+
+
+            const emaSpreadATR =
+                emaSpread /
+                atr14;
+
+
+            const ema9SlopeATR =
+                ema9Slope /
+                atr14;
+
+
+            const ema21SlopeATR =
+                ema21Slope /
+                atr14;
+
+
+            // ==============================================
+            // RSI CHANGE
+            // ==============================================
+
+            const rsiChange =
+                rsi14 -
+                previousRSI;
+
+
+            // ==============================================
+            // PRICE DISTANCES
+            // ==============================================
+
+            const vwapDistance =
+                current.close -
+                vwap;
+
+
+            const vwapDistanceATR =
+                vwapDistance /
+                atr14;
+
+
+            const ema9Distance =
+                current.close -
+                ema9;
+
+
+            const ema9DistanceATR =
+                ema9Distance /
+                atr14;
+
+
+            const ema21Distance =
+                current.close -
+                ema21;
+
+
+            const ema21DistanceATR =
+                ema21Distance /
+                atr14;
+
+
+            // ==============================================
+            // CANDLE
+            // ==============================================
+
+            const range =
+                current.high -
+                current.low;
+
+
+            const body =
+                Math.abs(
+                    current.close -
+                    current.open
+                );
+
+
+            const upperWick =
+                current.high -
+                Math.max(
+                    current.open,
+                    current.close
+                );
+
+
+            const lowerWick =
+                Math.min(
+                    current.open,
+                    current.close
+                ) -
+                current.low;
+
+
+            const bodyRatio =
+                range > 0
+                    ? body /
+                      range
+                    : 0;
+
+
+            const upperWickRatio =
+                range > 0
+                    ? upperWick /
+                      range
+                    : 0;
+
+
+            const lowerWickRatio =
+                range > 0
+                    ? lowerWick /
+                      range
+                    : 0;
+
+
+            const closeLocation =
+                range > 0
+                    ? (
+                        current.close -
+                        current.low
+                    ) /
+                    range
+                    : 0.5;
+
+
+            const rangeATR =
+                range /
+                atr14;
+
+
+            const bullish =
+                current.close >
+                current.open;
+
+
+            const bearish =
+                current.close <
+                current.open;
+
+
+            // ==============================================
+            // TREND
+            // ==============================================
+
+            let trend =
+                "SIDEWAYS";
+
+
+            if (
+                ema9 >
+                    ema21 &&
+                ema9Slope >
+                    0 &&
+                ema21Slope >=
+                    0
+            ) {
+
+                trend =
+                    "BULLISH";
+
+            }
+
+
+            if (
+                ema9 <
+                    ema21 &&
+                ema9Slope <
+                    0 &&
+                ema21Slope <=
+                    0
+            ) {
+
+                trend =
+                    "BEARISH";
+
+            }
+
+
+            // ==============================================
+            // MARKET REGIME
+            // ==============================================
+
+            let regime =
+                "RANGING";
+
+
+            const spreadStrength =
+                Math.abs(
+                    emaSpreadATR
+                );
+
+
+            const slopeStrength =
+                Math.max(
+
+                    Math.abs(
+                        ema9SlopeATR
+                    ),
+
+                    Math.abs(
+                        ema21SlopeATR
+                    )
+
+                );
+
+
+            if (
+                spreadStrength >=
+                    0.80 &&
+                slopeStrength >=
+                    0.15
+            ) {
+
+                regime =
+                    "TRENDING";
+
+            } else if (
+                spreadStrength >=
+                    0.40
+            ) {
+
+                regime =
+                    "TRANSITION";
+
+            }
+
+
+            // ==============================================
+            // TIME
+            // ==============================================
+
+            const ist =
+                getISTTime(
+                    current.timestamp
+                );
+
+
+            const hour =
+                ist.hour;
+
+
+            const minute =
+                ist.minute;
+
+
+            const minutesFromOpen =
+                (
+                    hour *
+                    60 +
+                    minute
+                ) -
+                (
+                    9 *
+                    60 +
+                    15
+                );
+
+
+            // ==============================================
+            // FUTURE DATA
+            // ==============================================
+
+            const future =
+                candles.slice(
+                    i + 1,
+                    i +
+                    1 +
+                    FUTURE_CANDLES
+                );
+
+
+            if (
+                future.length === 0
+            ) {
+
+                continue;
+
+            }
+
+
+            // ==============================================
+            // LEARNING RISK MODEL
+            // ==============================================
+
+            const entry =
+                current.close;
+
+
+            /*
+            Learning labels:
+
+            Risk = 1 ATR
+            Reward = 2 ATR
+
+            This is NOT the final trading
+            strategy.
+
+            It is only the supervised
+            learning target.
+            */
+
+            const risk =
+                atr14;
+
+
+            const reward =
+                atr14 *
+                2;
+
+
+            const buyStop =
+                entry -
+                risk;
+
+
+            const buyTarget =
+                entry +
+                reward;
+
+
+            const sellStop =
+                entry +
+                risk;
+
+
+            const sellTarget =
+                entry -
+                reward;
+
+
+            // ==============================================
+            // OUTCOME
+            // ==============================================
+
+            let buyOutcome =
+                "TIMEOUT";
+
+
+            let sellOutcome =
+                "TIMEOUT";
+
+
+            let maxFavorableBuy =
+                0;
+
+
+            let maxAdverseBuy =
+                0;
+
+
+            let maxFavorableSell =
+                0;
+
+
+            let maxAdverseSell =
+                0;
+
+
+            // ==============================================
+            // FUTURE SIMULATION
+            // ==============================================
+
+            for (
+                const futureCandle
+                of future
+            ) {
+
+                // ------------------------------------------
+                // BUY MFE / MAE
+                // ------------------------------------------
+
+                maxFavorableBuy =
+                    Math.max(
+
+                        maxFavorableBuy,
+
+                        futureCandle.high -
+                        entry
+
+                    );
+
+
+                maxAdverseBuy =
+                    Math.max(
+
+                        maxAdverseBuy,
+
+                        entry -
+                        futureCandle.low
+
+                    );
+
+
+                // ------------------------------------------
+                // SELL MFE / MAE
+                // ------------------------------------------
+
+                maxFavorableSell =
+                    Math.max(
+
+                        maxFavorableSell,
+
+                        entry -
+                        futureCandle.low
+
+                    );
+
+
+                maxAdverseSell =
+                    Math.max(
+
+                        maxAdverseSell,
+
+                        futureCandle.high -
+                        entry
+
+                    );
+
+
+                // ------------------------------------------
+                // BUY OUTCOME
+                // ------------------------------------------
+
+                if (
+                    buyOutcome ===
+                    "TIMEOUT"
+                ) {
+
+                    const hitStop =
+                        futureCandle.low <=
+                        buyStop;
+
+
+                    const hitTarget =
+                        futureCandle.high >=
+                        buyTarget;
+
+
+                    /*
+                    Conservative rule:
+
+                    If both happen in one candle,
+                    classify as LOSS.
+
+                    This avoids artificially
+                    inflating the learning result.
+                    */
+
+                    if (
+                        hitStop &&
+                        hitTarget
+                    ) {
+
+                        buyOutcome =
+                            "LOSS";
+
+                    } else if (
+                        hitStop
+                    ) {
+
+                        buyOutcome =
+                            "LOSS";
+
+                    } else if (
+                        hitTarget
+                    ) {
+
+                        buyOutcome =
+                            "WIN";
+
+                    }
+
+                }
+
+
+                // ------------------------------------------
+                // SELL OUTCOME
+                // ------------------------------------------
+
+                if (
+                    sellOutcome ===
+                    "TIMEOUT"
+                ) {
+
+                    const hitStop =
+                        futureCandle.high >=
+                        sellStop;
+
+
+                    const hitTarget =
+                        futureCandle.low <=
+                        sellTarget;
+
+
+                    if (
+                        hitStop &&
+                        hitTarget
+                    ) {
+
+                        sellOutcome =
+                            "LOSS";
+
+                    } else if (
+                        hitStop
+                    ) {
+
+                        sellOutcome =
+                            "LOSS";
+
+                    } else if (
+                        hitTarget
+                    ) {
+
+                        sellOutcome =
+                            "WIN";
+
+                    }
+
+                }
+
+            }
+
+
+            // ==============================================
+            // LABEL
+            // ==============================================
+
+            let preferredDirection =
+                "NONE";
+
+
+            let label =
+                "NO_TRADE";
+
+
+            const buyWin =
+                buyOutcome ===
+                "WIN";
+
+
+            const sellWin =
+                sellOutcome ===
+                "WIN";
+
+
+            const buyLoss =
+                buyOutcome ===
+                "LOSS";
+
+
+            const sellLoss =
+                sellOutcome ===
+                "LOSS";
+
+
+            if (
+                buyWin &&
+                !sellWin
+            ) {
+
+                preferredDirection =
+                    "BUY";
+
+
+                label =
+                    "BUY_WIN";
+
+            } else if (
+                sellWin &&
+                !buyWin
+            ) {
+
+                preferredDirection =
+                    "SELL";
+
+
+                label =
+                    "SELL_WIN";
+
+            } else if (
+                buyWin &&
+                sellWin
+            ) {
+
+                label =
+                    "BOTH_WIN";
+
+            } else if (
+                buyLoss &&
+                sellLoss
+            ) {
+
+                label =
+                    "BOTH_LOSS";
+
+            }
+
+
+            // ==============================================
+            // ADD ROW
+            // ==============================================
+
+            rows.push({
+
+                timestamp:
+                    current.timestamp,
+
+                date:
+                    current.date,
+
+                open:
+                    current.open,
+
+                high:
+                    current.high,
+
+                low:
+                    current.low,
+
+                close:
+                    current.close,
+
+                volume:
+                    current.volume,
+
+
+                // EMA
+                ema9,
+
+                ema21,
+
+                emaSpread,
+
+                emaSpreadATR,
+
+                ema9Slope,
+
+                ema21Slope,
+
+                ema9SlopeATR,
+
+                ema21SlopeATR,
+
+
+                // RSI
+                rsi14,
+
+                previousRSI,
+
+                rsiChange,
+
+
+                // ATR
+                atr14,
+
+
+                // VWAP
+                vwap,
+
+                vwapDistance,
+
+                vwapDistanceATR,
+
+
+                // EMA distances
+                ema9Distance,
+
+                ema9DistanceATR,
+
+                ema21Distance,
+
+                ema21DistanceATR,
+
+
+                // Candle
+                range,
+
+                rangeATR,
+
+                body,
+
+                bodyRatio,
+
+                upperWick,
+
+                lowerWick,
+
+                upperWickRatio,
+
+                lowerWickRatio,
+
+                closeLocation,
+
+                bullish,
+
+                bearish,
+
+
+                // Market
+                trend,
+
+                regime,
+
+
+                // Time
+                hour,
+
+                minute,
+
+                minutesFromOpen,
+
+
+                // Outcome
+                outcome: {
+
+                    entryTimestamp:
+                        current.timestamp,
+
+                    entryTime:
+                        new Date(
+                            current.timestamp
+                        ).toISOString(),
+
+                    entry,
+
+                    risk,
+
+                    reward,
+
+                    buyStop,
+
+                    buyTarget,
+
+                    sellStop,
+
+                    sellTarget,
+
+                    buyOutcome,
+
+                    sellOutcome,
+
+                    preferredDirection,
+
+                    label,
+
+                    maxFavorableBuy,
+
+                    maxAdverseBuy,
+
+                    maxFavorableSell,
+
+                    maxAdverseSell,
+
+                    futureCandles:
+                        future.length,
+
+                    outcomeTimestamp:
+                        future[
+                            future.length -
+                            1
+                        ].timestamp
+
+                }
+
+            });
+
+        }
+
+
+        // ==================================================
+        // STATISTICS
+        // ==================================================
+
+        const totalRows =
+            rows.length;
+
+
+        const BUY_WIN =
+            rows.filter(
+                row =>
+                    row.outcome.label ===
+                    "BUY_WIN"
+            ).length;
+
+
+        const SELL_WIN =
+            rows.filter(
+                row =>
+                    row.outcome.label ===
+                    "SELL_WIN"
+            ).length;
+
+
+        const BOTH_WIN =
+            rows.filter(
+                row =>
+                    row.outcome.label ===
+                    "BOTH_WIN"
+            ).length;
+
+
+        const BOTH_LOSS =
+            rows.filter(
+                row =>
+                    row.outcome.label ===
+                    "BOTH_LOSS"
+            ).length;
+
+
+        const NO_TRADE =
+            rows.filter(
+                row =>
+                    row.outcome.label ===
+                    "NO_TRADE"
+            ).length;
+
+
+        const buyWins =
+            rows.filter(
+                row =>
+                    row.outcome.buyOutcome ===
+                    "WIN"
+            ).length;
+
+
+        const buyLosses =
+            rows.filter(
+                row =>
+                    row.outcome.buyOutcome ===
+                    "LOSS"
+            ).length;
+
+
+        const buyTimeouts =
+            rows.filter(
+                row =>
+                    row.outcome.buyOutcome ===
+                    "TIMEOUT"
+            ).length;
+
+
+        const sellWins =
+            rows.filter(
+                row =>
+                    row.outcome.sellOutcome ===
+                    "WIN"
+            ).length;
+
+
+        const sellLosses =
+            rows.filter(
+                row =>
+                    row.outcome.sellOutcome ===
+                    "LOSS"
+            ).length;
+
+
+        const sellTimeouts =
+            rows.filter(
+                row =>
+                    row.outcome.sellOutcome ===
+                    "TIMEOUT"
+            ).length;
+
+
+        const buyDecisiveTrades =
+            buyWins +
+            buyLosses;
+
+
+        const sellDecisiveTrades =
+            sellWins +
+            sellLosses;
+
+
+        const buyWinRate =
+            buyDecisiveTrades >
+            0
+                ? (
+                    buyWins /
+                    buyDecisiveTrades
+                ) *
+                100
+                : 0;
+
+
+        const sellWinRate =
+            sellDecisiveTrades >
+            0
+                ? (
+                    sellWins /
+                    sellDecisiveTrades
+                ) *
+                100
+                : 0;
+
+
+        // ==================================================
+        // FEATURE LIST
+        // ==================================================
+
+        const featureList = [
+
+            "timestamp",
+            "date",
+
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+
+            "ema9",
+            "ema21",
+
+            "emaSpread",
+            "emaSpreadATR",
+
+            "ema9Slope",
+            "ema21Slope",
+
+            "ema9SlopeATR",
+            "ema21SlopeATR",
+
+            "rsi14",
+            "previousRSI",
+            "rsiChange",
+
+            "atr14",
+
+            "vwap",
+            "vwapDistance",
+            "vwapDistanceATR",
+
+            "ema9Distance",
+            "ema9DistanceATR",
+
+            "ema21Distance",
+            "ema21DistanceATR",
+
+            "range",
+            "rangeATR",
+
+            "body",
+            "bodyRatio",
+
+            "upperWick",
+            "lowerWick",
+
+            "upperWickRatio",
+            "lowerWickRatio",
+
+            "closeLocation",
+
+            "bullish",
+            "bearish",
+
+            "trend",
+            "regime",
+
+            "hour",
+            "minute",
+            "minutesFromOpen"
+
+        ];
+
+
+        // ==================================================
+        // FINAL RESPONSE
+        // ==================================================
+
+        return res.status(200).json({
+
+            success: true,
+
+            version:
+                VERSION,
+
+            status:
+                "COMPLETED",
+
+            mode:
+                "LEARNING_DATASET_ONLY",
+
+            paperOnly:
+                true,
+
+            realOrders:
+                false,
+
+
+            // ----------------------------------------------
+            // MARKET
+            // ----------------------------------------------
+
+            instrument,
+
+            scripCode,
+
+            interval,
+
+
+            // ----------------------------------------------
+            // REQUEST
+            // ----------------------------------------------
+
+            requestedDays,
+
+            chunkDays:
+                CHUNK_DAYS,
+
+            chunksRequested,
+
+
+            // ----------------------------------------------
+            // FETCH DETAILS
+            // ----------------------------------------------
+
+            chunkInformation,
+
+
+            // ----------------------------------------------
+            // CANDLES
+            // ----------------------------------------------
+
+            candlesTested:
+                candles.length,
+
+
+            firstCandle:
+                candles.length > 0
+                    ? {
+
+                        timestamp:
+                            candles[
+                                0
+                            ].timestamp,
+
+                        time:
+                            new Date(
+                                candles[
+                                    0
+                                ].timestamp
+                            ).toISOString(),
+
+                        date:
+                            candles[
+                                0
+                            ].date,
+
+                        close:
+                            candles[
+                                0
+                            ].close
+
+                    }
+                    : null,
+
+
+            lastCandle:
+                candles.length > 0
+                    ? {
+
+                        timestamp:
+                            candles[
+                                candles.length -
+                                1
+                            ].timestamp,
+
+                        time:
+                            new Date(
+                                candles[
+                                    candles.length -
+                                    1
+                                ].timestamp
+                            ).toISOString(),
+
+                        date:
+                            candles[
+                                candles.length -
+                                1
+                            ].date,
+
+                        close:
+                            candles[
+                                candles.length -
+                                1
+                            ].close
+
+                    }
+                    : null,
+
+
+            tradingDays,
+
+
+            // ----------------------------------------------
+            // DATA QUALITY
+            // ----------------------------------------------
+
+            dataQuality: {
+
+                rawCandles:
+                    rawCandleCount,
+
+                validCandles:
+                    validRawCandles.length,
+
+                finalCandles:
+                    candles.length,
+
+                duplicateCandles,
+
+                invalidCandles,
+
+                requestedDays,
+
+                actualTradingDays:
+                    tradingDays
+
+            },
+
+
+            // ----------------------------------------------
+            // LEARNING DATA
+            // ----------------------------------------------
+
+            learningRows:
+                totalRows,
+
+            skippedRows:
+                candles.length -
+                totalRows,
+
+
+            // ----------------------------------------------
+            // STATISTICS
+            // ----------------------------------------------
+
+            datasetStatistics: {
+
+                totalRows,
+
+                BUY_WIN,
+
+                SELL_WIN,
+
+                BOTH_WIN,
+
+                BOTH_LOSS,
+
+                NO_TRADE,
+
+                buyWins,
+
+                buyLosses,
+
+                buyTimeouts,
+
+                sellWins,
+
+                sellLosses,
+
+                sellTimeouts,
+
+                buyDecisiveTrades,
+
+                sellDecisiveTrades,
+
+                buyWinRate,
+
+                sellWinRate
+
+            },
+
+
+            // ----------------------------------------------
+            // FEATURES
+            // ----------------------------------------------
+
+            featureList,
+
+
+            // ----------------------------------------------
+            // DATA
+            // ----------------------------------------------
+
+            rows
 
         });
 
-      }
-
-      /*
-       Small delay between requests.
-       This avoids hammering the API.
-      */
-
-      await sleep(150);
-
-      chunkEnd =
-        chunkStart;
-
-    }
-
-    // =====================================================
-    // CLEAN CANDLES
-    // =====================================================
-
-    const validRaw =
-      allRawCandles
-        .filter(validCandle);
-
-    const candlesMap =
-      new Map();
-
-    for (
-      const c of validRaw
+    } catch (
+        error
     ) {
 
-      const obj =
-        candleObject(c);
+        console.error(
+            "================================"
+        );
 
-      candlesMap.set(
-        obj.timestamp,
-        obj
-      );
+        console.error(
+            "V11.1 FATAL ERROR"
+        );
+
+        console.error(
+            error
+        );
+
+        console.error(
+            "================================"
+        );
+
+
+        return res.status(500).json({
+
+            success: false,
+
+            version:
+                "V11.1",
+
+            status:
+                "FAILED",
+
+            mode:
+                "LEARNING_DATASET_ONLY",
+
+            paperOnly:
+                true,
+
+            realOrders:
+                false,
+
+            error:
+                error?.message ||
+                "Unknown error"
+
+        });
 
     }
-
-    const candles =
-      Array.from(
-        candlesMap.values()
-      )
-      .sort(
-        (a, b) =>
-          a.timestamp -
-          b.timestamp
-      );
-
-    // =====================================================
-    // DATA QUALITY
-    // =====================================================
-
-    const duplicateCandles =
-      validRaw.length -
-      candles.length;
-
-    const invalidCandles =
-      allRawCandles.length -
-      validRaw.length;
-
-    // =====================================================
-    // TRADING DAYS
-    // =====================================================
-
-    const tradingDaySet =
-      new Set(
-        candles.map(
-          c => c.date
-        )
-      );
-
-    const tradingDays =
-      tradingDaySet.size;
-
-    // =====================================================
-    // FEATURE DATASET
-    // =====================================================
-
-    const rows = [];
-
-    /*
-      We need enough history for
-      EMA21 + RSI14 + ATR14.
-    */
-
-    const LOOKBACK = 40;
-
-    /*
-      Future horizon:
-      12 candles = 60 minutes
-      for 5-minute data.
-    */
-
-    const FUTURE_CANDLES = 12;
-
-    for (
-      let i = LOOKBACK;
-      i <
-      candles.length -
-      FUTURE_CANDLES;
-      i++
-    ) {
-
-      const current =
-        candles[i];
-
-      const history =
-        candles.slice(
-          0,
-          i + 1
-        );
-
-      const closes =
-        history.map(
-          c => c.close
-        );
-
-      const ema9 =
-        ema(
-          closes,
-          9
-        );
-
-      const ema21 =
-        ema(
-          closes,
-          21
-        );
-
-      const previousCloses =
-        closes.slice(
-          0,
-          -1
-        );
-
-      const previousEMA9 =
-        ema(
-          previousCloses,
-          9
-        );
-
-      const previousEMA21 =
-        ema(
-          previousCloses,
-          21
-        );
-
-      const ema9Slope =
-        (
-          ema9 -
-          previousEMA9
-        );
-
-      const ema21Slope =
-        (
-          ema21 -
-          previousEMA21
-        );
-
-      const rsi14 =
-        rsi(
-          closes,
-          14
-        );
-
-      const previousRSI =
-        rsi(
-          previousCloses,
-          14
-        );
-
-      const atr14 =
-        atr(
-          history,
-          14
-        );
-
-      const currentVWAP =
-        vwap(
-          history
-        );
-
-      if (
-        ema9 === null ||
-        ema21 === null ||
-        rsi14 === null ||
-        atr14 === null ||
-        currentVWAP === null
-      ) {
-
-        continue;
-
-      }
-
-      // ===================================================
-      // PRICE / EMA FEATURES
-      // ===================================================
-
-      const emaSpread =
-        ema9 -
-        ema21;
-
-      const emaSpreadATR =
-        atr14 !== 0
-          ? emaSpread / atr14
-          : 0;
-
-      const ema9SlopeATR =
-        atr14 !== 0
-          ? ema9Slope / atr14
-          : 0;
-
-      const ema21SlopeATR =
-        atr14 !== 0
-          ? ema21Slope / atr14
-          : 0;
-
-      const ema9Distance =
-        current.close -
-        ema9;
-
-      const ema21Distance =
-        current.close -
-        ema21;
-
-      const ema9DistanceATR =
-        atr14 !== 0
-          ? ema9Distance / atr14
-          : 0;
-
-      const ema21DistanceATR =
-        atr14 !== 0
-          ? ema21Distance / atr14
-          : 0;
-
-      const vwapDistance =
-        current.close -
-        currentVWAP;
-
-      const vwapDistanceATR =
-        atr14 !== 0
-          ? vwapDistance / atr14
-          : 0;
-
-      // ===================================================
-      // CANDLE FEATURES
-      // ===================================================
-
-      const range =
-        current.high -
-        current.low;
-
-      const body =
-        Math.abs(
-          current.close -
-          current.open
-        );
-
-      const bodyRatio =
-        range > 0
-          ? body / range
-          : 0;
-
-      const upperWick =
-        current.high -
-        Math.max(
-          current.open,
-          current.close
-        );
-
-      const lowerWick =
-        Math.min(
-          current.open,
-          current.close
-        ) -
-        current.low;
-
-      const upperWickRatio =
-        range > 0
-          ? upperWick / range
-          : 0;
-
-      const lowerWickRatio =
-        range > 0
-          ? lowerWick / range
-          : 0;
-
-      const closeLocation =
-        range > 0
-          ? (
-              current.close -
-              current.low
-            ) / range
-          : 0.5;
-
-      const bullish =
-        current.close >
-        current.open;
-
-      const bearish =
-        current.close <
-        current.open;
-
-      // ===================================================
-      // MARKET TREND
-      // ===================================================
-
-      let trend = "SIDEWAYS";
-
-      if (
-        ema9 > ema21 &&
-        ema9Slope > 0 &&
-        ema21Slope > 0
-      ) {
-
-        trend =
-          "BULLISH";
-
-      } else if (
-        ema9 < ema21 &&
-        ema9Slope < 0 &&
-        ema21Slope < 0
-      ) {
-
-        trend =
-          "BEARISH";
-
-      }
-
-      // ===================================================
-      // REGIME
-      // ===================================================
-
-      let regime =
-        "RANGING";
-
-      const normalizedSpread =
-        Math.abs(
-          emaSpreadATR
-        );
-
-      const normalizedSlope =
-        Math.max(
-          Math.abs(
-            ema9SlopeATR
-          ),
-          Math.abs(
-            ema21SlopeATR
-          )
-        );
-
-      if (
-        normalizedSpread >= 0.8 &&
-        normalizedSlope >= 0.15
-      ) {
-
-        regime =
-          "TRENDING";
-
-      } else if (
-        normalizedSpread >= 0.4
-      ) {
-
-        regime =
-          "TRANSITION";
-
-      }
-
-      // ===================================================
-      // TIME FEATURES
-      // ===================================================
-
-      const date =
-        new Date(
-          current.timestamp
-        );
-
-      /*
-       INDstocks timestamps are documented
-       as IST. We use the timestamp fields
-       conservatively for the learning dataset.
-      */
-
-      const hour =
-        date.getUTCHours();
-
-      const minute =
-        date.getUTCMinutes();
-
-      /*
-       Approximate Indian-market session
-       from 09:15 IST.
-      */
-
-      const minutesFromOpen =
-        (
-          hour * 60 +
-          minute
-        ) -
-        (
-          9 * 60 +
-          15
-        );
-
-      // ===================================================
-      // FUTURE OUTCOME
-      // ===================================================
-
-      const future =
-        candles.slice(
-          i + 1,
-          i + 1 +
-          FUTURE_CANDLES
-        );
-
-      const entry =
-        current.close;
-
-      /*
-       Risk model intentionally simple
-       for the learning dataset.
-
-       ATR-based:
-       stop = 1 ATR
-       target = 2 ATR
-      */
-
-      const risk =
-        atr14;
-
-      const reward =
-        atr14 * 2;
-
-      const buyStop =
-        entry -
-        risk;
-
-      const buyTarget =
-        entry +
-        reward;
-
-      const sellStop =
-        entry +
-        risk;
-
-      const sellTarget =
-        entry -
-        reward;
-
-      let buyOutcome =
-        "TIMEOUT";
-
-      let sellOutcome =
-        "TIMEOUT";
-
-      let buyWin =
-        false;
-
-      let sellWin =
-        false;
-
-      let buyLoss =
-        false;
-
-      let sellLoss =
-        false;
-
-      let maxFavorableBuy =
-        0;
-
-      let maxAdverseBuy =
-        0;
-
-      let maxFavorableSell =
-        0;
-
-      let maxAdverseSell =
-        0;
-
-      for (
-        const f of future
-      ) {
-
-        maxFavorableBuy =
-          Math.max(
-            maxFavorableBuy,
-            f.high -
-            entry
-          );
-
-        maxAdverseBuy =
-          Math.max(
-            maxAdverseBuy,
-            entry -
-            f.low
-          );
-
-        maxFavorableSell =
-          Math.max(
-            maxFavorableSell,
-            entry -
-            f.low
-          );
-
-        maxAdverseSell =
-          Math.max(
-            maxAdverseSell,
-            f.high -
-            entry
-          );
-
-        /*
-         For learning labels we use
-         conservative stop-first logic
-         if both levels occur in the
-         same candle.
-        */
-
-        if (
-          buyOutcome ===
-          "TIMEOUT"
-        ) {
-
-          const hitStop =
-            f.low <=
-            buyStop;
-
-          const hitTarget =
-            f.high >=
-            buyTarget;
-
-          if (
-            hitStop &&
-            hitTarget
-          ) {
-
-            buyOutcome =
-              "LOSS";
-
-          } else if (
-            hitStop
-          ) {
-
-            buyOutcome =
-              "LOSS";
-
-          } else if (
-            hitTarget
-          ) {
-
-            buyOutcome =
-              "WIN";
-
-          }
-
-        }
-
-        if (
-          sellOutcome ===
-          "TIMEOUT"
-        ) {
-
-          const hitStop =
-            f.high >=
-            sellStop;
-
-          const hitTarget =
-            f.low <=
-            sellTarget;
-
-          if (
-            hitStop &&
-            hitTarget
-          ) {
-
-            sellOutcome =
-              "LOSS";
-
-          } else if (
-            hitStop
-          ) {
-
-            sellOutcome =
-              "LOSS";
-
-          } else if (
-            hitTarget
-          ) {
-
-            sellOutcome =
-              "WIN";
-
-          }
-
-        }
-
-      }
-
-      buyWin =
-        buyOutcome ===
-        "WIN";
-
-      sellWin =
-        sellOutcome ===
-        "WIN";
-
-      buyLoss =
-        buyOutcome ===
-        "LOSS";
-
-      sellLoss =
-        sellOutcome ===
-        "LOSS";
-
-      // ===================================================
-      // LABEL
-      // ===================================================
-
-      let preferredDirection =
-        "NONE";
-
-      let label =
-        "NO_TRADE";
-
-      if (
-        buyWin &&
-        !sellWin
-      ) {
-
-        preferredDirection =
-          "BUY";
-
-        label =
-          "BUY_WIN";
-
-      } else if (
-        sellWin &&
-        !buyWin
-      ) {
-
-        preferredDirection =
-          "SELL";
-
-        label =
-          "SELL_WIN";
-
-      } else if (
-        buyLoss &&
-        sellLoss
-      ) {
-
-        label =
-          "BOTH_LOSS";
-
-      }
-
-      // ===================================================
-      // ROW
-      // ===================================================
-
-      rows.push({
-
-        timestamp:
-          current.timestamp,
-
-        date:
-          current.date,
-
-        open:
-          current.open,
-
-        high:
-          current.high,
-
-        low:
-          current.low,
-
-        close:
-          current.close,
-
-        volume:
-          current.volume,
-
-        ema9,
-
-        ema21,
-
-        emaSpread,
-
-        emaSpreadATR,
-
-        ema9Slope,
-
-        ema21Slope,
-
-        ema9SlopeATR,
-
-        ema21SlopeATR,
-
-        rsi14,
-
-        previousRSI,
-
-        rsiChange:
-          rsi14 -
-          previousRSI,
-
-        atr14,
-
-        vwap:
-          currentVWAP,
-
-        vwapDistance,
-
-        vwapDistanceATR,
-
-        ema9Distance,
-
-        ema9DistanceATR,
-
-        ema21Distance,
-
-        ema21DistanceATR,
-
-        range,
-
-        rangeATR:
-          atr14 !== 0
-            ? range / atr14
-            : 0,
-
-        body,
-
-        bodyRatio,
-
-        upperWick,
-
-        lowerWick,
-
-        upperWickRatio,
-
-        lowerWickRatio,
-
-        closeLocation,
-
-        bullish,
-
-        bearish,
-
-        trend,
-
-        regime,
-
-        hour,
-
-        minute,
-
-        minutesFromOpen,
-
-        outcome: {
-
-          entryTimestamp:
-            current.timestamp,
-
-          entryTime:
-            new Date(
-              current.timestamp
-            ).toISOString(),
-
-          entry,
-
-          risk,
-
-          reward,
-
-          buyStop,
-
-          buyTarget,
-
-          sellStop,
-
-          sellTarget,
-
-          buyOutcome,
-
-          sellOutcome,
-
-          preferredDirection,
-
-          label,
-
-          maxFavorableBuy,
-
-          maxAdverseBuy,
-
-          maxFavorableSell,
-
-          maxAdverseSell,
-
-          futureCandles:
-            future.length,
-
-          outcomeTimestamp:
-            future.length
-              ? future[
-                  future.length - 1
-                ].timestamp
-              : current.timestamp
-
-        }
-
-      });
-
-    }
-
-    // =====================================================
-    // DATASET STATISTICS
-    // =====================================================
-
-    const BUY_WIN =
-      rows.filter(
-        r =>
-          r.outcome.label ===
-          "BUY_WIN"
-      ).length;
-
-    const SELL_WIN =
-      rows.filter(
-        r =>
-          r.outcome.label ===
-          "SELL_WIN"
-      ).length;
-
-    const BOTH_LOSS =
-      rows.filter(
-        r =>
-          r.outcome.label ===
-          "BOTH_LOSS"
-      ).length;
-
-    const NO_TRADE =
-      rows.filter(
-        r =>
-          r.outcome.label ===
-          "NO_TRADE"
-      ).length;
-
-    const buyWins =
-      rows.filter(
-        r =>
-          r.outcome.buyOutcome ===
-          "WIN"
-      ).length;
-
-    const buyLosses =
-      rows.filter(
-        r =>
-          r.outcome.buyOutcome ===
-          "LOSS"
-      ).length;
-
-    const buyTimeouts =
-      rows.filter(
-        r =>
-          r.outcome.buyOutcome ===
-          "TIMEOUT"
-      ).length;
-
-    const sellWins =
-      rows.filter(
-        r =>
-          r.outcome.sellOutcome ===
-          "WIN"
-      ).length;
-
-    const sellLosses =
-      rows.filter(
-        r =>
-          r.outcome.sellOutcome ===
-          "LOSS"
-      ).length;
-
-    const sellTimeouts =
-      rows.filter(
-        r =>
-          r.outcome.sellOutcome ===
-          "TIMEOUT"
-      ).length;
-
-    const buyDecisiveTrades =
-      buyWins +
-      buyLosses;
-
-    const sellDecisiveTrades =
-      sellWins +
-      sellLosses;
-
-    const buyWinRate =
-      buyDecisiveTrades > 0
-        ? (
-            buyWins /
-            buyDecisiveTrades
-          ) * 100
-        : 0;
-
-    const sellWinRate =
-      sellDecisiveTrades > 0
-        ? (
-            sellWins /
-            sellDecisiveTrades
-          ) * 100
-        : 0;
-
-    // =====================================================
-    // FEATURE LIST
-    // =====================================================
-
-    const featureList = [
-
-      "timestamp",
-      "date",
-
-      "open",
-      "high",
-      "low",
-      "close",
-      "volume",
-
-      "ema9",
-      "ema21",
-      "emaSpread",
-      "emaSpreadATR",
-
-      "ema9Slope",
-      "ema21Slope",
-
-      "ema9SlopeATR",
-      "ema21SlopeATR",
-
-      "rsi14",
-      "previousRSI",
-      "rsiChange",
-
-      "atr14",
-
-      "vwap",
-      "vwapDistance",
-      "vwapDistanceATR",
-
-      "ema9Distance",
-      "ema9DistanceATR",
-
-      "ema21Distance",
-      "ema21DistanceATR",
-
-      "range",
-      "rangeATR",
-
-      "body",
-      "bodyRatio",
-
-      "upperWick",
-      "lowerWick",
-
-      "upperWickRatio",
-      "lowerWickRatio",
-
-      "closeLocation",
-
-      "bullish",
-      "bearish",
-
-      "trend",
-      "regime",
-
-      "hour",
-      "minute",
-      "minutesFromOpen"
-
-    ];
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
-
-    return res.status(200).json({
-
-      success: true,
-
-      version: VERSION,
-
-      status:
-        "COMPLETED",
-
-      mode:
-        "LEARNING_DATASET_ONLY",
-
-      paperOnly:
-        true,
-
-      realOrders:
-        false,
-
-      instrument:
-        "NIFTY 50",
-
-      scripCode:
-        INSTRUMENT,
-
-      interval:
-        INTERVAL,
-
-      requestedDays:
-        REQUESTED_DAYS,
-
-      chunkDays:
-        CHUNK_DAYS,
-
-      chunksRequested,
-
-      candlesTested:
-        candles.length,
-
-      firstCandle:
-        candles.length
-          ? {
-              timestamp:
-                candles[0]
-                  .timestamp,
-
-              time:
-                new Date(
-                  candles[0]
-                    .timestamp
-                ).toISOString(),
-
-              date:
-                candles[0].date,
-
-              close:
-                candles[0].close
-            }
-          : null,
-
-      lastCandle:
-        candles.length
-          ? {
-              timestamp:
-                candles[
-                  candles.length - 1
-                ].timestamp,
-
-              time:
-                new Date(
-                  candles[
-                    candles.length - 1
-                  ].timestamp
-                ).toISOString(),
-
-              date:
-                candles[
-                  candles.length - 1
-                ].date,
-
-              close:
-                candles[
-                  candles.length - 1
-                ].close
-            }
-          : null,
-
-      tradingDays,
-
-      dataQuality: {
-
-        rawCandles:
-          allRawCandles.length,
-
-        validCandles:
-          validRaw.length,
-
-        finalCandles:
-          candles.length,
-
-        duplicateCandles,
-
-        invalidCandles,
-
-        requestedDays:
-          REQUESTED_DAYS,
-
-        actualTradingDays:
-          tradingDays
-
-      },
-
-      learningRows:
-        rows.length,
-
-      skippedRows:
-        candles.length -
-        rows.length,
-
-      datasetStatistics: {
-
-        totalRows:
-          rows.length,
-
-        BUY_WIN,
-
-        SELL_WIN,
-
-        BOTH_LOSS,
-
-        NO_TRADE,
-
-        buyWins,
-
-        buyLosses,
-
-        buyTimeouts,
-
-        sellWins,
-
-        sellLosses,
-
-        sellTimeouts,
-
-        buyDecisiveTrades,
-
-        sellDecisiveTrades,
-
-        buyWinRate,
-
-        sellWinRate
-
-      },
-
-      featureList,
-
-      rows
-
-    });
-
-  } catch (error) {
-
-    console.error(
-      "V11.1 ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-
-      success: false,
-
-      version:
-        "V11.1",
-
-      error:
-        error.message,
-
-      mode:
-        "LEARNING_DATASET_ONLY",
-
-      paperOnly:
-        true,
-
-      realOrders:
-        false
-
-    });
-
-  }
 
 }
