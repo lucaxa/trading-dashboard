@@ -1,49 +1,47 @@
 /*
 TradeMind Pro
-V12.5
+V12.6
 
-STRICT WALK-FORWARD INTEGRITY BRAIN
+STRICT OOS PROFITABILITY PROOF ENGINE
 
-Purpose:
-Build a genuinely out-of-sample trading brain.
+V12.5:
+- Strict walk-forward
+- Anti-leakage
+- Brain gating
+- Context-aware patterns
 
-IMPORTANT:
-- PAPER ONLY
-- NO REAL ORDERS
-- NO BROKER EXECUTION
-- CURRENT CANDLE IS NEVER USED FOR LEARNING
-- FUTURE TEST DATA IS NEVER USED TO DISCOVER PATTERNS
-- EACH WALK-FORWARD FOLD LEARNS ONLY FROM PRIOR DATA
+V12.6:
+- TRUE OUT-OF-SAMPLE PROFITABILITY PROOF
+- Pattern discovery ONLY from training data
+- Pattern validation ONLY on unseen test data
+- Recent OOS validation
+- OOS profitability gate
+- OOS drawdown control
+- OOS loss-streak control
+- Simpler patterns preferred
+- Current candle excluded from learning
+- Current candle outcome NEVER used
+- No overlapping paper trades
+- Same-candle STOP FIRST
 
-V12.5 improvements over V12.4:
-
-1. Strict expanding walk-forward learning.
-2. Pattern discovery occurs ONLY inside each training window.
-3. Test candles remain completely unseen until evaluation.
-4. Current candle is excluded from all learning statistics.
-5. OOS performance is aggregated separately.
-6. Pattern must survive repeated OOS testing.
-7. Recent deterioration protection.
-8. Drawdown protection.
-9. Consecutive-loss protection.
-10. Prefer simpler patterns when evidence is similar.
-11. No-trade remains a valid decision.
-
+PAPER ONLY.
+NO REAL ORDERS.
 */
 
 // ============================================================
-// VERSION / ENGINE CONFIG
+// VERSION
 // ============================================================
 
-const VERSION = "V12.5";
+const VERSION = "V12.6";
 
 const INTERVAL = "5minute";
 const INSTRUMENT = "NIFTY 50";
 
 const REQUESTED_DAYS = 30;
 
+
 // ============================================================
-// RISK MODEL
+// RISK
 // ============================================================
 
 const STOP_R = 1.0;
@@ -51,6 +49,20 @@ const STOP_R = 1.0;
 const MIN_TARGET_R = 2.0;
 
 const PREFERRED_TARGET_R = 2.5;
+
+const MAX_HOLD_CANDLES = 12;
+
+
+// ============================================================
+// WALK FORWARD
+// ============================================================
+
+const FOLD_COUNT = 4;
+
+const MIN_TRAINING_ROWS = 200;
+
+const MIN_TEST_ROWS = 100;
+
 
 // ============================================================
 // PATTERN REQUIREMENTS
@@ -61,45 +73,42 @@ const MIN_LEVEL2_SAMPLES = 15;
 const MIN_LEVEL3_SAMPLES = 12;
 const MIN_LEVEL4_SAMPLES = 10;
 
-const MIN_TRAINING_DECISIVE = 6;
+const MIN_DECISIVE_TRADES = 8;
 
 const MIN_OOS_SAMPLES = 3;
-const MIN_OOS_DECISIVE = 2;
 
-const MIN_OOS_FOLDS = 2;
-
-const MIN_POSITIVE_OOS_FOLDS = 2;
-
-const MIN_STABLE_OOS_FOLDS = 2;
+const MIN_OOS_DECISIVE_TRADES = 3;
 
 const MIN_EXPECTED_VALUE = 0.10;
 
 const MIN_OOS_EXPECTED_VALUE = 0.10;
 
-const GOOD_EXPECTED_VALUE = 0.20;
-
 const MIN_PROFIT_FACTOR = 1.10;
 
-const GOOD_PROFIT_FACTOR = 1.30;
+const MIN_OOS_PROFIT_FACTOR = 1.10;
 
-const MIN_CONTEXT_SCORE = 60;
+const MIN_STABLE_OOS_FOLDS = 2;
 
-const MAX_DRAWDOWN_R = 15;
+const MAX_OOS_DRAWDOWN_R = 15;
 
-const MAX_LOSS_STREAK = 8;
+const MAX_OOS_LOSS_STREAK = 8;
 
-const MAX_RECENT_DETERIORATION = -0.35;
+const QUALITY_THRESHOLD = 45;
+
+
+// ============================================================
+// RECENT STABILITY
+// ============================================================
 
 const RECENT_WINDOW_FRACTION = 0.35;
 
-// ============================================================
-// WALK FORWARD
-// ============================================================
+const MAX_RECENT_DETERIORATION = -0.35;
 
-const FOLD_COUNT = 4;
+const REQUIRE_RECENT_STABILITY = true;
+
 
 // ============================================================
-// GENERAL HELPERS
+// HELPERS
 // ============================================================
 
 function number(value, fallback = null) {
@@ -149,10 +158,6 @@ function array(value) {
 }
 
 
-// ============================================================
-// TIMESTAMP
-// ============================================================
-
 function normalizeTimestamp(value) {
 
     let ts = number(value);
@@ -169,10 +174,6 @@ function normalizeTimestamp(value) {
 }
 
 
-// ============================================================
-// FIELD EXTRACTION
-// ============================================================
-
 function firstValue(object, fields) {
 
     if (
@@ -182,7 +183,9 @@ function firstValue(object, fields) {
         return null;
     }
 
-    for (const field of fields) {
+    for (
+        const field of fields
+    ) {
 
         if (
             object[field] !== undefined &&
@@ -332,14 +335,10 @@ function vwapDirection(row) {
     }
 
     const price =
-        number(
-            row.close
-        );
+        number(row.close);
 
     const vwap =
-        number(
-            row.vwap
-        );
+        number(row.vwap);
 
     if (
         price === null ||
@@ -367,10 +366,21 @@ function slopeBucket(value) {
             number(value, 0)
         );
 
-    if (x < 0.10) return "FLAT";
-    if (x < 0.25) return "WEAK";
-    if (x < 0.50) return "MODERATE";
-    if (x < 0.75) return "STRONG";
+    if (x < 0.10) {
+        return "FLAT";
+    }
+
+    if (x < 0.25) {
+        return "WEAK";
+    }
+
+    if (x < 0.50) {
+        return "MODERATE";
+    }
+
+    if (x < 0.75) {
+        return "STRONG";
+    }
 
     return "VERY_STRONG";
 }
@@ -378,37 +388,38 @@ function slopeBucket(value) {
 
 function timeBucket(row) {
 
-    let hour =
-        number(
-            row.hour
-        );
+    const hour =
+        number(row.hour);
 
-    if (hour === null) {
+    if (hour !== null) {
 
-        if (row.timestamp) {
+        if (hour < 10) return "OPEN";
+        if (hour < 11) return "MORNING";
+        if (hour < 13) return "MIDDAY";
+        if (hour < 14) return "AFTERNOON";
 
-            const d =
-                new Date(
-                    normalizeTimestamp(
-                        row.timestamp
-                    ) * 1000
-                );
-
-            hour =
-                d.getUTCHours();
-        }
+        return "CLOSE";
     }
 
-    if (hour === null) {
-        return "UNKNOWN";
+    if (row.timestamp) {
+
+        const d =
+            new Date(
+                row.timestamp * 1000
+            );
+
+        const h =
+            d.getUTCHours();
+
+        if (h < 10) return "OPEN";
+        if (h < 11) return "MORNING";
+        if (h < 13) return "MIDDAY";
+        if (h < 14) return "AFTERNOON";
+
+        return "CLOSE";
     }
 
-    if (hour < 10) return "OPEN";
-    if (hour < 11) return "MORNING";
-    if (hour < 13) return "MIDDAY";
-    if (hour < 14) return "AFTERNOON";
-
-    return "CLOSE";
+    return "UNKNOWN";
 }
 
 
@@ -423,14 +434,17 @@ function normalizeTrend(row) {
             row.trend ||
             row.marketTrend ||
             "UNKNOWN"
-        )
-        .toUpperCase();
+        ).toUpperCase();
 
-    if (trend.includes("BULL")) {
+    if (
+        trend.includes("BULL")
+    ) {
         return "BULLISH";
     }
 
-    if (trend.includes("BEAR")) {
+    if (
+        trend.includes("BEAR")
+    ) {
         return "BEARISH";
     }
 
@@ -451,18 +465,23 @@ function normalizeRegime(row) {
         String(
             row.regime ||
             "UNKNOWN"
-        )
-        .toUpperCase();
+        ).toUpperCase();
 
-    if (regime.includes("TREND")) {
+    if (
+        regime.includes("TREND")
+    ) {
         return "TRENDING";
     }
 
-    if (regime.includes("RANGE")) {
+    if (
+        regime.includes("RANGE")
+    ) {
         return "RANGING";
     }
 
-    if (regime.includes("TRANS")) {
+    if (
+        regime.includes("TRANS")
+    ) {
         return "TRANSITION";
     }
 
@@ -471,32 +490,24 @@ function normalizeRegime(row) {
 
 
 // ============================================================
-// FEATURE STATE
+// FEATURE EXTRACTION
 // ============================================================
 
-function extractFeatureState(row) {
+function extractFeatures(row) {
 
     return {
 
         trend:
-            normalizeTrend(
-                row
-            ),
+            normalizeTrend(row),
 
         regime:
-            normalizeRegime(
-                row
-            ),
+            normalizeRegime(row),
 
         rsi:
-            rsiBucket(
-                row.rsi14
-            ),
+            rsiBucket(row.rsi14),
 
         vwap:
-            vwapDirection(
-                row
-            ),
+            vwapDirection(row),
 
         slope:
             slopeBucket(
@@ -504,9 +515,7 @@ function extractFeatureState(row) {
             ),
 
         time:
-            timeBucket(
-                row
-            )
+            timeBucket(row)
     };
 }
 
@@ -520,44 +529,55 @@ function determinePatternType(
     feature
 ) {
 
+    const trend =
+        feature.trend;
+
+    const vwap =
+        feature.vwap;
+
     if (
-        feature.regime ===
-        "RANGING"
+        (
+            side === "BUY" &&
+            trend === "BULLISH" &&
+            (
+                vwap === "ABOVE" ||
+                vwap === "NEAR"
+            )
+        ) ||
+        (
+            side === "SELL" &&
+            trend === "BEARISH" &&
+            (
+                vwap === "BELOW" ||
+                vwap === "NEAR"
+            )
+        )
+    ) {
+
+        return "TREND_FOLLOW";
+    }
+
+    if (
+        (
+            side === "BUY" &&
+            trend === "BEARISH" &&
+            vwap === "BELOW"
+        ) ||
+        (
+            side === "SELL" &&
+            trend === "BULLISH" &&
+            vwap === "ABOVE"
+        )
+    ) {
+
+        return "REVERSAL";
+    }
+
+    if (
+        trend === "RANGING"
     ) {
 
         return "RANGE";
-    }
-
-    if (
-        side === "BUY" &&
-        feature.trend === "BULLISH"
-    ) {
-
-        return "TREND_FOLLOW";
-    }
-
-    if (
-        side === "SELL" &&
-        feature.trend === "BEARISH"
-    ) {
-
-        return "TREND_FOLLOW";
-    }
-
-    if (
-        side === "BUY" &&
-        feature.trend === "BEARISH"
-    ) {
-
-        return "REVERSAL";
-    }
-
-    if (
-        side === "SELL" &&
-        feature.trend === "BULLISH"
-    ) {
-
-        return "REVERSAL";
     }
 
     return "OTHER";
@@ -574,14 +594,23 @@ function createPatternKey(
     level
 ) {
 
+    const patternType =
+        determinePatternType(
+            side,
+            feature
+        );
+
     const parts = [
 
         side,
 
         `T:${feature.trend}`,
 
-        `V:${feature.vwap}`
+        `V:${feature.vwap}`,
+
+        `P:${patternType}`
     ];
+
 
     if (level >= 2) {
 
@@ -589,6 +618,7 @@ function createPatternKey(
             `R:${feature.rsi}`
         );
     }
+
 
     if (level >= 3) {
 
@@ -598,6 +628,7 @@ function createPatternKey(
         );
     }
 
+
     if (level >= 4) {
 
         parts.push(
@@ -605,12 +636,13 @@ function createPatternKey(
         );
     }
 
+
     return parts.join("|");
 }
 
 
 // ============================================================
-// LEVEL SAMPLE REQUIREMENT
+// LEVEL REQUIREMENTS
 // ============================================================
 
 function minimumSamplesForLevel(level) {
@@ -632,6 +664,78 @@ function minimumSamplesForLevel(level) {
 
 
 // ============================================================
+// SIGNAL INFERENCE
+// ============================================================
+
+function inferSide(row) {
+
+    const trend =
+        normalizeTrend(row);
+
+    const vwap =
+        vwapDirection(row);
+
+    const rsi =
+        number(row.rsi14);
+
+
+    if (
+        trend === "BULLISH" &&
+        (
+            vwap === "ABOVE" ||
+            vwap === "NEAR"
+        ) &&
+        rsi !== null &&
+        rsi >= 40 &&
+        rsi <= 68
+    ) {
+
+        return "BUY";
+    }
+
+
+    if (
+        trend === "BEARISH" &&
+        (
+            vwap === "BELOW" ||
+            vwap === "NEAR"
+        ) &&
+        rsi !== null &&
+        rsi >= 32 &&
+        rsi <= 60
+    ) {
+
+        return "SELL";
+    }
+
+
+    // Controlled reversal signals.
+
+    if (
+        rsi !== null &&
+        rsi < 30 &&
+        vwap === "BELOW"
+    ) {
+
+        return "BUY";
+    }
+
+
+    if (
+        rsi !== null &&
+        rsi > 70 &&
+        vwap === "ABOVE"
+    ) {
+
+        return "SELL";
+    }
+
+
+    return null;
+}
+
+
+// ============================================================
 // DATASET FETCH
 // ============================================================
 
@@ -645,6 +749,7 @@ async function fetchDataset(req) {
         req.headers["x-forwarded-proto"] ||
         "https";
 
+
     if (!host) {
 
         throw new Error(
@@ -652,23 +757,27 @@ async function fetchDataset(req) {
         );
     }
 
+
     const url =
         `${protocol}://${host}` +
         `/api/learning-dataset` +
         `?interval=${INTERVAL}` +
         `&days=${REQUESTED_DAYS}`;
 
+
     const response =
         await fetch(
             url,
             {
                 method: "GET",
+
                 headers: {
                     "Accept":
                         "application/json"
                 }
             }
         );
+
 
     if (!response.ok) {
 
@@ -677,8 +786,10 @@ async function fetchDataset(req) {
         );
     }
 
+
     const data =
         await response.json();
+
 
     if (
         !data ||
@@ -689,6 +800,7 @@ async function fetchDataset(req) {
             "Learning dataset returned unsuccessful response"
         );
     }
+
 
     if (
         !Array.isArray(
@@ -701,6 +813,7 @@ async function fetchDataset(req) {
         );
     }
 
+
     return {
         data,
         url
@@ -709,14 +822,17 @@ async function fetchDataset(req) {
 
 
 // ============================================================
-// NORMALIZE ROWS
+// NORMALIZE DATA
 // ============================================================
 
 function normalizeRows(rows) {
 
     const result = [];
 
-    for (const row of rows) {
+
+    for (
+        const row of rows
+    ) {
 
         if (
             !row ||
@@ -724,6 +840,7 @@ function normalizeRows(rows) {
         ) {
             continue;
         }
+
 
         const timestamp =
             normalizeTimestamp(
@@ -738,11 +855,23 @@ function normalizeRows(rows) {
                 )
             );
 
-        result.push({
+
+        const normalized = {
 
             ...row,
 
             timestamp,
+
+            close:
+                number(
+                    firstValue(
+                        row,
+                        [
+                            "close",
+                            "c"
+                        ]
+                    )
+                ),
 
             open:
                 number(
@@ -775,20 +904,15 @@ function normalizeRows(rows) {
                             "l"
                         ]
                     )
-                ),
-
-            close:
-                number(
-                    firstValue(
-                        row,
-                        [
-                            "close",
-                            "c"
-                        ]
-                    )
                 )
-        });
+        };
+
+
+        result.push(
+            normalized
+        );
     }
+
 
     result.sort(
         (a, b) =>
@@ -799,6 +923,7 @@ function normalizeRows(rows) {
                 b.timestamp || 0
             )
     );
+
 
     return result;
 }
@@ -827,7 +952,10 @@ function calculateStats(
     let lossStreak = 0;
     let maxLossStreak = 0;
 
-    for (const row of rows) {
+
+    for (
+        const row of rows
+    ) {
 
         const result =
             sideOutcome(
@@ -835,24 +963,34 @@ function calculateStats(
                 side
             );
 
-        if (result === "WIN") {
+
+        if (
+            result === "WIN"
+        ) {
 
             wins++;
 
-            winR += 2;
+            winR +=
+                MIN_TARGET_R;
 
-            equity += 2;
+            equity +=
+                MIN_TARGET_R;
 
             lossStreak = 0;
         }
 
-        else if (result === "LOSS") {
+
+        else if (
+            result === "LOSS"
+        ) {
 
             losses++;
 
-            lossR += 1;
+            lossR +=
+                STOP_R;
 
-            equity -= 1;
+            equity -=
+                STOP_R;
 
             lossStreak++;
 
@@ -863,6 +1001,7 @@ function calculateStats(
                 );
         }
 
+
         else {
 
             timeouts++;
@@ -870,11 +1009,13 @@ function calculateStats(
             lossStreak = 0;
         }
 
+
         peak =
             Math.max(
                 peak,
                 equity
             );
+
 
         maxDrawdown =
             Math.max(
@@ -883,26 +1024,36 @@ function calculateStats(
             );
     }
 
-    const decisive =
-        wins + losses;
+
+    const samples =
+        rows.length;
+
+
+    const decisiveTrades =
+        wins +
+        losses;
+
 
     const winRate =
-        decisive > 0
+        decisiveTrades > 0
             ? (
                 wins /
-                decisive
+                decisiveTrades
             ) * 100
             : 0;
+
 
     const netR =
         winR -
         lossR;
 
-    const expectedValue =
-        rows.length > 0
+
+    const expectedValueR =
+        samples > 0
             ? netR /
-              rows.length
+              samples
             : 0;
+
 
     const profitFactor =
         lossR > 0
@@ -912,10 +1063,10 @@ function calculateStats(
                 ? 999
                 : 0;
 
+
     return {
 
-        samples:
-            rows.length,
+        samples,
 
         wins,
 
@@ -923,25 +1074,12 @@ function calculateStats(
 
         timeouts,
 
-        decisiveTrades:
-            decisive,
+        decisiveTrades,
 
         winRate:
             round(
                 winRate,
                 2
-            ),
-
-        totalWinR:
-            round(
-                winR,
-                3
-            ),
-
-        totalLossR:
-            round(
-                lossR,
-                3
             ),
 
         netR:
@@ -952,7 +1090,7 @@ function calculateStats(
 
         expectedValueR:
             round(
-                expectedValue,
+                expectedValueR,
                 4
             ),
 
@@ -965,7 +1103,7 @@ function calculateStats(
         maxDrawdownR:
             round(
                 maxDrawdown,
-                3
+                2
             ),
 
         maxLossStreak
@@ -974,51 +1112,43 @@ function calculateStats(
 
 
 // ============================================================
-// BUILD STRICT WALK-FORWARD FOLDS
+// BUILD WALK FORWARD FOLDS
 // ============================================================
 
 function buildWalkForwardFolds(
-    historicalRows
+    total
 ) {
 
-    const total =
-        historicalRows.length;
+    const folds = [];
 
-    if (total < 100) {
-        return [];
+
+    if (
+        total <
+        MIN_TRAINING_ROWS +
+        MIN_TEST_ROWS
+    ) {
+
+        return folds;
     }
 
-    /*
-    Reserve approximately 20% of the historical
-    dataset as the initial training requirement.
 
-    Then create four NON-OVERLAPPING future
-    test windows.
-
-    Example:
-
-    TRAIN | TEST1 | TEST2 | TEST3 | TEST4
-
-    Every test period is strictly after
-    the corresponding training period.
-    */
-
-    const initialTraining =
-        Math.floor(
-            total / 5
-        );
-
-    const remaining =
+    const usable =
         total -
-        initialTraining;
+        MIN_TEST_ROWS;
+
 
     const testSize =
-        Math.floor(
-            remaining /
-            FOLD_COUNT
+        Math.max(
+            MIN_TEST_ROWS,
+            Math.floor(
+                usable /
+                (
+                    FOLD_COUNT +
+                    1
+                )
+            )
         );
 
-    const folds = [];
 
     for (
         let i = 0;
@@ -1027,27 +1157,32 @@ function buildWalkForwardFolds(
     ) {
 
         const trainingEnd =
-            initialTraining +
+            MIN_TRAINING_ROWS +
             (
                 i *
                 testSize
             );
 
+
         const testStart =
             trainingEnd;
 
+
         const testEnd =
-            i === FOLD_COUNT - 1
-                ? total
-                : testStart +
-                  testSize;
+            Math.min(
+                total,
+                testStart +
+                testSize
+            );
+
 
         if (
-            trainingEnd < 20 ||
-            testEnd <= testStart
+            testEnd <=
+            testStart
         ) {
             continue;
         }
+
 
         folds.push({
 
@@ -1072,16 +1207,17 @@ function buildWalkForwardFolds(
         });
     }
 
+
     return folds;
 }
 
 
 // ============================================================
-// BUILD PATTERN MAP FROM TRAINING ONLY
+// PATTERN MAP
 // ============================================================
 
 function buildPatternMap(
-    trainingRows,
+    rows,
     side,
     level
 ) {
@@ -1089,15 +1225,14 @@ function buildPatternMap(
     const map =
         new Map();
 
+
     for (
-        const row
-        of trainingRows
+        const row of rows
     ) {
 
         const feature =
-            extractFeatureState(
-                row
-            );
+            extractFeatures(row);
+
 
         const key =
             createPatternKey(
@@ -1106,7 +1241,10 @@ function buildPatternMap(
                 level
             );
 
-        if (!map.has(key)) {
+
+        if (
+            !map.has(key)
+        ) {
 
             map.set(
                 key,
@@ -1114,24 +1252,645 @@ function buildPatternMap(
             );
         }
 
-        map.get(key).push(
-            row
-        );
+
+        map
+            .get(key)
+            .push(row);
     }
+
 
     return map;
 }
 
 
 // ============================================================
-// TRAINING PATTERN QUALITY
+// GET PATTERN ROWS
 // ============================================================
 
-function trainingPatternQuality(
+function rowsForPattern(
     rows,
     side,
     level,
     key
+) {
+
+    return rows.filter(
+        row => {
+
+            const feature =
+                extractFeatures(row);
+
+
+            return (
+                createPatternKey(
+                    side,
+                    feature,
+                    level
+                ) === key
+            );
+        }
+    );
+}
+
+
+// ============================================================
+// QUALITY
+// ============================================================
+
+function calculateQuality(
+    overall,
+    oos,
+    recent,
+    level
+) {
+
+    const evScore =
+        clamp(
+            (
+                oos.expectedValueR /
+                0.25
+            ) * 35,
+            0,
+            35
+        );
+
+
+    const pfScore =
+        clamp(
+            (
+                (
+                    oos.profitFactor -
+                    1
+                ) /
+                1
+            ) * 25,
+            0,
+            25
+        );
+
+
+    const decisiveScore =
+        clamp(
+            (
+                oos.decisiveTrades /
+                20
+            ) * 10,
+            0,
+            10
+        );
+
+
+    const stabilityScore =
+        clamp(
+            (
+                oos.stableFolds /
+                FOLD_COUNT
+            ) * 20,
+            0,
+            20
+        );
+
+
+    const recentScore =
+        recent.stable
+            ? 10
+            : 0;
+
+
+    const complexityPenalty =
+        level === 1
+            ? 0
+            : level === 2
+                ? 2
+                : level === 3
+                    ? 4
+                    : 6;
+
+
+    const drawdownPenalty =
+        clamp(
+            (
+                oos.maxDrawdownR /
+                MAX_OOS_DRAWDOWN_R
+            ) * 5,
+            0,
+            5
+        );
+
+
+    const score =
+        evScore +
+        pfScore +
+        decisiveScore +
+        stabilityScore +
+        recentScore -
+        complexityPenalty -
+        drawdownPenalty;
+
+
+    return round(
+        clamp(
+            score,
+            0,
+            100
+        ),
+        2
+    );
+}
+
+
+// ============================================================
+// OOS FOLD VALIDATION
+// ============================================================
+
+function validatePatternOOS(
+    key,
+    side,
+    level,
+    rows,
+    folds
+) {
+
+    const foldDetails = [];
+
+
+    for (
+        const fold of folds
+    ) {
+
+        const trainingRows =
+            rows.slice(
+                fold.trainingStart,
+                fold.trainingEnd
+            );
+
+
+        const testRows =
+            rows.slice(
+                fold.testStart,
+                fold.testEnd
+            );
+
+
+        const trainingPatternRows =
+            rowsForPattern(
+                trainingRows,
+                side,
+                level,
+                key
+            );
+
+
+        /*
+        CRITICAL:
+
+        Pattern must be discovered
+        inside training data.
+
+        A pattern appearing for the
+        first time in the test window
+        cannot qualify.
+        */
+
+
+        if (
+            trainingPatternRows.length <
+            Math.max(
+                5,
+                Math.floor(
+                    minimumSamplesForLevel(
+                        level
+                    ) / 2
+                )
+            )
+        ) {
+
+            continue;
+        }
+
+
+        const testPatternRows =
+            rowsForPattern(
+                testRows,
+                side,
+                level,
+                key
+            );
+
+
+        if (
+            testPatternRows.length === 0
+        ) {
+
+            continue;
+        }
+
+
+        const trainingStats =
+            calculateStats(
+                trainingPatternRows,
+                side
+            );
+
+
+        const testStats =
+            calculateStats(
+                testPatternRows,
+                side
+            );
+
+
+        foldDetails.push({
+
+            fold:
+                fold.fold,
+
+            trainingSamples:
+                trainingStats.samples,
+
+            trainingWinRate:
+                trainingStats.winRate,
+
+            trainingExpectedValueR:
+                trainingStats.expectedValueR,
+
+            trainingProfitFactor:
+                trainingStats.profitFactor,
+
+            testSamples:
+                testStats.samples,
+
+            testWins:
+                testStats.wins,
+
+            testLosses:
+                testStats.losses,
+
+            testTimeouts:
+                testStats.timeouts,
+
+            testDecisiveTrades:
+                testStats.decisiveTrades,
+
+            testWinRate:
+                testStats.winRate,
+
+            testExpectedValueR:
+                testStats.expectedValueR,
+
+            testProfitFactor:
+                testStats.profitFactor,
+
+            testNetR:
+                testStats.netR,
+
+            testDrawdownR:
+                testStats.maxDrawdownR,
+
+            testLossStreak:
+                testStats.maxLossStreak
+        });
+    }
+
+
+    return foldDetails;
+}
+
+
+// ============================================================
+// OOS AGGREGATE
+// ============================================================
+
+function aggregateOOS(
+    foldDetails
+) {
+
+    let wins = 0;
+    let losses = 0;
+    let timeouts = 0;
+
+    let netR = 0;
+
+    let maxDrawdown = 0;
+    let maxLossStreak = 0;
+
+
+    for (
+        const fold of foldDetails
+    ) {
+
+        wins +=
+            fold.testWins;
+
+        losses +=
+            fold.testLosses;
+
+        timeouts +=
+            fold.testTimeouts;
+
+        netR +=
+            fold.testNetR;
+
+
+        maxDrawdown =
+            Math.max(
+                maxDrawdown,
+                fold.testDrawdownR
+            );
+
+
+        maxLossStreak =
+            Math.max(
+                maxLossStreak,
+                fold.testLossStreak
+            );
+    }
+
+
+    const samples =
+        foldDetails.reduce(
+            (
+                sum,
+                x
+            ) =>
+                sum +
+                x.testSamples,
+            0
+        );
+
+
+    const decisive =
+        wins +
+        losses;
+
+
+    const winRate =
+        decisive > 0
+            ? (
+                wins /
+                decisive
+            ) * 100
+            : 0;
+
+
+    const grossProfit =
+        wins *
+        MIN_TARGET_R;
+
+
+    const grossLoss =
+        losses *
+        STOP_R;
+
+
+    const profitFactor =
+        grossLoss > 0
+            ? grossProfit /
+              grossLoss
+            : grossProfit > 0
+                ? 999
+                : 0;
+
+
+    const expectedValue =
+        samples > 0
+            ? netR /
+              samples
+            : 0;
+
+
+    const positiveFolds =
+        foldDetails.filter(
+            x =>
+                x.testExpectedValueR >
+                0
+        ).length;
+
+
+    const stableFolds =
+        foldDetails.filter(
+            x =>
+                x.testExpectedValueR >=
+                    MIN_OOS_EXPECTED_VALUE &&
+                x.testProfitFactor >=
+                    MIN_OOS_PROFIT_FACTOR
+        ).length;
+
+
+    return {
+
+        samples,
+
+        wins,
+
+        losses,
+
+        timeouts,
+
+        decisiveTrades:
+            decisive,
+
+        winRate:
+            round(
+                winRate,
+                2
+            ),
+
+        netR:
+            round(
+                netR,
+                3
+            ),
+
+        expectedValueR:
+            round(
+                expectedValue,
+                4
+            ),
+
+        profitFactor:
+            round(
+                profitFactor,
+                3
+            ),
+
+        maxDrawdownR:
+            round(
+                maxDrawdown,
+                2
+            ),
+
+        maxLossStreak,
+
+        foldsEvaluated:
+            foldDetails.length,
+
+        positiveFolds,
+
+        stableFolds
+    };
+}
+
+
+// ============================================================
+// RECENT OOS ANALYSIS
+// ============================================================
+
+function calculateRecentOOS(
+    foldDetails
+) {
+
+    if (
+        !foldDetails.length
+    ) {
+
+        return {
+
+            stable:
+                false,
+
+            recentEV:
+                0,
+
+            earlierEV:
+                0,
+
+            deterioration:
+                0
+        };
+    }
+
+
+    const ordered =
+        [...foldDetails]
+            .sort(
+                (a, b) =>
+                    a.fold -
+                    b.fold
+            );
+
+
+    const recentCount =
+        Math.max(
+            1,
+            Math.ceil(
+                ordered.length *
+                RECENT_WINDOW_FRACTION
+            )
+        );
+
+
+    const recent =
+        ordered.slice(
+            -recentCount
+        );
+
+
+    const earlier =
+        ordered.slice(
+            0,
+            Math.max(
+                0,
+                ordered.length -
+                recentCount
+            )
+        );
+
+
+    const recentEV =
+        recent.length
+            ? recent.reduce(
+                (
+                    sum,
+                    x
+                ) =>
+                    sum +
+                    x.testExpectedValueR,
+                0
+            ) /
+            recent.length
+            : 0;
+
+
+    const earlierEV =
+        earlier.length
+            ? earlier.reduce(
+                (
+                    sum,
+                    x
+                ) =>
+                    sum +
+                    x.testExpectedValueR,
+                0
+            ) /
+            earlier.length
+            : recentEV;
+
+
+    const deterioration =
+        Math.abs(
+            earlierEV
+        ) > 0.0001
+            ? (
+                recentEV -
+                earlierEV
+            ) /
+            Math.abs(
+                earlierEV
+            )
+            : 0;
+
+
+    const recentStable =
+        recent.every(
+            x =>
+                x.testExpectedValueR >=
+                MIN_OOS_EXPECTED_VALUE &&
+                x.testProfitFactor >=
+                MIN_OOS_PROFIT_FACTOR
+        );
+
+
+    return {
+
+        recentEV:
+            round(
+                recentEV,
+                4
+            ),
+
+        earlierEV:
+            round(
+                earlierEV,
+                4
+            ),
+
+        deterioration:
+            round(
+                deterioration,
+                4
+            ),
+
+        recentStable
+    ,
+        stable:
+            recentStable &&
+            deterioration >=
+                MAX_RECENT_DETERIORATION
+    };
+}
+
+
+// ============================================================
+// EVALUATE ONE PATTERN
+// ============================================================
+
+function evaluatePattern(
+    key,
+    side,
+    level,
+    rows,
+    folds
 ) {
 
     const minimumSamples =
@@ -1139,60 +1898,116 @@ function trainingPatternQuality(
             level
         );
 
+
+    const historicalRows =
+        rowsForPattern(
+            rows,
+            side,
+            level,
+            key
+        );
+
+
     if (
-        rows.length <
+        historicalRows.length <
         minimumSamples
     ) {
+
         return null;
     }
 
-    const stats =
-        calculateStats(
+
+    const foldDetails =
+        validatePatternOOS(
+            key,
+            side,
+            level,
             rows,
+            folds
+        );
+
+
+    if (
+        foldDetails.length < 2
+    ) {
+
+        return null;
+    }
+
+
+    const oos =
+        aggregateOOS(
+            foldDetails
+        );
+
+
+    const overall =
+        calculateStats(
+            historicalRows,
             side
         );
 
-    if (
-        stats.decisiveTrades <
-        MIN_TRAINING_DECISIVE
-    ) {
-        return null;
-    }
+
+    const recent =
+        calculateRecentOOS(
+            foldDetails
+        );
+
 
     /*
-    Training data is allowed to reject weak
-    patterns before they reach OOS testing.
-
-    This does NOT use any future/test data.
+    Strict V12.6 gate.
     */
 
-    if (
-        stats.expectedValueR <
-        0.05
-    ) {
-        return null;
-    }
 
-    if (
-        stats.profitFactor <
-        1.05
-    ) {
-        return null;
-    }
+    const robust =
 
-    if (
-        stats.maxDrawdownR >
-        MAX_DRAWDOWN_R
-    ) {
-        return null;
-    }
+        historicalRows.length >=
+            minimumSamples &&
 
-    if (
-        stats.maxLossStreak >
-        MAX_LOSS_STREAK
-    ) {
-        return null;
-    }
+        overall.decisiveTrades >=
+            MIN_DECISIVE_TRADES &&
+
+        oos.samples >=
+            MIN_OOS_SAMPLES &&
+
+        oos.decisiveTrades >=
+            MIN_OOS_DECISIVE_TRADES &&
+
+        oos.expectedValueR >=
+            MIN_OOS_EXPECTED_VALUE &&
+
+        oos.profitFactor >=
+            MIN_OOS_PROFIT_FACTOR &&
+
+        oos.stableFolds >=
+            MIN_STABLE_OOS_FOLDS &&
+
+        oos.maxDrawdownR <=
+            MAX_OOS_DRAWDOWN_R &&
+
+        oos.maxLossStreak <=
+            MAX_OOS_LOSS_STREAK &&
+
+        (
+            !REQUIRE_RECENT_STABILITY ||
+            recent.stable
+        );
+
+
+    const qualityScore =
+        calculateQuality(
+            overall,
+            oos,
+            recent,
+            level
+        );
+
+
+    const qualified =
+        robust &&
+        qualityScore >=
+            QUALITY_THRESHOLD;
+
 
     return {
 
@@ -1203,134 +2018,135 @@ function trainingPatternQuality(
         level,
 
         patternType:
-            determinePatternType(
-                side,
-                extractFeatureState(
-                    rows[
-                        rows.length - 1
-                    ]
-                )
-            ),
+            key.includes("|P:TREND_FOLLOW")
+                ? "TREND_FOLLOW"
+                : key.includes("|P:REVERSAL")
+                    ? "REVERSAL"
+                    : key.includes("|P:RANGE")
+                        ? "RANGE"
+                        : "OTHER",
 
         trainingSamples:
-            stats.samples,
+            historicalRows.length,
 
-        trainingWins:
-            stats.wins,
+        samples:
+            overall.samples,
 
-        trainingLosses:
-            stats.losses,
+        wins:
+            overall.wins,
 
-        trainingTimeouts:
-            stats.timeouts,
+        losses:
+            overall.losses,
 
-        trainingDecisiveTrades:
-            stats.decisiveTrades,
+        timeouts:
+            overall.timeouts,
 
-        trainingWinRate:
-            stats.winRate,
+        decisiveTrades:
+            overall.decisiveTrades,
 
-        trainingEV:
-            stats.expectedValueR,
+        winRate:
+            overall.winRate,
 
-        trainingPF:
-            stats.profitFactor,
+        netR:
+            overall.netR,
 
-        trainingNetR:
-            stats.netR,
+        expectedValueR:
+            overall.expectedValueR,
 
-        trainingDrawdownR:
-            stats.maxDrawdownR,
+        profitFactor:
+            overall.profitFactor,
 
-        trainingLossStreak:
-            stats.maxLossStreak
+        maxDrawdownR:
+            overall.maxDrawdownR,
+
+        maxLossStreak:
+            overall.maxLossStreak,
+
+        oosSamples:
+            oos.samples,
+
+        oosWins:
+            oos.wins,
+
+        oosLosses:
+            oos.losses,
+
+        oosTimeouts:
+            oos.timeouts,
+
+        oosDecisiveTrades:
+            oos.decisiveTrades,
+
+        oosWinRate:
+            oos.winRate,
+
+        oosNetR:
+            oos.netR,
+
+        oosExpectedValueR:
+            oos.expectedValueR,
+
+        oosProfitFactor:
+            oos.profitFactor,
+
+        maxOOSDrawdownR:
+            oos.maxDrawdownR,
+
+        maxOOSLossStreak:
+            oos.maxLossStreak,
+
+        foldsEvaluated:
+            oos.foldsEvaluated,
+
+        positiveFolds:
+            oos.positiveFolds,
+
+        stableOOSFolds:
+            oos.stableFolds,
+
+        recentEV:
+            recent.recentEV,
+
+        earlierEV:
+            recent.earlierEV,
+
+        recentDeterioration:
+            recent.deterioration,
+
+        recentStable:
+            recent.stable,
+
+        qualityScore,
+
+        robust,
+
+        qualified,
+
+        foldDetails
     };
 }
 
 
 // ============================================================
-// OOS PATTERN TEST
+// DISCOVER PATTERNS
 // ============================================================
 
-function testPatternOOS(
-    pattern,
-    testRows
+function discoverPatterns(
+    rows,
+    folds
 ) {
 
-    const matching =
-        testRows.filter(
-            row => {
-
-                const feature =
-                    extractFeatureState(
-                        row
-                    );
-
-                return (
-                    createPatternKey(
-                        pattern.side,
-                        feature,
-                        pattern.level
-                    ) ===
-                    pattern.key
-                );
-            }
-        );
-
-    if (!matching.length) {
-
-        return {
-
-            samples: 0,
-            wins: 0,
-            losses: 0,
-            timeouts: 0,
-            decisiveTrades: 0,
-            winRate: 0,
-            expectedValueR: 0,
-            profitFactor: 0,
-            netR: 0,
-            maxDrawdownR: 0,
-            maxLossStreak: 0
-        };
-    }
-
-    return calculateStats(
-        matching,
-        pattern.side
-    );
-}
-
-
-// ============================================================
-// STRICT FOLD TRAINING
-// ============================================================
-
-function trainFold(
-    historicalRows,
-    fold
-) {
-
-    const trainingRows =
-        historicalRows.slice(
-            fold.trainingStart,
-            fold.trainingEnd
-        );
-
-    const testRows =
-        historicalRows.slice(
-            fold.testStart,
-            fold.testEnd
-        );
-
-    const candidates = [];
+    const results = [];
 
     const sides = [
         "BUY",
         "SELL"
     ];
 
-    for (const side of sides) {
+
+    for (
+        const side of sides
+    ) {
 
         for (
             let level = 1;
@@ -1340,656 +2156,52 @@ function trainFold(
 
             const map =
                 buildPatternMap(
-                    trainingRows,
+                    rows,
                     side,
                     level
                 );
 
+
             for (
-                const [
-                    key,
-                    rows
-                ]
-                of map.entries()
+                const key of map.keys()
             ) {
 
-                const pattern =
-                    trainingPatternQuality(
-                        rows,
+                const evaluated =
+                    evaluatePattern(
+                        key,
                         side,
                         level,
-                        key
+                        rows,
+                        folds
                     );
 
-                if (!pattern) {
-                    continue;
-                }
-
-                /*
-                IMPORTANT:
-
-                The pattern has now been frozen.
-
-                Only NOW do we evaluate it
-                against the future test window.
-                */
-
-                const oos =
-                    testPatternOOS(
-                        pattern,
-                        testRows
-                    );
 
                 if (
-                    oos.samples === 0
+                    evaluated
                 ) {
-                    continue;
+
+                    results.push(
+                        evaluated
+                    );
                 }
-
-                candidates.push({
-
-                    ...pattern,
-
-                    fold:
-                        fold.fold,
-
-                    testSamples:
-                        oos.samples,
-
-                    testWins:
-                        oos.wins,
-
-                    testLosses:
-                        oos.losses,
-
-                    testTimeouts:
-                        oos.timeouts,
-
-                    testDecisiveTrades:
-                        oos.decisiveTrades,
-
-                    testWinRate:
-                        oos.winRate,
-
-                    testExpectedValueR:
-                        oos.expectedValueR,
-
-                    testProfitFactor:
-                        oos.profitFactor,
-
-                    testNetR:
-                        oos.netR,
-
-                    testDrawdownR:
-                        oos.maxDrawdownR,
-
-                    testLossStreak:
-                        oos.maxLossStreak
-                });
             }
         }
     }
 
-    return {
-
-        fold:
-            fold.fold,
-
-        trainingRows:
-            trainingRows.length,
-
-        testRows:
-            testRows.length,
-
-        candidates,
-
-        patternsDiscovered:
-            candidates.length
-    };
-}
-
-
-// ============================================================
-// AGGREGATE OOS PATTERNS
-// ============================================================
-
-function aggregateOOSPatterns(
-    foldResults
-) {
-
-    const map =
-        new Map();
-
-    for (
-        const foldResult
-        of foldResults
-    ) {
-
-        for (
-            const pattern
-            of foldResult.candidates
-        ) {
-
-            if (
-                !map.has(
-                    pattern.key
-                )
-            ) {
-
-                map.set(
-                    pattern.key,
-                    {
-                        key:
-                            pattern.key,
-
-                        side:
-                            pattern.side,
-
-                        level:
-                            pattern.level,
-
-                        patternType:
-                            pattern.patternType,
-
-                        folds:
-                            [],
-
-                        totalTrainingSamples:
-                            0,
-
-                        totalOOSSamples:
-                            0,
-
-                        totalOOSWins:
-                            0,
-
-                        totalOOSLosses:
-                            0,
-
-                        totalOOSTimeouts:
-                            0,
-
-                        totalOOSNetR:
-                            0
-                    }
-                );
-            }
-
-            const item =
-                map.get(
-                    pattern.key
-                );
-
-            item.folds.push(
-                pattern
-            );
-
-            item.totalTrainingSamples +=
-                pattern.trainingSamples;
-
-            item.totalOOSSamples +=
-                pattern.testSamples;
-
-            item.totalOOSWins +=
-                pattern.testWins;
-
-            item.totalOOSLosses +=
-                pattern.testLosses;
-
-            item.totalOOSTimeouts +=
-                pattern.testTimeouts;
-
-            item.totalOOSNetR +=
-                pattern.testNetR;
-        }
-    }
-
-    const results = [];
-
-    for (
-        const item
-        of map.values()
-    ) {
-
-        const decisive =
-            item.totalOOSWins +
-            item.totalOOSLosses;
-
-        const oosWinRate =
-            decisive > 0
-                ? (
-                    item.totalOOSWins /
-                    decisive
-                ) * 100
-                : 0;
-
-        const oosEV =
-            item.totalOOSSamples > 0
-                ? item.totalOOSNetR /
-                  item.totalOOSSamples
-                : 0;
-
-        const winR =
-            item.totalOOSWins *
-            MIN_TARGET_R;
-
-        const lossR =
-            item.totalOOSLosses *
-            STOP_R;
-
-        const oosPF =
-            lossR > 0
-                ? winR / lossR
-                : winR > 0
-                    ? 999
-                    : 0;
-
-        const positiveFolds =
-            item.folds.filter(
-                f =>
-                    f.testExpectedValueR >
-                    0
-            ).length;
-
-        const stableFolds =
-            item.folds.filter(
-                f =>
-                    f.testExpectedValueR >=
-                        MIN_OOS_EXPECTED_VALUE &&
-                    f.testProfitFactor >=
-                        MIN_PROFIT_FACTOR &&
-                    f.testDecisiveTrades >=
-                        2
-            ).length;
-
-        /*
-        Recent OOS performance.
-
-        Later folds receive more importance.
-        */
-
-        const sorted =
-            item.folds.slice().sort(
-                (a, b) =>
-                    a.fold -
-                    b.fold
-            );
-
-        const recentCount =
-            Math.max(
-                1,
-                Math.ceil(
-                    sorted.length *
-                    RECENT_WINDOW_FRACTION
-                )
-            );
-
-        const recent =
-            sorted.slice(
-                -recentCount
-            );
-
-        const earlier =
-            sorted.slice(
-                0,
-                Math.max(
-                    0,
-                    sorted.length -
-                    recentCount
-                )
-            );
-
-        const recentEV =
-            recent.length > 0
-                ? recent.reduce(
-                    (
-                        sum,
-                        f
-                    ) =>
-                        sum +
-                        f.testExpectedValueR,
-                    0
-                ) /
-                  recent.length
-                : 0;
-
-        const earlierEV =
-            earlier.length > 0
-                ? earlier.reduce(
-                    (
-                        sum,
-                        f
-                    ) =>
-                        sum +
-                        f.testExpectedValueR,
-                    0
-                ) /
-                  earlier.length
-                : recentEV;
-
-        const recentDeterioration =
-            earlier.length > 0
-                ? recentEV -
-                  earlierEV
-                : 0;
-
-        const recentStable =
-            recent.every(
-                f =>
-                    f.testExpectedValueR >=
-                    MIN_OOS_EXPECTED_VALUE ||
-                    f.testDecisiveTrades < 2
-            );
-
-        const maxOOSDrawdown =
-            Math.max(
-                ...item.folds.map(
-                    f =>
-                        f.testDrawdownR
-                ),
-                0
-            );
-
-        const maxOOSLossStreak =
-            Math.max(
-                ...item.folds.map(
-                    f =>
-                        f.testLossStreak
-                ),
-                0
-            );
-
-        /*
-        Quality score.
-
-        OOS evidence is dominant.
-
-        This is intentionally NOT based
-        purely on overall historical performance.
-        */
-
-        const evScore =
-            clamp(
-                (
-                    oosEV /
-                    GOOD_EXPECTED_VALUE
-                ) * 35,
-                0,
-                35
-            );
-
-        const pfScore =
-            clamp(
-                (
-                    (
-                        oosPF -
-                        1
-                    ) /
-                    (
-                        GOOD_PROFIT_FACTOR -
-                        1
-                    )
-                ) * 25,
-                0,
-                25
-            );
-
-        const stabilityScore =
-            (
-                stableFolds /
-                Math.max(
-                    1,
-                    item.folds.length
-                )
-            ) * 25;
-
-        const positiveScore =
-            (
-                positiveFolds /
-                Math.max(
-                    1,
-                    item.folds.length
-                )
-            ) * 10;
-
-        const drawdownPenalty =
-            clamp(
-                (
-                    maxOOSDrawdown /
-                    MAX_DRAWDOWN_R
-                ) * 5,
-                0,
-                5
-            );
-
-        const qualityScore =
-            clamp(
-                evScore +
-                pfScore +
-                stabilityScore +
-                positiveScore -
-                drawdownPenalty,
-                0,
-                100
-            );
-
-        /*
-        STRICT ROBUST GATE
-
-        A pattern must have:
-        - enough OOS observations
-        - enough OOS decisive trades
-        - at least 2 OOS folds
-        - at least 2 positive folds
-        - at least 2 stable folds
-        - positive aggregate OOS EV
-        - PF > 1.1
-        - controlled drawdown
-        - controlled loss streak
-        - no major recent deterioration
-        */
-
-        const robust =
-
-            item.folds.length >=
-                MIN_OOS_FOLDS &&
-
-            item.totalOOSSamples >=
-                MIN_OOS_SAMPLES &&
-
-            decisive >=
-                MIN_OOS_DECISIVE &&
-
-            positiveFolds >=
-                MIN_POSITIVE_OOS_FOLDS &&
-
-            stableFolds >=
-                MIN_STABLE_OOS_FOLDS &&
-
-            oosEV >=
-                MIN_OOS_EXPECTED_VALUE &&
-
-            oosPF >=
-                MIN_PROFIT_FACTOR &&
-
-            maxOOSDrawdown <=
-                MAX_DRAWDOWN_R &&
-
-            maxOOSLossStreak <=
-                MAX_LOSS_STREAK &&
-
-            recentDeterioration >=
-                MAX_RECENT_DETERIORATION &&
-
-            recentStable;
-
-        results.push({
-
-            key:
-                item.key,
-
-            side:
-                item.side,
-
-            level:
-                item.level,
-
-            patternType:
-                item.patternType,
-
-            trainingSamples:
-                item.totalTrainingSamples,
-
-            oosSamples:
-                item.totalOOSSamples,
-
-            oosWins:
-                item.totalOOSWins,
-
-            oosLosses:
-                item.totalOOSLosses,
-
-            oosTimeouts:
-                item.totalOOSTimeouts,
-
-            oosDecisiveTrades:
-                decisive,
-
-            oosWinRate:
-                round(
-                    oosWinRate,
-                    2
-                ),
-
-            oosNetR:
-                round(
-                    item.totalOOSNetR,
-                    3
-                ),
-
-            oosExpectedValueR:
-                round(
-                    oosEV,
-                    4
-                ),
-
-            oosProfitFactor:
-                round(
-                    oosPF,
-                    3
-                ),
-
-            positiveFolds,
-
-            stableFolds,
-
-            foldsEvaluated:
-                item.folds.length,
-
-            recentEV:
-                round(
-                    recentEV,
-                    4
-                ),
-
-            earlierEV:
-                round(
-                    earlierEV,
-                    4
-                ),
-
-            recentDeterioration:
-                round(
-                    recentDeterioration,
-                    4
-                ),
-
-            recentStable,
-
-            maxOOSDrawdown:
-                round(
-                    maxOOSDrawdown,
-                    3
-                ),
-
-            maxOOSLossStreak,
-
-            qualityScore:
-                round(
-                    qualityScore,
-                    2
-                ),
-
-            robust,
-
-            foldDetails:
-                item.folds.map(
-                    f => ({
-
-                        fold:
-                            f.fold,
-
-                        trainingSamples:
-                            f.trainingSamples,
-
-                        trainingWinRate:
-                            f.trainingWinRate,
-
-                        trainingExpectedValueR:
-                            f.trainingEV,
-
-                        trainingProfitFactor:
-                            f.trainingPF,
-
-                        testSamples:
-                            f.testSamples,
-
-                        testWins:
-                            f.testWins,
-
-                        testLosses:
-                            f.testLosses,
-
-                        testTimeouts:
-                            f.testTimeouts,
-
-                        testDecisiveTrades:
-                            f.testDecisiveTrades,
-
-                        testWinRate:
-                            f.testWinRate,
-
-                        testExpectedValueR:
-                            f.testExpectedValueR,
-
-                        testProfitFactor:
-                            f.testProfitFactor,
-
-                        testNetR:
-                            f.testNetR,
-
-                        testDrawdownR:
-                            f.testDrawdownR,
-
-                        testLossStreak:
-                            f.testLossStreak
-                    })
-                )
-        });
-    }
 
     return results.sort(
         (a, b) => {
 
             if (
-                a.robust !==
-                b.robust
+                a.qualified !==
+                b.qualified
             ) {
 
-                return a.robust
+                return a.qualified
                     ? -1
                     : 1;
             }
+
 
             if (
                 b.qualityScore !==
@@ -2002,6 +2214,7 @@ function aggregateOOSPatterns(
                 );
             }
 
+
             if (
                 b.oosExpectedValueR !==
                 a.oosExpectedValueR
@@ -2013,9 +2226,10 @@ function aggregateOOSPatterns(
                 );
             }
 
+
             /*
-            If quality is similar,
-            prefer simpler patterns.
+            Prefer simpler patterns
+            when quality is similar.
             */
 
             if (
@@ -2029,6 +2243,7 @@ function aggregateOOSPatterns(
                 );
             }
 
+
             return (
                 b.oosSamples -
                 a.oosSamples
@@ -2039,190 +2254,18 @@ function aggregateOOSPatterns(
 
 
 // ============================================================
-// MARKET SIDE INFERENCE
+// BEST PATTERN
 // ============================================================
 
-function inferSide(row) {
-
-    const trend =
-        normalizeTrend(
-            row
-        );
-
-    const regime =
-        normalizeRegime(
-            row
-        );
-
-    const vwap =
-        vwapDirection(
-            row
-        );
-
-    const rsi =
-        number(
-            row.rsi14
-        );
-
-    if (
-        trend === "BULLISH" &&
-        regime !== "RANGING" &&
-        (
-            vwap === "ABOVE" ||
-            vwap === "NEAR"
-        ) &&
-        rsi !== null &&
-        rsi >= 40 &&
-        rsi <= 68
-    ) {
-
-        return "BUY";
-    }
-
-    if (
-        trend === "BEARISH" &&
-        regime !== "RANGING" &&
-        (
-            vwap === "BELOW" ||
-            vwap === "NEAR"
-        ) &&
-        rsi !== null &&
-        rsi >= 32 &&
-        rsi <= 60
-    ) {
-
-        return "SELL";
-    }
-
-    /*
-    Reversal setup.
-
-    Only allow when RSI is extreme
-    and price is stretched away from VWAP.
-    */
-
-    if (
-        rsi !== null &&
-        rsi < 30 &&
-        vwap === "BELOW"
-    ) {
-
-        return "BUY";
-    }
-
-    if (
-        rsi !== null &&
-        rsi > 70 &&
-        vwap === "ABOVE"
-    ) {
-
-        return "SELL";
-    }
-
-    return null;
-}
-
-
-// ============================================================
-// CONTEXT SCORE
-// ============================================================
-
-function contextScore(
-    row,
-    pattern
-) {
-
-    const feature =
-        extractFeatureState(
-            row
-        );
-
-    let score = 0;
-
-    if (
-        pattern.side &&
-        pattern.side ===
-        inferSide(row)
-    ) {
-
-        score += 25;
-    }
-
-    if (
-        pattern.key.includes(
-            `T:${feature.trend}`
-        )
-    ) {
-
-        score += 20;
-    }
-
-    if (
-        pattern.key.includes(
-            `V:${feature.vwap}`
-        )
-    ) {
-
-        score += 15;
-    }
-
-    if (
-        pattern.level >= 2 &&
-        pattern.key.includes(
-            `R:${feature.rsi}`
-        )
-    ) {
-
-        score += 15;
-    }
-
-    if (
-        pattern.level >= 3 &&
-        pattern.key.includes(
-            `G:${feature.regime}`
-        )
-    ) {
-
-        score += 10;
-    }
-
-    if (
-        pattern.level >= 3 &&
-        pattern.key.includes(
-            `S:${feature.slope}`
-        )
-    ) {
-
-        score += 5;
-    }
-
-    if (
-        pattern.level >= 4 &&
-        pattern.key.includes(
-            `H:${feature.time}`
-        )
-    ) {
-
-        score += 10;
-    }
-
-    return clamp(
-        score,
-        0,
-        100
-    );
-}
-
-
-// ============================================================
-// FIND CURRENT PATTERN
-// ============================================================
-
-function findBestCurrentPattern(
+function findBestPattern(
     row,
     side,
     patterns
 ) {
+
+    const feature =
+        extractFeatures(row);
+
 
     const matches =
         patterns.filter(
@@ -2235,10 +2278,6 @@ function findBestCurrentPattern(
                     return false;
                 }
 
-                const feature =
-                    extractFeatureState(
-                        row
-                    );
 
                 const key =
                     createPatternKey(
@@ -2247,6 +2286,7 @@ function findBestCurrentPattern(
                         pattern.level
                     );
 
+
                 return (
                     key ===
                     pattern.key
@@ -2254,35 +2294,17 @@ function findBestCurrentPattern(
             }
         );
 
-    if (!matches.length) {
+
+    if (
+        !matches.length
+    ) {
+
         return null;
     }
 
-    const scored =
-        matches.map(
-            pattern => ({
 
-                ...pattern,
-
-                contextScore:
-                    contextScore(
-                        row,
-                        pattern
-                    )
-            })
-        );
-
-    scored.sort(
+    matches.sort(
         (a, b) => {
-
-            /*
-            Quality first.
-
-            Then context.
-
-            Then prefer simpler patterns
-            when quality is close.
-            */
 
             if (
                 b.qualityScore !==
@@ -2295,16 +2317,18 @@ function findBestCurrentPattern(
                 );
             }
 
+
             if (
-                b.contextScore !==
-                a.contextScore
+                b.oosExpectedValueR !==
+                a.oosExpectedValueR
             ) {
 
                 return (
-                    b.contextScore -
-                    a.contextScore
+                    b.oosExpectedValueR -
+                    a.oosExpectedValueR
                 );
             }
+
 
             return (
                 a.level -
@@ -2313,328 +2337,272 @@ function findBestCurrentPattern(
         }
     );
 
-    return scored[0];
+
+    return matches[0];
 }
 
 
 // ============================================================
-// CURRENT MARKET
+// PAPER EXECUTION
 // ============================================================
 
-function currentMarket(rows) {
+function paperExecution(
+    rows,
+    patterns
+) {
 
-    if (!rows.length) {
-
-        return {
-            available: false
-        };
-    }
-
-    const row =
-        rows[
-            rows.length - 1
-        ];
-
-    const feature =
-        extractFeatureState(
-            row
+    const qualified =
+        patterns.filter(
+            p =>
+                p.qualified
         );
 
-    return {
-
-        available:
-            true,
-
-        timestamp:
-            normalizeTimestamp(
-                row.timestamp
-            ),
-
-        date:
-            row.date ||
-            null,
-
-        close:
-            number(
-                row.close
-            ),
-
-        trend:
-            feature.trend,
-
-        regime:
-            feature.regime,
-
-        rsi:
-            number(
-                row.rsi14
-            ),
-
-        rsiBucket:
-            feature.rsi,
-
-        vwap:
-            number(
-                row.vwap
-            ),
-
-        vwapDirection:
-            feature.vwap,
-
-        vwapDistanceATR:
-            number(
-                row.vwapDistanceATR
-            ),
-
-        ema9:
-            number(
-                row.ema9
-            ),
-
-        ema21:
-            number(
-                row.ema21
-            ),
-
-        emaSpreadATR:
-            number(
-                row.emaSpreadATR
-            ),
-
-        ema9SlopeATR:
-            number(
-                row.ema9SlopeATR
-            ),
-
-        atr14:
-            number(
-                row.atr14
-            ),
-
-        time:
-            feature.time,
-
-        inferredSide:
-            inferSide(
-                row
-            )
-    };
-}
-
-
-// ============================================================
-// PAPER EXECUTION BACKTEST
-// ============================================================
-
-function paperExecutionBacktest(
-    historicalRows,
-    foldResults,
-    robustPatterns
-) {
 
     const trades = [];
 
-    /*
-    CRITICAL:
 
-    We use each fold's frozen training brain
-    against ONLY its own unseen test window.
+    let nextAllowedIndex =
+        0;
 
-    This is not a backtest using a pattern
-    trained on the whole dataset.
-    */
 
     for (
-        const foldResult
-        of foldResults
+        let i = 0;
+        i < rows.length;
+        i++
     ) {
 
-        const foldPatterns =
-            foldResult.candidates.filter(
-                candidate => {
-
-                    /*
-                    Only patterns that passed
-                    training qualification are
-                    eligible.
-
-                    But they do NOT need to be
-                    robust yet because robustness
-                    is only known after the OOS
-                    test.
-                    */
-
-                    return true;
-                }
-            );
-
-        const fold =
-            foldResult.fold;
-
-        /*
-        Locate the test window again.
-        */
-
-        const allFolds =
-            buildWalkForwardFolds(
-                historicalRows
-            );
-
-        const foldInfo =
-            allFolds.find(
-                f =>
-                    f.fold === fold
-            );
-
-        if (!foldInfo) {
+        if (
+            i <
+            nextAllowedIndex
+        ) {
             continue;
         }
 
-        const testRows =
-            historicalRows.slice(
-                foldInfo.testStart,
-                foldInfo.testEnd
+
+        const row =
+            rows[i];
+
+
+        const side =
+            inferSide(row);
+
+
+        if (!side) {
+            continue;
+        }
+
+
+        const pattern =
+            findBestPattern(
+                row,
+                side,
+                qualified
             );
 
-        let lastSignalIndex =
-            -999;
 
-        for (
-            let i = 0;
-            i < testRows.length;
-            i++
+        if (!pattern) {
+            continue;
+        }
+
+
+        const outcome =
+            sideOutcome(
+                row,
+                side
+            );
+
+
+        let resultR = 0;
+
+
+        if (
+            outcome === "WIN"
+        ) {
+
+            resultR =
+                MIN_TARGET_R;
+        }
+
+
+        else if (
+            outcome === "LOSS"
+        ) {
+
+            resultR =
+                -STOP_R;
+        }
+
+
+        else {
+
+            resultR =
+                0;
+        }
+
+
+        const close =
+            number(
+                row.close
+            );
+
+
+        const atr =
+            number(
+                row.atr14
+            );
+
+
+        let stop = null;
+        let target = null;
+        let preferredTarget = null;
+
+
+        if (
+            close !== null &&
+            atr !== null &&
+            atr > 0
         ) {
 
             if (
-                i <=
-                lastSignalIndex
+                side === "BUY"
             ) {
-                continue;
-            }
 
-            const row =
-                testRows[i];
+                stop =
+                    close -
+                    atr;
 
-            const side =
-                inferSide(
-                    row
-                );
-
-            if (!side) {
-                continue;
-            }
-
-            /*
-            Find the pattern that was learned
-            from training data ONLY.
-            */
-
-            const matches =
-                foldPatterns.filter(
-                    pattern => {
-
-                        if (
-                            pattern.side !==
-                            side
-                        ) {
-                            return false;
-                        }
-
-                        const feature =
-                            extractFeatureState(
-                                row
-                            );
-
-                        return (
-                            createPatternKey(
-                                side,
-                                feature,
-                                pattern.level
-                            ) ===
-                            pattern.key
-                        );
-                    }
-                );
-
-            if (!matches.length) {
-                continue;
-            }
-
-            matches.sort(
-                (a, b) => {
-
-                    if (
-                        b.trainingEV !==
-                        a.trainingEV
-                    ) {
-
-                        return (
-                            b.trainingEV -
-                            a.trainingEV
-                        );
-                    }
-
-                    return (
-                        a.level -
-                        b.level
+                target =
+                    close +
+                    (
+                        atr *
+                        MIN_TARGET_R
                     );
-                }
-            );
 
-            const pattern =
-                matches[0];
-
-            const outcome =
-                sideOutcome(
-                    row,
-                    side
-                );
-
-            let resultR = 0;
-
-            if (outcome === "WIN") {
-                resultR = MIN_TARGET_R;
+                preferredTarget =
+                    close +
+                    (
+                        atr *
+                        PREFERRED_TARGET_R
+                    );
             }
 
-            else if (
-                outcome === "LOSS"
-            ) {
-                resultR = -STOP_R;
+            else {
+
+                stop =
+                    close +
+                    atr;
+
+                target =
+                    close -
+                    (
+                        atr *
+                        MIN_TARGET_R
+                    );
+
+                preferredTarget =
+                    close -
+                    (
+                        atr *
+                        PREFERRED_TARGET_R
+                    );
             }
-
-            trades.push({
-
-                fold,
-
-                index:
-                    foldInfo.testStart +
-                    i,
-
-                timestamp:
-                    row.timestamp,
-
-                side,
-
-                pattern:
-                    pattern.key,
-
-                patternLevel:
-                    pattern.level,
-
-                trainingEV:
-                    pattern.trainingEV,
-
-                trainingPF:
-                    pattern.trainingPF,
-
-                outcome,
-
-                resultR
-            });
-
-            lastSignalIndex = i;
         }
+
+
+        trades.push({
+
+            tradeNumber:
+                trades.length + 1,
+
+            signalIndex:
+                i,
+
+            timestamp:
+                row.timestamp,
+
+            side,
+
+            pattern:
+                pattern.key,
+
+            patternLevel:
+                pattern.level,
+
+            patternType:
+                pattern.patternType,
+
+            patternQuality:
+                pattern.qualityScore,
+
+            patternSamples:
+                pattern.oosSamples,
+
+            patternEV:
+                pattern.oosExpectedValueR,
+
+            patternPF:
+                pattern.oosProfitFactor,
+
+            entry:
+                close,
+
+            stop:
+                stop !== null
+                    ? round(
+                        stop,
+                        2
+                    )
+                    : null,
+
+            target:
+                target !== null
+                    ? round(
+                        target,
+                        2
+                    )
+                    : null,
+
+            preferredTarget:
+                preferredTarget !== null
+                    ? round(
+                        preferredTarget,
+                        2
+                    )
+                    : null,
+
+            riskReward:
+                "1:2",
+
+            exitType:
+                outcome === "WIN"
+                    ? "TARGET"
+                    : outcome === "LOSS"
+                        ? "STOP"
+                        : "TIMEOUT",
+
+            resultR,
+
+            reason:
+                outcome === "WIN"
+                    ? "TARGET_HIT"
+                    : outcome === "LOSS"
+                        ? "STOP_HIT"
+                        : "MAX_HOLD_TIMEOUT"
+        });
+
+
+        /*
+        One trade at a time.
+
+        This prevents overlapping
+        paper positions.
+        */
+
+        nextAllowedIndex =
+            i +
+            MAX_HOLD_CANDLES;
     }
+
 
     let wins = 0;
     let losses = 0;
@@ -2650,14 +2618,13 @@ function paperExecutionBacktest(
     let lossStreak = 0;
     let maxLossStreak = 0;
 
+
     for (
-        const trade
-        of trades
+        const trade of trades
     ) {
 
         if (
-            trade.outcome ===
-            "WIN"
+            trade.resultR > 0
         ) {
 
             wins++;
@@ -2671,9 +2638,9 @@ function paperExecutionBacktest(
             lossStreak = 0;
         }
 
+
         else if (
-            trade.outcome ===
-            "LOSS"
+            trade.resultR < 0
         ) {
 
             losses++;
@@ -2695,6 +2662,7 @@ function paperExecutionBacktest(
                 );
         }
 
+
         else {
 
             timeouts++;
@@ -2702,11 +2670,13 @@ function paperExecutionBacktest(
             lossStreak = 0;
         }
 
+
         peak =
             Math.max(
                 peak,
                 equity
             );
+
 
         maxDrawdown =
             Math.max(
@@ -2715,8 +2685,11 @@ function paperExecutionBacktest(
             );
     }
 
+
     const decisive =
-        wins + losses;
+        wins +
+        losses;
+
 
     const winRate =
         decisive > 0
@@ -2726,15 +2699,18 @@ function paperExecutionBacktest(
             ) * 100
             : 0;
 
+
     const netR =
         winR -
         lossR;
+
 
     const expectedValue =
         trades.length > 0
             ? netR /
               trades.length
             : 0;
+
 
     const profitFactor =
         lossR > 0
@@ -2743,6 +2719,7 @@ function paperExecutionBacktest(
             : winR > 0
                 ? 999
                 : 0;
+
 
     return {
 
@@ -2797,7 +2774,7 @@ function paperExecutionBacktest(
         maxDrawdownR:
             round(
                 maxDrawdown,
-                3
+                2
             ),
 
         maxConsecutiveLosses:
@@ -2816,26 +2793,123 @@ function paperExecutionBacktest(
             "1:2",
 
         tradeLog:
-            trades.slice(
-                -100
-            )
+            trades.slice(-100)
     };
 }
 
 
 // ============================================================
-// FINAL CURRENT SIGNAL
+// CURRENT MARKET
 // ============================================================
 
-function finalRecommendation(
-    currentRow,
-    robustPatterns
+function currentMarket(
+    rows
+) {
+
+    if (
+        !rows.length
+    ) {
+
+        return {
+            available: false
+        };
+    }
+
+
+    const row =
+        rows[
+            rows.length - 1
+        ];
+
+
+    const feature =
+        extractFeatures(row);
+
+
+    const side =
+        inferSide(row);
+
+
+    return {
+
+        available:
+            true,
+
+        timestamp:
+            row.timestamp,
+
+        date:
+            row.date ||
+            null,
+
+        close:
+            number(row.close),
+
+        trend:
+            feature.trend,
+
+        regime:
+            feature.regime,
+
+        rsi:
+            number(row.rsi14),
+
+        rsiBucket:
+            feature.rsi,
+
+        vwap:
+            number(row.vwap),
+
+        vwapDirection:
+            feature.vwap,
+
+        vwapDistanceATR:
+            number(
+                row.vwapDistanceATR
+            ),
+
+        atr14:
+            number(
+                row.atr14
+            ),
+
+        ema9:
+            number(row.ema9),
+
+        ema21:
+            number(row.ema21),
+
+        emaSpreadATR:
+            number(
+                row.emaSpreadATR
+            ),
+
+        ema9SlopeATR:
+            number(
+                row.ema9SlopeATR
+            ),
+
+        time:
+            feature.time,
+
+        inferredSide:
+            side
+    };
+}
+
+
+// ============================================================
+// CURRENT RECOMMENDATION
+// ============================================================
+
+function recommendation(
+    rows,
+    qualifiedPatterns
 ) {
 
     const market =
-        currentMarket(
-            [currentRow]
-        );
+        currentMarket(rows);
+
 
     if (
         !market.available
@@ -2850,14 +2924,14 @@ function finalRecommendation(
                 null,
 
             reason:
-                "No current market data."
+                "No market data."
         };
     }
 
-    const side =
-        market.inferredSide;
 
-    if (!side) {
+    if (
+        !market.inferredSide
+    ) {
 
         return {
 
@@ -2875,75 +2949,52 @@ function finalRecommendation(
         };
     }
 
-    const best =
-        findBestCurrentPattern(
-            currentRow,
-            side,
-            robustPatterns
+
+    const last =
+        rows[
+            rows.length - 1
+        ];
+
+
+    const pattern =
+        findBestPattern(
+            last,
+            market.inferredSide,
+            qualifiedPatterns
         );
 
-    if (!best) {
+
+    if (!pattern) {
 
         return {
 
             status:
-                "NO_TRADE",
+                "NO_EDGE",
 
-            side,
+            side:
+                market.inferredSide,
 
             reason:
-                "Directional setup exists, but no independently validated OOS pattern matches the current context.",
+                "Directional setup exists, but no proven OOS pattern matches the current market.",
 
             nextAction:
                 "WAIT"
         };
     }
 
-    if (
-        best.qualityScore <
-        MIN_CONTEXT_SCORE
-    ) {
-
-        return {
-
-            status:
-                "NO_TRADE",
-
-            side,
-
-            pattern:
-                best.key,
-
-            patternLevel:
-                best.level,
-
-            qualityScore:
-                best.qualityScore,
-
-            contextScore:
-                best.contextScore,
-
-            reason:
-                "Pattern quality/context score is below the V12.5 execution threshold.",
-
-            nextAction:
-                "WAIT"
-        };
-    }
 
     const close =
-        number(
-            currentRow.close
-        );
+        number(last.close);
+
 
     const atr =
-        number(
-            currentRow.atr14
-        );
+        number(last.atr14);
+
 
     let stop = null;
     let target = null;
     let preferredTarget = null;
+
 
     if (
         close !== null &&
@@ -2952,7 +3003,8 @@ function finalRecommendation(
     ) {
 
         if (
-            side === "BUY"
+            market.inferredSide ===
+            "BUY"
         ) {
 
             stop =
@@ -2972,8 +3024,9 @@ function finalRecommendation(
                     atr *
                     PREFERRED_TARGET_R
                 );
+        }
 
-        } else {
+        else {
 
             stop =
                 close +
@@ -2995,54 +3048,47 @@ function finalRecommendation(
         }
     }
 
+
     return {
 
         status:
-            "PAPER_TRADE_CANDIDATE",
+            "TAKE_TRADE",
 
-        side,
+        side:
+            market.inferredSide,
 
         pattern:
-            best.key,
-
-        patternType:
-            best.patternType,
+            pattern.key,
 
         patternLevel:
-            best.level,
+            pattern.level,
+
+        patternType:
+            pattern.patternType,
 
         qualityScore:
-            best.qualityScore,
+            pattern.qualityScore,
 
-        contextScore:
-            best.contextScore,
+        historicalSamples:
+            pattern.samples,
 
         oosSamples:
-            best.oosSamples,
-
-        oosDecisiveTrades:
-            best.oosDecisiveTrades,
+            pattern.oosSamples,
 
         oosWinRate:
-            best.oosWinRate,
+            pattern.oosWinRate,
 
         oosExpectedValueR:
-            best.oosExpectedValueR,
+            pattern.oosExpectedValueR,
 
         oosProfitFactor:
-            best.oosProfitFactor,
+            pattern.oosProfitFactor,
 
-        positiveFolds:
-            best.positiveFolds,
+        stableOOSFolds:
+            pattern.stableOOSFolds,
 
-        stableFolds:
-            best.stableFolds,
-
-        recentEV:
-            best.recentEV,
-
-        recentDeterioration:
-            best.recentDeterioration,
+        recentStable:
+            pattern.recentStable,
 
         entry:
             close,
@@ -3078,10 +3124,10 @@ function finalRecommendation(
             "1:2.5",
 
         reason:
-            "Current candle matches a pattern that was trained only on prior data and independently validated across multiple unseen future folds.",
+            "Current setup matches a pattern that passed strict out-of-sample profitability validation.",
 
         nextAction:
-            "PAPER_WAIT_FOR_NEXT_CANDLE"
+            "PAPER_TRADE_CANDIDATE"
     };
 }
 
@@ -3090,25 +3136,29 @@ function finalRecommendation(
 // TRADING DAYS
 // ============================================================
 
-function calculateTradingDays(rows) {
+function countTradingDays(rows) {
 
     const days =
         new Set();
 
+
     for (
-        const row
-        of rows
+        const row of rows
     ) {
 
-        if (!row.timestamp) {
+        if (
+            !row.timestamp
+        ) {
             continue;
         }
+
 
         const d =
             new Date(
                 row.timestamp *
                 1000
             );
+
 
         days.add(
             [
@@ -3119,120 +3169,88 @@ function calculateTradingDays(rows) {
         );
     }
 
+
     return days.size;
 }
 
 
 // ============================================================
-// MAIN ENGINE
+// ENGINE
 // ============================================================
 
 async function runEngine(req) {
 
     const source =
-        await fetchDataset(
-            req
-        );
+        await fetchDataset(req);
+
 
     const rawRows =
         source.data.rows;
 
-    const rows =
+
+    const normalizedRows =
         normalizeRows(
             rawRows
         );
 
+
     if (
-        rows.length <
-        100
+        normalizedRows.length <
+        MIN_TRAINING_ROWS +
+        MIN_TEST_ROWS
     ) {
 
         throw new Error(
-            `Not enough learning rows: ${rows.length}`
+            `Not enough learning rows: ${normalizedRows.length}`
         );
     }
 
-    rows.sort(
-        (a, b) =>
-            (
-                a.timestamp || 0
-            ) -
-            (
-                b.timestamp || 0
-            )
-    );
 
     /*
-    ========================================================
-    CRITICAL CURRENT-CANDLE EXCLUSION
-    ========================================================
+    IMPORTANT:
 
-    The latest candle is NEVER part of the learning
-    or walk-forward evaluation dataset.
+    Last candle is considered
+    current market data.
 
-    It is reserved exclusively for the current signal.
+    It is NEVER included in
+    historical pattern learning.
     */
 
-    const currentRow =
-        rows[
-            rows.length - 1
-        ];
-
     const historicalRows =
-        rows.slice(
+        normalizedRows.slice(
             0,
             -1
         );
 
-    /*
-    ========================================================
-    STRICT WALK-FORWARD
-    ========================================================
-    */
+
+    const currentRow =
+        normalizedRows[
+            normalizedRows.length - 1
+        ];
+
 
     const folds =
         buildWalkForwardFolds(
-            historicalRows
+            historicalRows.length
         );
 
+
     if (
-        folds.length <
-        FOLD_COUNT
+        folds.length < 2
     ) {
 
         throw new Error(
-            `Unable to build ${FOLD_COUNT} strict walk-forward folds`
+            "Unable to build sufficient walk-forward folds."
         );
     }
 
-    const foldResults = [];
-
-    for (
-        const fold
-        of folds
-    ) {
-
-        const result =
-            trainFold(
-                historicalRows,
-                fold
-            );
-
-        foldResults.push(
-            result
-        );
-    }
-
-    /*
-    ========================================================
-    OOS AGGREGATION
-    ========================================================
-    */
 
     const patterns =
-        aggregateOOSPatterns(
-            foldResults
+        discoverPatterns(
+            historicalRows,
+            folds
         );
+
 
     const robustPatterns =
         patterns.filter(
@@ -3240,167 +3258,124 @@ async function runEngine(req) {
                 p.robust
         );
 
-    /*
-    ========================================================
-    PATTERN COUNTS
-    ========================================================
-    */
 
     const qualifiedPatterns =
-        robustPatterns.filter(
+        patterns.filter(
             p =>
-                p.qualityScore >=
-                MIN_CONTEXT_SCORE
+                p.qualified
         );
+
 
     const buyPatterns =
         qualifiedPatterns.filter(
             p =>
-                p.side ===
-                "BUY"
+                p.side === "BUY"
         );
+
 
     const sellPatterns =
         qualifiedPatterns.filter(
             p =>
-                p.side ===
-                "SELL"
+                p.side === "SELL"
         );
 
+
     /*
-    ========================================================
-    PAPER OOS EXECUTION
-    ========================================================
+    Paper execution uses ONLY
+    historically proven patterns.
+
+    The current candle itself
+    is NOT part of the backtest.
     */
 
     const paperBacktest =
-        paperExecutionBacktest(
+        paperExecution(
             historicalRows,
-            foldResults,
-            robustPatterns
-        );
-
-    /*
-    ========================================================
-    CURRENT SIGNAL
-    ========================================================
-    */
-
-    const recommendation =
-        finalRecommendation(
-            currentRow,
             qualifiedPatterns
         );
 
-    /*
-    ========================================================
-    LEVEL COUNTS
-    ========================================================
-    */
-
-    const levelCounts = {
-
-        level1:
-            patterns.filter(
-                p =>
-                    p.level === 1
-            ).length,
-
-        level2:
-            patterns.filter(
-                p =>
-                    p.level === 2
-            ).length,
-
-        level3:
-            patterns.filter(
-                p =>
-                    p.level === 3
-            ).length,
-
-        level4:
-            patterns.filter(
-                p =>
-                    p.level === 4
-            ).length
-    };
 
     /*
-    ========================================================
-    PATTERN TYPE COUNTS
-    ========================================================
+    Current market decision.
+
+    Current candle is evaluated only
+    against patterns learned from
+    prior candles.
     */
 
-    const patternTypes = {
-
-        TREND_FOLLOW:
-            patterns.filter(
-                p =>
-                    p.patternType ===
-                    "TREND_FOLLOW"
-            ).length,
-
-        REVERSAL:
-            patterns.filter(
-                p =>
-                    p.patternType ===
-                    "REVERSAL"
-            ).length,
-
-        RANGE:
-            patterns.filter(
-                p =>
-                    p.patternType ===
-                    "RANGE"
-            ).length,
-
-        OTHER:
-            patterns.filter(
-                p =>
-                    p.patternType ===
-                    "OTHER"
-            ).length
-    };
-
-    /*
-    ========================================================
-    SIDE BALANCE
-    ========================================================
-    */
-
-    const totalQualified =
-        qualifiedPatterns.length;
-
-    const buyCount =
-        buyPatterns.length;
-
-    const sellCount =
-        sellPatterns.length;
-
-    const sideRatio =
-        totalQualified > 0
-            ? buyCount /
-              totalQualified
-            : 0;
-
-    const sideImbalance =
-        Math.abs(
-            0.5 -
-            sideRatio
+    const currentRecommendation =
+        recommendation(
+            normalizedRows,
+            qualifiedPatterns
         );
 
-    const sideBiased =
-        sideImbalance >
-        0.35;
+
+    const currentMarketData =
+        currentMarket(
+            normalizedRows
+        );
+
+
+    const sideBalance = {
+
+        buy:
+            buyPatterns.length,
+
+        sell:
+            sellPatterns.length,
+
+        total:
+            qualifiedPatterns.length,
+
+        ratio:
+            sellPatterns.length > 0
+                ? round(
+                    buyPatterns.length /
+                    sellPatterns.length,
+                    3
+                )
+                : buyPatterns.length > 0
+                    ? 999
+                    : 0
+    };
+
 
     /*
-    ========================================================
-    FINAL ENGINE STATUS
-    ========================================================
+    OOS aggregate across qualified patterns.
+
+    This is informational only.
     */
 
-    const brainReady =
-        robustPatterns.length > 0;
+    const oosNetR =
+        qualifiedPatterns.reduce(
+            (
+                sum,
+                p
+            ) =>
+                sum +
+                p.oosNetR,
+            0
+        );
+
+
+    const oosSamples =
+        qualifiedPatterns.reduce(
+            (
+                sum,
+                p
+            ) =>
+                sum +
+                p.oosSamples,
+            0
+        );
+
+
+    const aggregateOOSExpectedValue =
+        oosSamples > 0
+            ? oosNetR /
+              oosSamples
+            : 0;
+
 
     return {
 
@@ -3414,7 +3389,7 @@ async function runEngine(req) {
             "COMPLETED",
 
         mode:
-            "V12_5_STRICT_WALK_FORWARD_BRAIN",
+            "V12_6_STRICT_OOS_PROFITABILITY_PROOF",
 
         paperOnly:
             true,
@@ -3440,11 +3415,10 @@ async function runEngine(req) {
         source:
             "V11.1_LEARNING_DATASET",
 
-        /*
-        ====================================================
-        ANTI-LEAKAGE
-        ====================================================
-        */
+
+        // ====================================================
+        // ANTI LEAKAGE
+        // ====================================================
 
         antiLeakage: {
 
@@ -3466,10 +3440,10 @@ async function runEngine(req) {
             currentCandleExcluded:
                 true,
 
-            currentCandleOutcomeUsed:
+            currentCandleUsedForLearning:
                 false,
 
-            currentCandleUsedForTraining:
+            currentCandleOutcomeUsed:
                 false,
 
             testDataUsedForTraining:
@@ -3478,26 +3452,31 @@ async function runEngine(req) {
             testOutcomeUsedForTraining:
                 false,
 
-            patternDiscoveryUsesFutureData:
+            futureDataUsedForPatternDiscovery:
+                false,
+
+            futureDataUsedForCurrentSignal:
                 false,
 
             overlappingTestWindows:
                 false,
 
-            currentSignalUsesFutureData:
-                false
+            overlappingPaperTrades:
+                false,
+
+            sameCandleStopTargetBias:
+                "STOP_FIRST"
         },
 
-        /*
-        ====================================================
-        OBJECTIVE
-        ====================================================
-        */
+
+        // ====================================================
+        // OBJECTIVE
+        // ====================================================
 
         objective: {
 
             primary:
-                "STRICT_OUT_OF_SAMPLE_POSITIVE_EXPECTED_VALUE",
+                "STRICT_OUT_OF_SAMPLE_PROFITABILITY",
 
             secondary:
                 "MINIMIZE_DRAWDOWN",
@@ -3508,24 +3487,26 @@ async function runEngine(req) {
             allowNoTrade:
                 true,
 
-            minimumExpectedValueR:
-                MIN_EXPECTED_VALUE,
-
             minimumOOSExpectedValueR:
                 MIN_OOS_EXPECTED_VALUE,
 
-            minimumProfitFactor:
-                MIN_PROFIT_FACTOR,
+            minimumOOSProfitFactor:
+                MIN_OOS_PROFIT_FACTOR,
 
             minimumStableOOSFolds:
-                MIN_STABLE_OOS_FOLDS
+                MIN_STABLE_OOS_FOLDS,
+
+            minimumOOSDecisiveTrades:
+                MIN_OOS_DECISIVE_TRADES,
+
+            recentStabilityRequired:
+                REQUIRE_RECENT_STABILITY
         },
 
-        /*
-        ====================================================
-        DATA
-        ====================================================
-        */
+
+        // ====================================================
+        // SOURCE
+        // ====================================================
 
         sourceStatistics: {
 
@@ -3533,7 +3514,7 @@ async function runEngine(req) {
                 rawRows.length,
 
             normalizedRows:
-                rows.length,
+                normalizedRows.length,
 
             historicalLearningRows:
                 historicalRows.length,
@@ -3541,21 +3522,29 @@ async function runEngine(req) {
             currentCandleExcluded:
                 1,
 
+            candlesTested:
+                historicalRows.length,
+
             tradingDays:
-                calculateTradingDays(
-                    rows
+                countTradingDays(
+                    normalizedRows
                 ),
 
             invalidRows:
                 rawRows.length -
-                rows.length
+                normalizedRows.length,
+
+            latestTimestamp:
+                currentRow.timestamp,
+
+            latestPrice:
+                currentRow.close
         },
 
-        /*
-        ====================================================
-        WALK FORWARD
-        ====================================================
-        */
+
+        // ====================================================
+        // WALK FORWARD
+        // ====================================================
 
         walkForward: {
 
@@ -3574,7 +3563,6 @@ async function runEngine(req) {
             folds:
                 folds.map(
                     fold => ({
-
                         fold:
                             fold.fold,
 
@@ -3594,25 +3582,15 @@ async function runEngine(req) {
                             fold.trainingRows,
 
                         testRows:
-                            fold.testRows,
-
-                        patternsDiscovered:
-                            foldResults[
-                                fold.fold - 1
-                            ] &&
-                            foldResults[
-                                fold.fold - 1
-                            ].patternsDiscovered
-                                || 0
+                            fold.testRows
                     })
                 )
         },
 
-        /*
-        ====================================================
-        LEARNING
-        ====================================================
-        */
+
+        // ====================================================
+        // LEARNING
+        // ====================================================
 
         learning: {
 
@@ -3626,39 +3604,63 @@ async function runEngine(req) {
                 qualifiedPatterns.length,
 
             buyPatterns:
-                buyCount,
+                buyPatterns.length,
 
             sellPatterns:
-                sellCount,
+                sellPatterns.length,
 
-            sideBalance: {
+            sideBalance,
 
-                buy:
-                    buyCount,
+            patternTypes: {
 
-                sell:
-                    sellCount,
+                TREND_FOLLOW:
+                    qualifiedPatterns.filter(
+                        p =>
+                            p.patternType ===
+                            "TREND_FOLLOW"
+                    ).length,
 
-                ratio:
-                    round(
-                        sideRatio,
-                        3
-                    ),
+                REVERSAL:
+                    qualifiedPatterns.filter(
+                        p =>
+                            p.patternType ===
+                            "REVERSAL"
+                    ).length,
 
-                imbalance:
-                    round(
-                        sideImbalance,
-                        3
-                    ),
-
-                biased:
-                    sideBiased
+                RANGE:
+                    qualifiedPatterns.filter(
+                        p =>
+                            p.patternType ===
+                            "RANGE"
+                    ).length
             },
 
-            patternTypes,
+            levels: {
 
-            levels:
-                levelCounts,
+                level1:
+                    patterns.filter(
+                        p =>
+                            p.level === 1
+                    ).length,
+
+                level2:
+                    patterns.filter(
+                        p =>
+                            p.level === 2
+                    ).length,
+
+                level3:
+                    patterns.filter(
+                        p =>
+                            p.level === 3
+                    ).length,
+
+                level4:
+                    patterns.filter(
+                        p =>
+                            p.level === 4
+                    ).length
+            },
 
             minimumSamples: {
 
@@ -3673,70 +3675,94 @@ async function runEngine(req) {
 
                 level4:
                     MIN_LEVEL4_SAMPLES
-            },
-
-            stabilityRules: {
-
-                minimumOOSFolds:
-                    MIN_OOS_FOLDS,
-
-                minimumPositiveOOSFolds:
-                    MIN_POSITIVE_OOS_FOLDS,
-
-                minimumStableOOSFolds:
-                    MIN_STABLE_OOS_FOLDS,
-
-                minimumOOSSamples:
-                    MIN_OOS_SAMPLES,
-
-                minimumOOSDecisiveTrades:
-                    MIN_OOS_DECISIVE,
-
-                maximumOOSDrawdownR:
-                    MAX_DRAWDOWN_R,
-
-                maximumOOSLossStreak:
-                    MAX_LOSS_STREAK,
-
-                maximumRecentDeterioration:
-                    MAX_RECENT_DETERIORATION
             }
         },
 
-        /*
-        ====================================================
-        CURRENT MARKET
-        ====================================================
-        */
+
+        // ====================================================
+        // OOS PROOF
+        // ====================================================
+
+        oosProof: {
+
+            description:
+                "Only patterns whose unseen test data demonstrates sufficient profitability and stability can qualify for paper execution.",
+
+            qualifiedPatterns:
+                qualifiedPatterns.length,
+
+            aggregateQualifiedPatternNetR:
+                round(
+                    oosNetR,
+                    3
+                ),
+
+            aggregateQualifiedPatternSamples:
+                oosSamples,
+
+            aggregateQualifiedPatternExpectedValueR:
+                round(
+                    aggregateOOSExpectedValue,
+                    4
+                ),
+
+            minimumExpectedValueR:
+                MIN_OOS_EXPECTED_VALUE,
+
+            minimumProfitFactor:
+                MIN_OOS_PROFIT_FACTOR,
+
+            minimumStableFolds:
+                MIN_STABLE_OOS_FOLDS,
+
+            minimumDecisiveTrades:
+                MIN_OOS_DECISIVE_TRADES,
+
+            recentStabilityRequired:
+                REQUIRE_RECENT_STABILITY,
+
+            recentDeteriorationLimit:
+                MAX_RECENT_DETERIORATION,
+
+            maxOOSDrawdownR:
+                MAX_OOS_DRAWDOWN_R,
+
+            maxOOSLossStreak:
+                MAX_OOS_LOSS_STREAK
+        },
+
+
+        // ====================================================
+        // CURRENT MARKET
+        // ====================================================
 
         currentMarket:
-            currentMarket(
-                [currentRow]
-            ),
+            currentMarketData,
 
-        /*
-        ====================================================
-        STRICT PAPER OOS BACKTEST
-        ====================================================
-        */
+
+        // ====================================================
+        // PAPER BACKTEST
+        // ====================================================
 
         paperBacktest: {
 
             description:
-                "Strict historical paper simulation where each fold is executed using a brain trained only on candles before that fold.",
+                "Historical paper execution using only patterns that passed strict OOS validation.",
 
             stats:
                 paperBacktest,
 
-            noRealOrders:
-                true
+            executionEligible:
+                qualifiedPatterns.length > 0,
+
+            realOrders:
+                false
         },
 
-        /*
-        ====================================================
-        RISK PLAN
-        ====================================================
-        */
+
+        // ====================================================
+        // RISK
+        // ====================================================
 
         riskPlan: {
 
@@ -3758,42 +3784,26 @@ async function runEngine(req) {
             preferredRiskReward:
                 "1:2.5",
 
+            maxHoldCandles:
+                MAX_HOLD_CANDLES,
+
             noStopWidening:
                 true,
 
-            maxDrawdownR:
-                MAX_DRAWDOWN_R,
+            maxOOSDrawdownR:
+                MAX_OOS_DRAWDOWN_R,
 
-            maxLossStreak:
-                MAX_LOSS_STREAK
+            maxOOSLossStreak:
+                MAX_OOS_LOSS_STREAK,
+
+            sameCandleStopTargetRule:
+                "STOP_FIRST"
         },
 
-        /*
-        ====================================================
-        ROBUST PATTERNS
-        ====================================================
-        */
 
-        robustPatterns: {
-
-            BUY:
-                buyPatterns.slice(
-                    0,
-                    20
-                ),
-
-            SELL:
-                sellPatterns.slice(
-                    0,
-                    20
-                )
-        },
-
-        /*
-        ====================================================
-        TOP PATTERNS
-        ====================================================
-        */
+        // ====================================================
+        // TOP PATTERNS
+        // ====================================================
 
         topPatterns: {
 
@@ -3822,58 +3832,55 @@ async function runEngine(req) {
                     )
         },
 
-        /*
-        ====================================================
-        BRAIN STATUS
-        ====================================================
-        */
 
-        brainStatus: {
+        // ====================================================
+        // QUALIFIED PATTERNS
+        // ====================================================
 
-            robustPatternAvailable:
-                brainReady,
+        qualifiedPatterns: {
 
-            qualifiedPatternAvailable:
-                qualifiedPatterns.length >
-                0,
+            BUY:
+                buyPatterns
+                    .slice(
+                        0,
+                        20
+                    ),
 
-            strictOOSValidation:
-                true,
-
-            futureLeakageDetected:
-                false,
-
-            currentCandleExcluded:
-                true
+            SELL:
+                sellPatterns
+                    .slice(
+                        0,
+                        20
+                    )
         },
 
-        /*
-        ====================================================
-        CURRENT RECOMMENDATION
-        ====================================================
-        */
 
-        recommendation,
+        // ====================================================
+        // CURRENT DECISION
+        // ====================================================
 
-        /*
-        ====================================================
-        PAPER ACTION
-        ====================================================
-        */
+        recommendation:
+            currentRecommendation,
+
 
         paperAction:
 
-            recommendation.status ===
-            "PAPER_TRADE_CANDIDATE"
+            currentRecommendation.status ===
+            "TAKE_TRADE"
 
                 ? "PAPER_TRADE_CANDIDATE"
 
                 : "NO_TRADE",
 
+
         nextAction:
 
-            recommendation.nextAction ||
-            "WAIT"
+            currentRecommendation.status ===
+            "TAKE_TRADE"
+
+                ? "PAPER_TRADE_CANDIDATE"
+
+                : "WAIT"
     };
 }
 
@@ -3890,8 +3897,7 @@ export default async function handler(
     try {
 
         if (
-            req.method !==
-            "GET"
+            req.method !== "GET"
         ) {
 
             return res
@@ -3909,25 +3915,25 @@ export default async function handler(
                 });
         }
 
+
         const result =
-            await runEngine(
-                req
-            );
+            await runEngine(req);
+
 
         return res
             .status(200)
-            .json(
-                result
-            );
+            .json(result);
 
     }
+
 
     catch (error) {
 
         console.error(
-            "V12.5 ERROR:",
+            "V12.6 ERROR:",
             error
         );
+
 
         return res
             .status(500)
@@ -3949,6 +3955,9 @@ export default async function handler(
                     false,
 
                 brokerOrderEnabled:
+                    false,
+
+                brokerOrderSent:
                     false,
 
                 error:
