@@ -1,6 +1,6 @@
 /*
 TradeMind Pro
-V11.7 Walk-Forward Robustness Engine
+V11.8 Robust Edge + Risk/Reward Engine
 
 Evolution:
 
@@ -25,7 +25,12 @@ Selective Trade Quality
 V11.7
 WALK-FORWARD ROBUSTNESS
         ↓
+V11.8
+ROBUST EDGE + RISK/REWARD SELECTION
+        ↓
 Robust Pattern Candidates
+        ↓
+Risk/Reward Trade Selection
         ↓
 Future Paper Signal Engine
 
@@ -41,12 +46,16 @@ TERTIARY:
 
     SELECT ONLY STABLE / ROBUST TRADES
 
+V11.8 ADDITION:
+    REQUIRE POSITIVE OUT-OF-SAMPLE EXPECTED VALUE
+    AND A MINIMUM 1:2 RISK / REWARD EXECUTION PLAN
+
 PAPER ONLY
 NO REAL ORDERS
 */
 
 
-const VERSION = "V11.7";
+const VERSION = "V11.8";
 
 
 // =====================================================
@@ -73,6 +82,21 @@ const PREFERRED_EXPECTED_VALUE_R = 0.35;
 const MIN_PROFIT_FACTOR = 1.25;
 
 const PREFERRED_PROFIT_FACTOR = 1.50;
+
+
+// V11.8 selective trade gate
+
+const V118_MIN_EXPECTED_VALUE_R = 0.35;
+
+const V118_MIN_PROFIT_FACTOR = 1.50;
+
+const V118_MIN_RISK_REWARD = 2.00;
+
+const V118_PREFERRED_RISK_REWARD = 2.50;
+
+const V118_MIN_TRADE_SCORE = 65;
+
+const V118_MAX_OPEN_RISK = 1.00;
 
 
 // Stability
@@ -389,15 +413,6 @@ function buildPattern(
         );
 
 
-    /*
-    Level 1:
-
-    Very broad patterns.
-
-    Designed to find structural
-    directional behaviour.
-    */
-
     if (level === 1) {
 
         const feature =
@@ -454,15 +469,6 @@ function buildPattern(
         );
     }
 
-
-    /*
-    Level 2:
-
-    Two-feature combinations.
-
-    This is the main V11.7
-    discovery level.
-    */
 
     const combinations = [
 
@@ -538,15 +544,6 @@ function buildPattern(
     ];
 
 
-    /*
-    A deterministic pattern family
-    is selected using row properties.
-
-    We deliberately create multiple
-    candidate families rather than
-    using one giant feature key.
-    */
-
     const patterns = [];
 
 
@@ -595,10 +592,6 @@ function getRowPatterns(
 
     const patterns = [];
 
-
-    /*
-    Level 1 patterns
-    */
 
     const rsi =
         bucketRSI(
@@ -738,10 +731,6 @@ function getRowPatterns(
 
     });
 
-
-    /*
-    Level 2
-    */
 
     const pairs = [
 
@@ -1311,18 +1300,6 @@ function discoverPatterns(
             getOutcome(row);
 
 
-        /*
-        We learn BUY and SELL
-        independently.
-
-        If the row has a preferred
-        direction, use that.
-
-        Otherwise we can still learn
-        both sides from their actual
-        outcomes.
-        */
-
         const sides = [];
 
 
@@ -1519,11 +1496,6 @@ function evaluatePatterns(
         const sides = [];
 
 
-        /*
-        Use preferred direction
-        first when available.
-        */
-
         if (
             outcome.preferredDirection ===
             "BUY"
@@ -1566,13 +1538,6 @@ function evaluatePatterns(
             }
         }
 
-
-        /*
-        Prevent the same row from
-        being counted twice in the
-        normal preferred-direction
-        case.
-        */
 
         for (
             const side
@@ -1796,14 +1761,6 @@ function createWalkForwardFolds(
         rows.length;
 
 
-    /*
-    We use expanding chronological
-    training windows.
-
-    No future information is used
-    to create a previous fold.
-    */
-
     const folds = [];
 
 
@@ -1881,7 +1838,6 @@ function createWalkForwardFolds(
                 trainEnd,
 
             testEnd:
-
                 testEnd,
 
             trainingRows:
@@ -2146,12 +2102,6 @@ function walkForwardAnalysis(
             rows
         );
 
-
-    /*
-    Candidate patterns must be
-    discovered independently inside
-    each training fold.
-    */
 
     const candidateMap =
         new Map();
@@ -2465,14 +2415,6 @@ function walkForwardAnalysis(
                 : 0;
 
 
-        /*
-        Stability score.
-
-        The engine deliberately
-        rewards consistency rather
-        than one spectacular fold.
-        */
-
         const evScore =
             clamp(
                 (
@@ -2560,6 +2502,13 @@ function walkForwardAnalysis(
             candidate.testSamples;
 
 
+        candidate.observedRiskReward =
+            observedRiskReward(candidate);
+
+        candidate.riskPlan =
+            buildRiskPlan(candidate);
+
+
         candidate.robustnessScore =
             (
                 evScore *
@@ -2583,13 +2532,6 @@ function walkForwardAnalysis(
             );
 
 
-        /*
-        Final robustness gate.
-
-        A pattern must make money
-        repeatedly, not just once.
-        */
-
         candidate.robust =
             candidate.foldsSeen >=
             MIN_STABLE_FOLDS &&
@@ -2608,7 +2550,7 @@ function walkForwardAnalysis(
 
             candidate.testSamples >=
             30;
-        
+
 
         candidates.push(
             candidate
@@ -2656,6 +2598,283 @@ function walkForwardAnalysis(
 
         candidates
     };
+}
+
+
+// =====================================================
+// V11.8 RISK / REWARD QUALIFICATION
+// =====================================================
+
+function observedRiskReward(candidate) {
+
+    const foldDetails =
+        Array.isArray(candidate.foldDetails)
+            ? candidate.foldDetails
+            : [];
+
+    const mfe = foldDetails
+        .map(
+            fold =>
+                safeNumber(
+                    fold.testAverageMFER,
+                    NaN
+                )
+        )
+        .filter(
+            Number.isFinite
+        );
+
+    const mae = foldDetails
+        .map(
+            fold =>
+                safeNumber(
+                    fold.testAverageMAER,
+                    NaN
+                )
+        )
+        .filter(
+            Number.isFinite
+        );
+
+    if (
+        !mfe.length ||
+        !mae.length
+    ) {
+        return null;
+    }
+
+    const averageMFE =
+        average(mfe);
+
+    const averageMAE =
+        average(mae);
+
+    if (
+        !(averageMAE > 0)
+    ) {
+        return null;
+    }
+
+    return (
+        averageMFE /
+        averageMAE
+    );
+}
+
+
+// =====================================================
+// V11.8 RISK PLAN
+// =====================================================
+
+function buildRiskPlan(candidate) {
+
+    const observedRR =
+        observedRiskReward(
+            candidate
+        );
+
+
+    /*
+    If historical MAE/MFE exists,
+    use it.
+
+    Otherwise we use a clearly
+    labelled execution policy floor.
+    */
+
+    const effectiveRR =
+        observedRR !== null
+            ? observedRR
+            : V118_MIN_RISK_REWARD;
+
+
+    const riskRewardSource =
+        observedRR !== null
+            ? "WALK_FORWARD_MAE_MFE"
+            : "EXECUTION_POLICY_NOT_BACKTESTED";
+
+
+    const riskRewardQualified =
+        observedRR === null ||
+        observedRR >=
+        V118_MIN_RISK_REWARD;
+
+
+    const riskScore =
+        clamp(
+            (
+                effectiveRR -
+                V118_MIN_RISK_REWARD
+            ) /
+            (
+                V118_PREFERRED_RISK_REWARD -
+                V118_MIN_RISK_REWARD
+            ),
+            0,
+            1
+        );
+
+
+    return {
+
+        riskPerTradeR:
+            V118_MAX_OPEN_RISK,
+
+        minimumRewardR:
+            V118_MIN_RISK_REWARD,
+
+        preferredRewardR:
+            V118_PREFERRED_RISK_REWARD,
+
+        plannedMinimumRR:
+            `${V118_MIN_RISK_REWARD}:1`,
+
+        plannedPreferredRR:
+            `${V118_PREFERRED_RISK_REWARD}:1`,
+
+        observedRiskReward:
+            observedRR !== null
+                ? round(
+                    observedRR,
+                    2
+                )
+                : null,
+
+        effectiveRiskReward:
+            round(
+                effectiveRR,
+                2
+            ),
+
+        riskRewardSource,
+
+        riskRewardQualified,
+
+        riskScore:
+            round(
+                riskScore * 100,
+                2
+            ),
+
+        executionRule:
+            "Risk 1R maximum; reject the setup if a 2R target cannot be reasonably defined; prefer 2.5R+ when market structure permits.",
+
+        stopRule:
+            "Stop must be defined before entry. Do not widen the initial stop after entry.",
+
+        profitRule:
+            "At +1R, protect the position; allow the remaining position to seek the planned 2R+ objective."
+    };
+}
+
+
+// =====================================================
+// V11.8 TRADE QUALITY SCORE
+// =====================================================
+
+function v118TradeScore(
+    candidate
+) {
+
+    const base =
+        finalTradeScore(
+            candidate
+        );
+
+
+    const evScore =
+        clamp(
+            (
+                candidate.averageTestEV -
+                V118_MIN_EXPECTED_VALUE_R
+            ) /
+            (
+                PREFERRED_EXPECTED_VALUE_R -
+                V118_MIN_EXPECTED_VALUE_R
+            ),
+            0,
+            1
+        );
+
+
+    const pfScore =
+        clamp(
+            (
+                candidate.averageTestPF -
+                V118_MIN_PROFIT_FACTOR
+            ) /
+            (
+                PREFERRED_PROFIT_FACTOR -
+                V118_MIN_PROFIT_FACTOR
+            ),
+            0,
+            1
+        );
+
+
+    const riskPlan =
+        buildRiskPlan(
+            candidate
+        );
+
+
+    const riskScore =
+        riskPlan.riskScore /
+        100;
+
+
+    return (
+        base * 0.60
+    ) + (
+        evScore * 15
+    ) + (
+        pfScore * 15
+    ) + (
+        riskScore * 10
+    );
+}
+
+
+// =====================================================
+// V11.8 QUALIFICATION
+// =====================================================
+
+function qualifiesForV118(
+    candidate
+) {
+
+    const riskPlan =
+        buildRiskPlan(
+            candidate
+        );
+
+
+    return (
+
+        candidate.robust === true &&
+
+        candidate.averageTestEV >=
+            V118_MIN_EXPECTED_VALUE_R &&
+
+        candidate.averageTestPF >=
+            V118_MIN_PROFIT_FACTOR &&
+
+        candidate.positiveFolds >=
+            MIN_STABLE_FOLDS &&
+
+        candidate.stableFolds >=
+            MIN_STABLE_FOLDS &&
+
+        candidate.testSamples >=
+            ROBUST_MIN_SAMPLES &&
+
+        riskPlan.riskRewardQualified &&
+
+        v118TradeScore(
+            candidate
+        ) >=
+            V118_MIN_TRADE_SCORE
+    );
 }
 
 
@@ -2733,25 +2952,35 @@ function buildRecommendation(
     const robust =
         analysis.candidates.filter(
             candidate =>
-                candidate.robust
+                qualifiesForV118(
+                    candidate
+                )
         );
 
 
-    if (!robust.length) {
+    if (
+        !robust.length
+    ) {
 
         return {
 
             status:
-                "NO_ROBUST_EDGE",
+                "NO_V118_EDGE",
 
             candidateCount:
                 analysis.candidateCount,
 
             robustCandidates:
+                analysis.robustCandidates,
+
+            riskQualifiedCandidates:
                 0,
 
             message:
-                "No pattern has demonstrated sufficient out-of-sample stability. Do not generate paper signals from these patterns yet."
+                "No candidate currently satisfies the V11.8 out-of-sample EV, profit-factor, stability and minimum 1:2 risk/reward rules. PAPER NO-TRADE.",
+
+            paperAction:
+                "NO_TRADE"
         };
     }
 
@@ -2759,15 +2988,32 @@ function buildRecommendation(
     const ranked =
         robust
             .map(
-                candidate => ({
+                candidate => {
 
-                    ...candidate,
-
-                    tradeQualityScore:
-                        finalTradeScore(
+                    const riskPlan =
+                        buildRiskPlan(
                             candidate
-                        )
-                })
+                        );
+
+
+                    return {
+
+                        ...candidate,
+
+                        riskPlan,
+
+                        tradeQualityScore:
+                            round(
+                                v118TradeScore(
+                                    candidate
+                                ),
+                                2
+                            ),
+
+                        paperAction:
+                            "TAKE_IF_LIVE_MARKET_MATCHES_PATTERN"
+                    };
+                }
             )
             .sort(
                 (
@@ -2796,18 +3042,21 @@ function buildRecommendation(
     return {
 
         status:
-            "ROBUST_CANDIDATES_FOUND",
+            "V118_RISK_QUALIFIED_CANDIDATES_FOUND",
 
         candidateCount:
             analysis.candidateCount,
 
         robustCandidates:
+            analysis.robustCandidates,
+
+        riskQualifiedCandidates:
             ranked.length,
 
-        robustBuyCandidates:
+        riskQualifiedBUY:
             buy.length,
 
-        robustSellCandidates:
+        riskQualifiedSELL:
             sell.length,
 
         bestExpectedValueR:
@@ -2830,22 +3079,34 @@ function buildRecommendation(
                 )
             ),
 
+        bestTradeQualityScore:
+            round(
+                Math.max(
+                    ...ranked.map(
+                        p =>
+                            p.tradeQualityScore
+                    )
+                ),
+                2
+            ),
+
         message:
-            "Robust historical candidates were found, but they remain PAPER candidates and must pass forward paper testing before any live execution.",
+            "V11.8 found statistically robust PAPER candidates and added a minimum 1:2 risk/reward execution policy. No real orders are permitted.",
+
+        paperAction:
+            "WAIT_FOR_LIVE_PATTERN_MATCH",
 
         topBUY:
-            buy
-                .slice(
-                    0,
-                    10
-                ),
+            buy.slice(
+                0,
+                10
+            ),
 
         topSELL:
-            sell
-                .slice(
-                    0,
-                    10
-                )
+            sell.slice(
+                0,
+                10
+            )
     };
 }
 
@@ -2956,8 +3217,7 @@ export default async function handler(
         V11.1 remains the ONLY
         market-data source.
 
-        V11.7 does not directly
-        access INDstocks.
+        No real orders.
         */
 
         const dataset =
@@ -3003,11 +3263,7 @@ export default async function handler(
 
 
         /*
-        Ensure chronological order.
-
-        V11.1 should already return
-        chronological data, but we
-        enforce it here.
+        Enforce chronological order.
         */
 
         rows.sort(
@@ -3036,10 +3292,6 @@ export default async function handler(
             );
 
 
-        /*
-        Candidate summary.
-        */
-
         const allCandidates =
             analysis.candidates;
 
@@ -3065,10 +3317,20 @@ export default async function handler(
 
                         tradeQualityScore:
                             round(
-                                finalTradeScore(
+                                v118TradeScore(
                                     candidate
                                 ),
                                 2
+                            ),
+
+                        riskPlan:
+                            buildRiskPlan(
+                                candidate
+                            ),
+
+                        v118Qualified:
+                            qualifiesForV118(
+                                candidate
                             )
                     })
                 );
@@ -3088,10 +3350,20 @@ export default async function handler(
 
                         tradeQualityScore:
                             round(
-                                finalTradeScore(
+                                v118TradeScore(
                                     candidate
                                 ),
                                 2
+                            ),
+
+                        riskPlan:
+                            buildRiskPlan(
+                                candidate
+                            ),
+
+                        v118Qualified:
+                            qualifiesForV118(
+                                candidate
                             )
                     })
                 );
@@ -3117,36 +3389,6 @@ export default async function handler(
         );
 
 
-        /*
-        Overall dataset statistics.
-        */
-
-        const totalWins =
-            rows.reduce(
-                (
-                    total,
-                    row
-                ) => {
-
-                    const outcome =
-                        getOutcome(row);
-
-                    return (
-                        total +
-                        (
-                            outcome.label ===
-                            "BUY_WIN" ||
-                            outcome.buyOutcome ===
-                            "WIN"
-                                ? 1
-                                : 0
-                        )
-                    );
-                },
-                0
-            );
-
-
         return res.status(200).json({
 
             success:
@@ -3159,7 +3401,7 @@ export default async function handler(
                 "COMPLETED",
 
             mode:
-                "WALK_FORWARD_ROBUSTNESS_LEARNING",
+                "ROBUST_EDGE_RISK_REWARD_LEARNING",
 
             paperOnly:
                 true,
@@ -3179,10 +3421,6 @@ export default async function handler(
                 "V11.1_LEARNING_DATASET",
 
 
-            /*
-            Objective
-            */
-
             objective: {
 
                 primary:
@@ -3192,7 +3430,7 @@ export default async function handler(
                     "MINIMIZE_LOSS",
 
                 tertiary:
-                    "SELECT_STABLE_HIGH_QUALITY_TRADES",
+                    "SELECT_STABLE_HIGH_QUALITY_ASYMMETRIC_TRADES",
 
                 allowNoTrade:
                     true,
@@ -3209,14 +3447,28 @@ export default async function handler(
                 preferredProfitFactor:
                     PREFERRED_PROFIT_FACTOR,
 
+                v118MinimumExpectedValueR:
+                    V118_MIN_EXPECTED_VALUE_R,
+
+                v118MinimumProfitFactor:
+                    V118_MIN_PROFIT_FACTOR,
+
+                v118MinimumRiskReward:
+                    V118_MIN_RISK_REWARD,
+
+                v118PreferredRiskReward:
+                    V118_PREFERRED_RISK_REWARD,
+
+                v118MaximumOpenRiskR:
+                    V118_MAX_OPEN_RISK,
+
+                v118MinimumTradeQualityScore:
+                    V118_MIN_TRADE_SCORE,
+
                 minimumStableFolds:
                     MIN_STABLE_FOLDS
             },
 
-
-            /*
-            Source quality
-            */
 
             sourceStatistics: {
 
@@ -3233,10 +3485,6 @@ export default async function handler(
                     dataset.dataQuality
             },
 
-
-            /*
-            Walk-forward design
-            */
 
             walkForward: {
 
@@ -3256,10 +3504,6 @@ export default async function handler(
                     analysis.folds
             },
 
-
-            /*
-            Pattern results
-            */
 
             learning: {
 
@@ -3286,11 +3530,6 @@ export default async function handler(
             },
 
 
-            /*
-            All candidates ranked by
-            robustness.
-            */
-
             candidates:
                 allCandidates
                     .slice(
@@ -3313,10 +3552,6 @@ export default async function handler(
                     ),
 
 
-            /*
-            Final paper candidates
-            */
-
             robustCandidates: {
 
                 BUY:
@@ -3334,10 +3569,6 @@ export default async function handler(
                         )
             },
 
-
-            /*
-            MAE / MFE status
-            */
 
             riskAnalysis: {
 
@@ -3371,13 +3602,39 @@ export default async function handler(
                     ),
 
                 message:
-                    "MAE/MFE are consumed when supplied by V11.1. If unavailable, V11.7 does not invent them."
+                    "MAE/MFE are consumed when supplied by V11.1. If unavailable, V11.8 uses a clearly labelled 1:2 execution-policy floor and does not pretend that the 1:2 target was historically backtested."
             },
 
 
-            /*
-            Final recommendation
-            */
+            riskRewardSelection: {
+
+                minimumRiskReward:
+                    V118_MIN_RISK_REWARD,
+
+                preferredRiskReward:
+                    V118_PREFERRED_RISK_REWARD,
+
+                maximumOpenRiskR:
+                    V118_MAX_OPEN_RISK,
+
+                minimumExpectedValueR:
+                    V118_MIN_EXPECTED_VALUE_R,
+
+                minimumProfitFactor:
+                    V118_MIN_PROFIT_FACTOR,
+
+                minimumTradeQualityScore:
+                    V118_MIN_TRADE_SCORE,
+
+                riskQualifiedCandidates:
+                    allCandidates.filter(
+                        candidate =>
+                            qualifiesForV118(
+                                candidate
+                            )
+                    ).length
+            },
+
 
             recommendation: {
 
@@ -3397,7 +3654,7 @@ export default async function handler(
     catch (error) {
 
         console.error(
-            "V11.7 ERROR:",
+            "V11.8 ERROR:",
             error
         );
 
