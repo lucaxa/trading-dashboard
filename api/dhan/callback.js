@@ -19,7 +19,8 @@ export default async function handler(req, res) {
       });
     }
 
-    const response = await fetch(
+    // Step 1: Exchange tokenId for Dhan access token
+    const tokenResponse = await fetch(
       `https://auth.dhan.co/app/consumeApp-consent?tokenId=${encodeURIComponent(tokenId)}`,
       {
         method: "POST",
@@ -30,21 +31,50 @@ export default async function handler(req, res) {
       }
     );
 
-    const data = await response.json();
+    const tokenData = await tokenResponse.json();
 
-    if (!response.ok || !data.accessToken) {
+    if (!tokenResponse.ok || !tokenData.accessToken) {
       return res.status(500).json({
         success: false,
-        error: "Failed to generate Dhan access token",
-        details: data
+        error: "Failed to generate Dhan access token"
       });
     }
 
+    const accessToken = tokenData.accessToken;
+
+    // Step 2: Test the access token against Dhan Profile API
+    const profileResponse = await fetch(
+      "https://api.dhan.co/v2/profile",
+      {
+        method: "GET",
+        headers: {
+          "access-token": accessToken
+        }
+      }
+    );
+
+    const profileData = await profileResponse.json();
+
+    if (!profileResponse.ok) {
+      return res.status(500).json({
+        success: false,
+        error: "Access token generated but profile test failed",
+        details: profileData
+      });
+    }
+
+    // Never send the actual access token to the browser
     return res.status(200).json({
       success: true,
-      message: "Dhan authentication successful",
-      dhanClientId: data.dhanClientId,
-      expiryTime: data.expiryTime
+      message: "Dhan authentication and API test successful",
+      dhanClientId: profileData.dhanClientId,
+      tokenValidity: profileData.tokenValidity,
+      activeSegment: profileData.activeSegment,
+      ddpi: profileData.ddpi,
+      mtf: profileData.mtf,
+      dataPlan: profileData.dataPlan,
+      dataValidity: profileData.dataValidity,
+      tokenExpiry: tokenData.expiryTime
     });
 
   } catch (error) {
