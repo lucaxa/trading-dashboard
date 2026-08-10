@@ -1,126 +1,78 @@
 /*
+============================================================
 TradeMind Pro
-V11.8 Robust Edge + Risk/Reward Engine
+V11.9 REAL EXECUTION RISK/REWARD BACKTEST
+============================================================
 
-Evolution:
+V11.9 PURPOSE
 
-V11.1
-Historical Learning Dataset
-        ↓
-V11.2
-Statistical Pattern Learning
-        ↓
-V11.3
-Independent BUY / SELL Learning
-        ↓
-V11.4
-Hierarchical Pattern Learning
-        ↓
-V11.5
-Expected Value Learning
-        ↓
-V11.6
-Selective Trade Quality
-        ↓
-V11.7
-WALK-FORWARD ROBUSTNESS
-        ↓
-V11.8
-ROBUST EDGE + RISK/REWARD SELECTION
-        ↓
-Robust Pattern Candidates
-        ↓
-Risk/Reward Trade Selection
-        ↓
-Future Paper Signal Engine
+V11.8 proved that some patterns can be statistically robust.
 
-PRIMARY OBJECTIVE:
+V11.9 now asks the more important question:
 
-    MAXIMIZE EXPECTED VALUE
+    "Does the actual historical trade make money?"
 
-SECONDARY:
+The existing V11.1 dataset already creates:
 
-    MINIMIZE LOSS
+    Entry
+    1R ATR Stop
+    2R ATR Target
+    BUY outcome
+    SELL outcome
+    MAE
+    MFE
 
-TERTIARY:
+V11.9 uses those ACTUAL historical execution outcomes.
 
-    SELECT ONLY STABLE / ROBUST TRADES
-
-V11.8 ADDITION:
-    REQUIRE POSITIVE OUT-OF-SAMPLE EXPECTED VALUE
-    AND A MINIMUM 1:2 RISK / REWARD EXECUTION PLAN
-
-PAPER ONLY
-NO REAL ORDERS
+NO REAL ORDERS.
+PAPER ONLY.
+============================================================
 */
 
+const VERSION = "V11.9";
 
-const VERSION = "V11.8";
 
-
-// =====================================================
+// ============================================================
 // CONFIGURATION
-// =====================================================
+// ============================================================
 
 const MIN_PATTERN_SAMPLES = 20;
-
 const MIN_DECISIVE_SAMPLES = 12;
 
-const ROBUST_MIN_SAMPLES = 30;
-
 const MIN_FOLD_SAMPLES = 8;
-
 const MIN_FOLD_DECISIVE = 5;
 
-
-// Expected-value thresholds
+const FOLD_COUNT = 4;
+const MIN_STABLE_FOLDS = 3;
 
 const MIN_EXPECTED_VALUE_R = 0.20;
-
 const PREFERRED_EXPECTED_VALUE_R = 0.35;
 
 const MIN_PROFIT_FACTOR = 1.25;
-
 const PREFERRED_PROFIT_FACTOR = 1.50;
 
+const MIN_RISK_REWARD = 2.00;
+const PREFERRED_RISK_REWARD = 2.50;
 
-// V11.8 selective trade gate
+const MIN_TRADE_SCORE = 65;
 
-const V118_MIN_EXPECTED_VALUE_R = 0.35;
-
-const V118_MIN_PROFIT_FACTOR = 1.50;
-
-const V118_MIN_RISK_REWARD = 2.00;
-
-const V118_PREFERRED_RISK_REWARD = 2.50;
-
-const V118_MIN_TRADE_SCORE = 65;
-
-const V118_MAX_OPEN_RISK = 1.00;
+const MIN_TEST_TRADES = 30;
 
 
-// Stability
-
-const MIN_STABLE_FOLDS = 3;
-
-const MIN_FOLD_WIN_RATE = 45;
-
-
-// Walk-forward configuration
-
-const FOLD_COUNT = 4;
-
-
-// Approximate V11.1 trade model
-
-const DEFAULT_WIN_R = 2.0;
-
-const DEFAULT_LOSS_R = 1.5;
-
-
-// =====================================================
+// ============================================================
 // HELPERS
-// =====================================================
+// ============================================================
+
+function safeNumber(value, fallback = 0) {
+
+    const n = Number(value);
+
+    return Number.isFinite(n)
+        ? n
+        : fallback;
+
+}
+
 
 function round(value, decimals = 3) {
 
@@ -128,32 +80,14 @@ function round(value, decimals = 3) {
         return 0;
     }
 
-    const multiplier =
-        Math.pow(10, decimals);
-
-    return (
-        Math.round(
-            value * multiplier
-        ) / multiplier
+    return Number(
+        Number(value).toFixed(decimals)
     );
+
 }
 
 
-function safeNumber(value, fallback = 0) {
-
-    const n =
-        Number(value);
-
-    return Number.isFinite(n)
-        ? n
-        : fallback;
-}
-
-
-function safeRate(
-    wins,
-    total
-) {
+function rate(wins, total) {
 
     if (!total) {
         return 0;
@@ -163,22 +97,7 @@ function safeRate(
         wins /
         total
     ) * 100;
-}
 
-
-function clamp(
-    value,
-    min,
-    max
-) {
-
-    return Math.max(
-        min,
-        Math.min(
-            max,
-            value
-        )
-    );
 }
 
 
@@ -201,29 +120,93 @@ function average(values) {
         ) /
         valid.length
     );
+
 }
 
 
-// =====================================================
-// BUCKET FUNCTIONS
-// =====================================================
+function clamp(
+    value,
+    minimum,
+    maximum
+) {
 
-function bucketRSI(rsi) {
+    return Math.max(
+        minimum,
+        Math.min(
+            maximum,
+            value
+        )
+    );
+
+}
+
+
+// ============================================================
+// BUCKET FUNCTIONS
+// ============================================================
+
+function bucketRSI(value) {
 
     const x =
-        safeNumber(rsi);
+        safeNumber(value);
 
-    if (x < 30) return "RSI_LT30";
-    if (x < 35) return "RSI_30_35";
-    if (x < 40) return "RSI_35_40";
-    if (x < 45) return "RSI_40_45";
-    if (x < 50) return "RSI_45_50";
-    if (x < 55) return "RSI_50_55";
-    if (x < 60) return "RSI_55_60";
-    if (x < 65) return "RSI_60_65";
-    if (x < 70) return "RSI_65_70";
+    if (x < 30)
+        return "RSI_LT30";
+
+    if (x < 35)
+        return "RSI_30_35";
+
+    if (x < 40)
+        return "RSI_35_40";
+
+    if (x < 45)
+        return "RSI_40_45";
+
+    if (x < 50)
+        return "RSI_45_50";
+
+    if (x < 55)
+        return "RSI_50_55";
+
+    if (x < 60)
+        return "RSI_55_60";
+
+    if (x < 65)
+        return "RSI_60_65";
+
+    if (x < 70)
+        return "RSI_65_70";
 
     return "RSI_70_PLUS";
+
+}
+
+
+function bucketVWAP(value) {
+
+    const x =
+        safeNumber(value);
+
+    if (x < -2)
+        return "VWAP_LT_MINUS2";
+
+    if (x < -1)
+        return "VWAP_MINUS2_MINUS1";
+
+    if (x < -0.25)
+        return "VWAP_MINUS1_MINUS025";
+
+    if (x < 0.25)
+        return "VWAP_MINUS025_025";
+
+    if (x < 1)
+        return "VWAP_025_1";
+
+    if (x < 2)
+        return "VWAP_1_2";
+
+    return "VWAP_GT2";
+
 }
 
 
@@ -234,56 +217,20 @@ function bucketSpread(value) {
             safeNumber(value)
         );
 
-    if (x < 0.25) {
+    if (x < 0.25)
         return "SPREAD_LT025";
-    }
 
-    if (x < 0.50) {
+    if (x < 0.50)
         return "SPREAD_025_050";
-    }
 
-    if (x < 0.75) {
+    if (x < 0.75)
         return "SPREAD_050_075";
-    }
 
-    if (x < 1.00) {
+    if (x < 1)
         return "SPREAD_075_100";
-    }
 
     return "SPREAD_1_PLUS";
-}
 
-
-function bucketVWAP(value) {
-
-    const x =
-        safeNumber(value);
-
-    if (x < -2) {
-        return "VWAP_LT_MINUS2";
-    }
-
-    if (x < -1) {
-        return "VWAP_MINUS2_MINUS1";
-    }
-
-    if (x < -0.25) {
-        return "VWAP_MINUS1_MINUS025";
-    }
-
-    if (x < 0.25) {
-        return "VWAP_MINUS025_025";
-    }
-
-    if (x < 1) {
-        return "VWAP_025_1";
-    }
-
-    if (x < 2) {
-        return "VWAP_1_2";
-    }
-
-    return "VWAP_GT2";
 }
 
 
@@ -292,307 +239,92 @@ function bucketTime(hour) {
     const h =
         safeNumber(hour);
 
-    if (h < 10) {
+    if (h < 10)
         return "TIME_OPEN";
-    }
 
-    if (h < 11) {
+    if (h < 11)
         return "TIME_MORNING";
-    }
 
-    if (h < 13) {
+    if (h < 13)
         return "TIME_MIDDAY";
-    }
 
-    if (h < 14) {
+    if (h < 14)
         return "TIME_AFTERNOON";
-    }
 
     return "TIME_CLOSE";
+
 }
 
 
-function bucketTrend(trend) {
+function bucketTrend(value) {
 
-    const value =
+    const text =
         String(
-            trend ||
-            "UNKNOWN"
+            value || ""
         ).toUpperCase();
 
     if (
-        value.includes("BULL")
+        text.includes("BULL")
     ) {
         return "TREND_BULLISH";
     }
 
     if (
-        value.includes("BEAR")
+        text.includes("BEAR")
     ) {
         return "TREND_BEARISH";
     }
 
     if (
-        value.includes("SIDE")
+        text.includes("SIDE")
     ) {
         return "TREND_SIDEWAYS";
     }
 
     return "TREND_OTHER";
+
 }
 
 
-function bucketRegime(regime) {
+function bucketRegime(value) {
 
-    const value =
+    const text =
         String(
-            regime ||
-            "UNKNOWN"
+            value || ""
         ).toUpperCase();
 
     if (
-        value.includes("TREND")
+        text.includes("TREND")
     ) {
         return "REGIME_TRENDING";
     }
 
     if (
-        value.includes("RANGE")
+        text.includes("RANGE")
     ) {
         return "REGIME_RANGING";
     }
 
     if (
-        value.includes("TRANS")
+        text.includes("TRANS")
     ) {
         return "REGIME_TRANSITION";
     }
 
     return "REGIME_OTHER";
+
 }
 
 
-// =====================================================
-// PATTERN GENERATION
-// =====================================================
+// ============================================================
+// PATTERN DESCRIPTORS
+// ============================================================
 
-function buildPattern(
-    row,
-    side,
-    level
-) {
-
-    const rsi =
-        bucketRSI(
-            row.rsi14
-        );
-
-    const vwap =
-        bucketVWAP(
-            row.vwapDistanceATR
-        );
-
-    const spread =
-        bucketSpread(
-            row.emaSpreadATR
-        );
-
-    const time =
-        bucketTime(
-            row.hour
-        );
-
-    const trend =
-        bucketTrend(
-            row.trend
-        );
-
-    const regime =
-        bucketRegime(
-            row.regime
-        );
-
-
-    if (level === 1) {
-
-        const feature =
-            [
-                "rsi",
-                "vwap",
-                "spread",
-                "time",
-                "trend",
-                "regime"
-            ][
-                Math.floor(
-                    safeNumber(
-                        row.__featureSeed,
-                        0
-                    )
-                ) % 6
-            ];
-
-
-        let value;
-
-        if (feature === "rsi") {
-            value = rsi;
-        }
-
-        else if (feature === "vwap") {
-            value = vwap;
-        }
-
-        else if (feature === "spread") {
-            value = spread;
-        }
-
-        else if (feature === "time") {
-            value = time;
-        }
-
-        else if (feature === "trend") {
-            value = trend;
-        }
-
-        else {
-            value = regime;
-        }
-
-
-        return (
-            side +
-            "|" +
-            feature +
-            "=" +
-            value
-        );
-    }
-
-
-    const combinations = [
-
-        [
-            "vwap",
-            vwap,
-            "time",
-            time
-        ],
-
-        [
-            "rsi",
-            rsi,
-            "vwap",
-            vwap
-        ],
-
-        [
-            "trend",
-            trend,
-            "vwap",
-            vwap
-        ],
-
-        [
-            "regime",
-            regime,
-            "vwap",
-            vwap
-        ],
-
-        [
-            "spread",
-            spread,
-            "time",
-            time
-        ],
-
-        [
-            "rsi",
-            rsi,
-            "time",
-            time
-        ],
-
-        [
-            "trend",
-            trend,
-            "time",
-            time
-        ],
-
-        [
-            "regime",
-            regime,
-            "time",
-            time
-        ],
-
-        [
-            "trend",
-            trend,
-            "spread",
-            spread
-        ],
-
-        [
-            "regime",
-            regime,
-            "spread",
-            spread
-        ]
-    ];
-
-
-    const patterns = [];
-
-
-    for (
-        const combination
-        of combinations
-    ) {
-
-        patterns.push({
-
-            key:
-                side +
-                "|" +
-                combination[0] +
-                "=" +
-                combination[1] +
-                "|" +
-                combination[2] +
-                "=" +
-                combination[3],
-
-            side,
-
-            level: 2,
-
-            features: [
-                combination[0],
-                combination[2]
-            ]
-        });
-    }
-
-
-    return patterns;
-}
-
-
-// =====================================================
-// GET ALL PATTERNS FOR ROW
-// =====================================================
-
-function getRowPatterns(
+function getDescriptors(
     row,
     side
 ) {
 
-    const patterns = [];
-
-
     const rsi =
         bucketRSI(
             row.rsi14
@@ -624,8 +356,14 @@ function getRowPatterns(
         );
 
 
-    patterns.push({
+    const descriptors = [];
 
+
+    // -------------------------
+    // LEVEL 1
+    // -------------------------
+
+    descriptors.push({
         key:
             side +
             "|rsi=" +
@@ -638,12 +376,10 @@ function getRowPatterns(
         features: [
             "rsi"
         ]
-
     });
 
 
-    patterns.push({
-
+    descriptors.push({
         key:
             side +
             "|vwap=" +
@@ -656,12 +392,10 @@ function getRowPatterns(
         features: [
             "vwap"
         ]
-
     });
 
 
-    patterns.push({
-
+    descriptors.push({
         key:
             side +
             "|spread=" +
@@ -674,12 +408,10 @@ function getRowPatterns(
         features: [
             "spread"
         ]
-
     });
 
 
-    patterns.push({
-
+    descriptors.push({
         key:
             side +
             "|time=" +
@@ -692,12 +424,10 @@ function getRowPatterns(
         features: [
             "time"
         ]
-
     });
 
 
-    patterns.push({
-
+    descriptors.push({
         key:
             side +
             "|trend=" +
@@ -710,12 +440,10 @@ function getRowPatterns(
         features: [
             "trend"
         ]
-
     });
 
 
-    patterns.push({
-
+    descriptors.push({
         key:
             side +
             "|regime=" +
@@ -728,9 +456,12 @@ function getRowPatterns(
         features: [
             "regime"
         ]
-
     });
 
+
+    // -------------------------
+    // LEVEL 2
+    // -------------------------
 
     const pairs = [
 
@@ -803,6 +534,7 @@ function getRowPatterns(
             "spread",
             spread
         ]
+
     ];
 
 
@@ -811,7 +543,7 @@ function getRowPatterns(
         of pairs
     ) {
 
-        patterns.push({
+        descriptors.push({
 
             key:
                 side +
@@ -834,54 +566,18 @@ function getRowPatterns(
             ]
 
         });
+
     }
 
 
-    return patterns;
+    return descriptors;
+
 }
 
 
-// =====================================================
+// ============================================================
 // OUTCOME
-// =====================================================
-
-function getOutcome(row) {
-
-    if (
-        row &&
-        row.outcome &&
-        typeof row.outcome ===
-            "object"
-    ) {
-
-        return row.outcome;
-    }
-
-
-    return {
-
-        label:
-            row.label ||
-            "NO_TRADE",
-
-        preferredDirection:
-            row.preferredDirection ||
-            "NONE",
-
-        buyOutcome:
-            row.buyOutcome ||
-            "TIMEOUT",
-
-        sellOutcome:
-            row.sellOutcome ||
-            "TIMEOUT"
-    };
-}
-
-
-// =====================================================
-// SIDE OUTCOME
-// =====================================================
+// ============================================================
 
 function getSideOutcome(
     row,
@@ -889,127 +585,142 @@ function getSideOutcome(
 ) {
 
     const outcome =
-        getOutcome(row);
+        row &&
+        row.outcome
+            ? row.outcome
+            : {};
 
     return side === "BUY"
         ? outcome.buyOutcome
         : outcome.sellOutcome;
+
 }
 
 
-// =====================================================
-// MAE / MFE EXTRACTION
-// =====================================================
+// ============================================================
+// ACTUAL EXECUTION EXTRACTION
+// ============================================================
 
-function extractMAE(
+function getExecution(
     row,
     side
 ) {
 
     const outcome =
-        getOutcome(row);
+        row &&
+        row.outcome
+            ? row.outcome
+            : {};
 
 
-    const candidates = [
-
-        side === "BUY"
-            ? outcome.buyMAE
-            : outcome.sellMAE,
-
-        side === "BUY"
-            ? outcome.buyMae
-            : outcome.sellMae,
-
-        side === "BUY"
-            ? outcome.buyMaxAdverseR
-            : outcome.sellMaxAdverseR,
-
-        outcome.maxAdverseR,
-
-        outcome.maeR,
-
-        row.maxAdverseR,
-
-        row.maeR
-    ];
+    const result =
+        getSideOutcome(
+            row,
+            side
+        );
 
 
-    for (
-        const value
-        of candidates
-    ) {
-
-        const n =
-            Number(value);
-
-        if (
-            Number.isFinite(n)
-        ) {
-
-            return Math.abs(n);
-        }
-    }
+    const entry =
+        safeNumber(
+            outcome.entry,
+            row.close
+        );
 
 
-    return null;
+    const risk =
+        safeNumber(
+            outcome.risk,
+            row.atr14
+        );
+
+
+    /*
+    V11.1 historical execution model:
+
+        Risk = 1 ATR
+        Reward = 2 ATR
+
+    Therefore:
+
+        LOSS = -1R
+        WIN  = +2R
+
+    This is now explicitly calculated
+    from the historical execution model.
+    */
+
+    const reward =
+        risk * 2;
+
+
+    return {
+
+        outcome:
+            result,
+
+        entry,
+
+        risk,
+
+        reward,
+
+        riskReward:
+            risk > 0
+                ? reward / risk
+                : 0,
+
+        winR:
+            result === "WIN"
+                ? 2
+                : 0,
+
+        lossR:
+            result === "LOSS"
+                ? 1
+                : 0,
+
+        stop:
+            side === "BUY"
+                ? entry - risk
+                : entry + risk,
+
+        target:
+            side === "BUY"
+                ? entry + reward
+                : entry - reward,
+
+        mae:
+            side === "BUY"
+                ? safeNumber(
+                    outcome.maxAdverseBuy,
+                    NaN
+                )
+                : safeNumber(
+                    outcome.maxAdverseSell,
+                    NaN
+                ),
+
+        mfe:
+            side === "BUY"
+                ? safeNumber(
+                    outcome.maxFavorableBuy,
+                    NaN
+                )
+                : safeNumber(
+                    outcome.maxFavorableSell,
+                    NaN
+                )
+
+    };
+
 }
 
 
-function extractMFE(
-    row,
-    side
-) {
+// ============================================================
+// EMPTY PATTERN
+// ============================================================
 
-    const outcome =
-        getOutcome(row);
-
-
-    const candidates = [
-
-        side === "BUY"
-            ? outcome.buyMFE
-            : outcome.sellMFE,
-
-        side === "BUY"
-            ? outcome.sellMFE
-            : outcome.buyMFE,
-
-        outcome.mfeR,
-
-        outcome.maxFavorableR,
-
-        row.mfeR,
-
-        row.maxFavorableR
-    ];
-
-
-    for (
-        const value
-        of candidates
-    ) {
-
-        const n =
-            Number(value);
-
-        if (
-            Number.isFinite(n)
-        ) {
-
-            return Math.abs(n);
-        }
-    }
-
-
-    return null;
-}
-
-
-// =====================================================
-// CREATE EMPTY PATTERN
-// =====================================================
-
-function emptyPattern(
+function createPattern(
     descriptor
 ) {
 
@@ -1037,54 +748,32 @@ function emptyPattern(
 
         decisive: 0,
 
-        winRate: 0,
-
-        averageWinR: 0,
-
-        averageLossR: 0,
-
         totalWinR: 0,
 
         totalLossR: 0,
 
-        expectedValueR: 0,
+        maeValues: [],
 
-        profitFactor: 0,
+        mfeValues: []
 
-        timeoutRate: 0,
-
-        maeSamples: 0,
-
-        mfeSamples: 0,
-
-        averageMAER: 0,
-
-        averageMFER: 0,
-
-        maxMAER: 0,
-
-        maxMFER: 0
     };
+
 }
 
 
-// =====================================================
+// ============================================================
 // UPDATE PATTERN
-// =====================================================
+// ============================================================
 
 function updatePattern(
     pattern,
     row
 ) {
 
-    const side =
-        pattern.side;
-
-
-    const outcome =
-        getSideOutcome(
+    const execution =
+        getExecution(
             row,
-            side
+            pattern.side
         );
 
 
@@ -1092,124 +781,71 @@ function updatePattern(
 
 
     if (
-        outcome === "WIN"
+        execution.outcome ===
+        "WIN"
     ) {
 
         pattern.wins++;
 
-        const winR =
-            safeNumber(
-                row.winR ??
-                getOutcome(row).winR,
-                DEFAULT_WIN_R
-            );
-
         pattern.totalWinR +=
-            Math.max(
-                0,
-                winR
-            );
+            execution.winR;
+
     }
 
-
     else if (
-        outcome === "LOSS"
+        execution.outcome ===
+        "LOSS"
     ) {
 
         pattern.losses++;
 
-        const lossR =
-            safeNumber(
-                row.lossR ??
-                getOutcome(row).lossR,
-                DEFAULT_LOSS_R
-            );
-
         pattern.totalLossR +=
-            Math.abs(
-                lossR
-            );
-    }
+            execution.lossR;
 
+    }
 
     else {
 
         pattern.timeouts++;
+
     }
-
-
-    const mae =
-        extractMAE(
-            row,
-            side
-        );
 
 
     if (
-        mae !== null
+        Number.isFinite(
+            execution.mae
+        ) &&
+        execution.risk > 0
     ) {
 
-        pattern.maeSamples++;
-
-        pattern.averageMAER =
-            (
-                (
-                    pattern.averageMAER *
-                    (
-                        pattern.maeSamples - 1
-                    )
-                ) +
-                mae
-            ) /
-            pattern.maeSamples;
-
-
-        pattern.maxMAER =
-            Math.max(
-                pattern.maxMAER,
-                mae
-            );
-    }
-
-
-    const mfe =
-        extractMFE(
-            row,
-            side
+        pattern.maeValues.push(
+            execution.mae /
+            execution.risk
         );
+
+    }
 
 
     if (
-        mfe !== null
+        Number.isFinite(
+            execution.mfe
+        ) &&
+        execution.risk > 0
     ) {
 
-        pattern.mfeSamples++;
+        pattern.mfeValues.push(
+            execution.mfe /
+            execution.risk
+        );
 
-        pattern.averageMFER =
-            (
-                (
-                    pattern.averageMFER *
-                    (
-                        pattern.mfeSamples - 1
-                    )
-                ) +
-                mfe
-            ) /
-            pattern.mfeSamples;
-
-
-        pattern.maxMFER =
-            Math.max(
-                pattern.maxMFER,
-                mfe
-            );
     }
+
 }
 
 
-// =====================================================
+// ============================================================
 // FINALIZE PATTERN
-// =====================================================
+// ============================================================
 
 function finalizePattern(
     pattern
@@ -1221,14 +857,14 @@ function finalizePattern(
 
 
     pattern.winRate =
-        safeRate(
+        rate(
             pattern.wins,
             pattern.decisive
         );
 
 
     pattern.timeoutRate =
-        safeRate(
+        rate(
             pattern.timeouts,
             pattern.samples
         );
@@ -1250,38 +886,61 @@ function finalizePattern(
 
     pattern.expectedValueR =
         pattern.samples > 0
-
             ? (
-                (
-                    pattern.wins *
-                    pattern.averageWinR
-                ) -
-                (
-                    pattern.losses *
-                    pattern.averageLossR
-                )
+                pattern.totalWinR -
+                pattern.totalLossR
             ) /
             pattern.samples
-
             : 0;
 
 
     pattern.profitFactor =
         pattern.totalLossR > 0
-
             ? pattern.totalWinR /
               pattern.totalLossR
-
             : 0;
 
 
+    pattern.averageMAER =
+        pattern.maeValues.length
+            ? average(
+                pattern.maeValues
+            )
+            : null;
+
+
+    pattern.averageMFER =
+        pattern.mfeValues.length
+            ? average(
+                pattern.mfeValues
+            )
+            : null;
+
+
+    /*
+    Actual observed MFE/MAE ratio.
+
+    This is supplementary.
+    The actual execution RR remains
+    the 1R stop / 2R target model.
+    */
+
+    pattern.observedRiskReward =
+        pattern.averageMAER > 0 &&
+        pattern.averageMFER !== null
+            ? pattern.averageMFER /
+              pattern.averageMAER
+            : null;
+
+
     return pattern;
+
 }
 
 
-// =====================================================
+// ============================================================
 // DISCOVER PATTERNS
-// =====================================================
+// ============================================================
 
 function discoverPatterns(
     rows
@@ -1296,46 +955,38 @@ function discoverPatterns(
         of rows
     ) {
 
-        const outcome =
-            getOutcome(row);
-
-
-        const sides = [];
-
-
-        if (
-            outcome.buyOutcome ===
-            "WIN" ||
-            outcome.buyOutcome ===
-            "LOSS" ||
-            outcome.buyOutcome ===
-            "TIMEOUT"
-        ) {
-
-            sides.push("BUY");
-        }
-
-
-        if (
-            outcome.sellOutcome ===
-            "WIN" ||
-            outcome.sellOutcome ===
-            "LOSS" ||
-            outcome.sellOutcome ===
-            "TIMEOUT"
-        ) {
-
-            sides.push("SELL");
-        }
-
-
         for (
             const side
-            of sides
+            of [
+                "BUY",
+                "SELL"
+            ]
         ) {
 
+            const outcome =
+                getSideOutcome(
+                    row,
+                    side
+                );
+
+
+            if (
+                ![
+                    "WIN",
+                    "LOSS",
+                    "TIMEOUT"
+                ].includes(
+                    outcome
+                )
+            ) {
+
+                continue;
+
+            }
+
+
             const descriptors =
-                getRowPatterns(
+                getDescriptors(
                     row,
                     side
                 );
@@ -1354,10 +1005,11 @@ function discoverPatterns(
 
                     map.set(
                         descriptor.key,
-                        emptyPattern(
+                        createPattern(
                             descriptor
                         )
                     );
+
                 }
 
 
@@ -1367,8 +1019,11 @@ function discoverPatterns(
                     ),
                     row
                 );
+
             }
+
         }
+
     }
 
 
@@ -1389,7 +1044,9 @@ function discoverPatterns(
             pattern.samples <
             MIN_PATTERN_SAMPLES
         ) {
+
             continue;
+
         }
 
 
@@ -1397,91 +1054,58 @@ function discoverPatterns(
             pattern.decisive <
             MIN_DECISIVE_SAMPLES
         ) {
+
             continue;
+
         }
 
 
         patterns.push(
             pattern
         );
+
     }
 
 
     return patterns;
+
 }
 
 
-// =====================================================
-// BUILD PATTERN MAP
-// =====================================================
+// ============================================================
+// MATCH
+// ============================================================
 
-function buildPatternMap(
-    patterns
+function patternMatches(
+    row,
+    pattern
 ) {
 
-    const map =
-        new Map();
+    return getDescriptors(
+        row,
+        pattern.side
+    ).some(
+        descriptor =>
+            descriptor.key ===
+            pattern.key
+    );
+
+}
 
 
-    for (
-        const pattern
-        of patterns
-    ) {
+// ============================================================
+// PERFORMANCE
+// ============================================================
 
-        map.set(
-            pattern.key,
+function calculatePerformance(
+    rows,
+    pattern
+) {
+
+    const performance =
+        createPattern(
             pattern
         );
-    }
-
-
-    return map;
-}
-
-
-// =====================================================
-// EVALUATE LEARNED PATTERNS
-// =====================================================
-
-function evaluatePatterns(
-    rows,
-    learnedPatterns
-) {
-
-    const patternMap =
-        buildPatternMap(
-            learnedPatterns
-        );
-
-
-    const aggregate = {
-
-        matchedRows: 0,
-
-        wins: 0,
-
-        losses: 0,
-
-        timeouts: 0,
-
-        decisiveTrades: 0,
-
-        totalWinR: 0,
-
-        totalLossR: 0,
-
-        maeSamples: 0,
-
-        mfeSamples: 0,
-
-        totalMAER: 0,
-
-        totalMFER: 0,
-
-        maxMAER: 0,
-
-        maxMFER: 0
-    };
 
 
     for (
@@ -1489,269 +1113,36 @@ function evaluatePatterns(
         of rows
     ) {
 
-        const outcome =
-            getOutcome(row);
-
-
-        const sides = [];
-
-
         if (
-            outcome.preferredDirection ===
-            "BUY"
+            !patternMatches(
+                row,
+                pattern
+            )
         ) {
 
-            sides.push("BUY");
+            continue;
 
         }
 
-        else if (
-            outcome.preferredDirection ===
-            "SELL"
-        ) {
 
-            sides.push("SELL");
+        updatePattern(
+            performance,
+            row
+        );
 
-        }
-
-        else {
-
-            if (
-                outcome.buyOutcome ===
-                "WIN" ||
-                outcome.buyOutcome ===
-                "LOSS"
-            ) {
-
-                sides.push("BUY");
-            }
-
-
-            if (
-                outcome.sellOutcome ===
-                "WIN" ||
-                outcome.sellOutcome ===
-                "LOSS"
-            ) {
-
-                sides.push("SELL");
-            }
-        }
-
-
-        for (
-            const side
-            of sides
-        ) {
-
-            const descriptors =
-                getRowPatterns(
-                    row,
-                    side
-                );
-
-
-            let matched =
-                false;
-
-
-            for (
-                const descriptor
-                of descriptors
-            ) {
-
-                if (
-                    patternMap.has(
-                        descriptor.key
-                    )
-                ) {
-
-                    matched = true;
-
-                    break;
-                }
-            }
-
-
-            if (!matched) {
-                continue;
-            }
-
-
-            aggregate.matchedRows++;
-
-
-            const sideOutcome =
-                getSideOutcome(
-                    row,
-                    side
-                );
-
-
-            if (
-                sideOutcome ===
-                "WIN"
-            ) {
-
-                aggregate.wins++;
-
-                const winR =
-                    safeNumber(
-                        row.winR ??
-                        outcome.winR,
-                        DEFAULT_WIN_R
-                    );
-
-                aggregate.totalWinR +=
-                    Math.max(
-                        0,
-                        winR
-                    );
-            }
-
-
-            else if (
-                sideOutcome ===
-                "LOSS"
-            ) {
-
-                aggregate.losses++;
-
-                const lossR =
-                    safeNumber(
-                        row.lossR ??
-                        outcome.lossR,
-                        DEFAULT_LOSS_R
-                    );
-
-                aggregate.totalLossR +=
-                    Math.abs(
-                        lossR
-                    );
-            }
-
-
-            else {
-
-                aggregate.timeouts++;
-            }
-
-
-            const mae =
-                extractMAE(
-                    row,
-                    side
-                );
-
-
-            if (
-                mae !== null
-            ) {
-
-                aggregate.maeSamples++;
-
-                aggregate.totalMAER +=
-                    mae;
-
-                aggregate.maxMAER =
-                    Math.max(
-                        aggregate.maxMAER,
-                        mae
-                    );
-            }
-
-
-            const mfe =
-                extractMFE(
-                    row,
-                    side
-                );
-
-
-            if (
-                mfe !== null
-            ) {
-
-                aggregate.mfeSamples++;
-
-                aggregate.totalMFER +=
-                    mfe;
-
-                aggregate.maxMFER =
-                    Math.max(
-                        aggregate.maxMFER,
-                        mfe
-                    );
-            }
-        }
     }
 
 
-    aggregate.decisiveTrades =
-        aggregate.wins +
-        aggregate.losses;
+    return finalizePattern(
+        performance
+    );
 
-
-    aggregate.winRate =
-        safeRate(
-            aggregate.wins,
-            aggregate.decisiveTrades
-        );
-
-
-    aggregate.timeoutRate =
-        safeRate(
-            aggregate.timeouts,
-            aggregate.matchedRows
-        );
-
-
-    aggregate.expectedValueR =
-        aggregate.matchedRows > 0
-
-            ? (
-                aggregate.totalWinR -
-                aggregate.totalLossR
-            ) /
-            aggregate.matchedRows
-
-            : 0;
-
-
-    aggregate.profitFactor =
-        aggregate.totalLossR > 0
-
-            ? aggregate.totalWinR /
-              aggregate.totalLossR
-
-            : 0;
-
-
-    aggregate.averageMAER =
-        aggregate.maeSamples > 0
-
-            ? aggregate.totalMAER /
-              aggregate.maeSamples
-
-            : null;
-
-
-    aggregate.averageMFER =
-        aggregate.mfeSamples > 0
-
-            ? aggregate.totalMFER /
-              aggregate.mfeSamples
-
-            : null;
-
-
-    return aggregate;
 }
 
 
-// =====================================================
-// WALK-FORWARD FOLD CREATION
-// =====================================================
+// ============================================================
+// WALK FORWARD FOLDS
+// ============================================================
 
 function createWalkForwardFolds(
     rows
@@ -1759,9 +1150,6 @@ function createWalkForwardFolds(
 
     const total =
         rows.length;
-
-
-    const folds = [];
 
 
     const minimumTraining =
@@ -1783,6 +1171,9 @@ function createWalkForwardFolds(
                 FOLD_COUNT
             )
         );
+
+
+    const folds = [];
 
 
     for (
@@ -1811,7 +1202,9 @@ function createWalkForwardFolds(
             trainEnd >=
             total
         ) {
+
             break;
+
         }
 
 
@@ -1819,7 +1212,9 @@ function createWalkForwardFolds(
             testEnd <=
             trainEnd
         ) {
+
             continue;
+
         }
 
 
@@ -1827,18 +1222,6 @@ function createWalkForwardFolds(
 
             fold:
                 i + 1,
-
-            trainingStart:
-                0,
-
-            trainingEnd:
-                trainEnd,
-
-            testStart:
-                trainEnd,
-
-            testEnd:
-                testEnd,
 
             trainingRows:
                 rows.slice(
@@ -1851,241 +1234,20 @@ function createWalkForwardFolds(
                     trainEnd,
                     testEnd
                 )
+
         });
+
     }
 
 
     return folds;
+
 }
 
 
-// =====================================================
-// FOLD PATTERN PERFORMANCE
-// =====================================================
-
-function patternFoldPerformance(
-    rows,
-    pattern
-) {
-
-    let samples = 0;
-
-    let wins = 0;
-
-    let losses = 0;
-
-    let timeouts = 0;
-
-    let totalWinR = 0;
-
-    let totalLossR = 0;
-
-    let totalMAE = 0;
-
-    let maeSamples = 0;
-
-    let totalMFE = 0;
-
-    let mfeSamples = 0;
-
-
-    for (
-        const row
-        of rows
-    ) {
-
-        const outcome =
-            getOutcome(row);
-
-
-        const side =
-            pattern.side;
-
-
-        const descriptors =
-            getRowPatterns(
-                row,
-                side
-            );
-
-
-        const matched =
-            descriptors.some(
-                descriptor =>
-                    descriptor.key ===
-                    pattern.key
-            );
-
-
-        if (!matched) {
-            continue;
-        }
-
-
-        samples++;
-
-
-        const sideOutcome =
-            getSideOutcome(
-                row,
-                side
-            );
-
-
-        if (
-            sideOutcome ===
-            "WIN"
-        ) {
-
-            wins++;
-
-            totalWinR +=
-                Math.max(
-                    0,
-                    safeNumber(
-                        row.winR ??
-                        outcome.winR,
-                        DEFAULT_WIN_R
-                    )
-                );
-        }
-
-
-        else if (
-            sideOutcome ===
-            "LOSS"
-        ) {
-
-            losses++;
-
-            totalLossR +=
-                Math.abs(
-                    safeNumber(
-                        row.lossR ??
-                        outcome.lossR,
-                        DEFAULT_LOSS_R
-                    )
-                );
-        }
-
-
-        else {
-
-            timeouts++;
-        }
-
-
-        const mae =
-            extractMAE(
-                row,
-                side
-            );
-
-
-        if (
-            mae !== null
-        ) {
-
-            totalMAE += mae;
-
-            maeSamples++;
-        }
-
-
-        const mfe =
-            extractMFE(
-                row,
-                side
-            );
-
-
-        if (
-            mfe !== null
-        ) {
-
-            totalMFE += mfe;
-
-            mfeSamples++;
-        }
-    }
-
-
-    const decisive =
-        wins +
-        losses;
-
-
-    const expectedValueR =
-        samples > 0
-
-            ? (
-                totalWinR -
-                totalLossR
-            ) /
-            samples
-
-            : 0;
-
-
-    const profitFactor =
-        totalLossR > 0
-
-            ? totalWinR /
-              totalLossR
-
-            : 0;
-
-
-    return {
-
-        samples,
-
-        wins,
-
-        losses,
-
-        timeouts,
-
-        decisive,
-
-        winRate:
-            safeRate(
-                wins,
-                decisive
-            ),
-
-        timeoutRate:
-            safeRate(
-                timeouts,
-                samples
-            ),
-
-        totalWinR,
-
-        totalLossR,
-
-        expectedValueR,
-
-        profitFactor,
-
-        averageMAER:
-            maeSamples > 0
-                ? totalMAE /
-                  maeSamples
-                : null,
-
-        averageMFER:
-            mfeSamples > 0
-                ? totalMFE /
-                  mfeSamples
-                : null
-    };
-}
-
-
-// =====================================================
-// WALK-FORWARD ANALYSIS
-// =====================================================
+// ============================================================
+// WALK FORWARD ANALYSIS
+// ============================================================
 
 function walkForwardAnalysis(
     rows
@@ -2093,12 +1255,6 @@ function walkForwardAnalysis(
 
     const folds =
         createWalkForwardFolds(
-            rows
-        );
-
-
-    const discovered =
-        discoverPatterns(
             rows
         );
 
@@ -2124,18 +1280,10 @@ function walkForwardAnalysis(
         const eligible =
             trainingPatterns.filter(
                 pattern =>
-
                     pattern.samples >=
-                    ROBUST_MIN_SAMPLES &&
-
+                        MIN_PATTERN_SAMPLES &&
                     pattern.decisive >=
-                    MIN_DECISIVE_SAMPLES &&
-
-                    pattern.expectedValueR >=
-                    MIN_EXPECTED_VALUE_R &&
-
-                    pattern.profitFactor >=
-                    MIN_PROFIT_FACTOR
+                        MIN_DECISIVE_SAMPLES
             );
 
 
@@ -2154,23 +1302,15 @@ function walkForwardAnalysis(
                     pattern.key,
                     {
 
-                        key:
-                            pattern.key,
-
-                        side:
-                            pattern.side,
-
-                        level:
-                            pattern.level,
-
-                        features:
-                            pattern.features,
+                        ...pattern,
 
                         foldsSeen: 0,
 
-                        foldDetails: [],
+                        stableFolds: 0,
 
-                        trainExpectedValues: [],
+                        positiveFolds: 0,
+
+                        testSamples: 0,
 
                         testExpectedValues: [],
 
@@ -2178,13 +1318,11 @@ function walkForwardAnalysis(
 
                         testWinRates: [],
 
-                        testSamples: 0,
+                        foldDetails: []
 
-                        stableFolds: 0,
-
-                        positiveFolds: 0
                     }
                 );
+
             }
 
 
@@ -2195,90 +1333,13 @@ function walkForwardAnalysis(
 
 
             const testPerformance =
-                patternFoldPerformance(
+                calculatePerformance(
                     fold.testRows,
                     pattern
                 );
 
 
             candidate.foldsSeen++;
-
-
-            candidate.foldDetails.push({
-
-                fold:
-                    fold.fold,
-
-                trainingSamples:
-                    pattern.samples,
-
-                trainingWinRate:
-                    round(
-                        pattern.winRate
-                    ),
-
-                trainingExpectedValueR:
-                    round(
-                        pattern.expectedValueR
-                    ),
-
-                trainingProfitFactor:
-                    round(
-                        pattern.profitFactor
-                    ),
-
-                testSamples:
-                    testPerformance.samples,
-
-                testWins:
-                    testPerformance.wins,
-
-                testLosses:
-                    testPerformance.losses,
-
-                testTimeouts:
-                    testPerformance.timeouts,
-
-                testWinRate:
-                    round(
-                        testPerformance.winRate
-                    ),
-
-                testExpectedValueR:
-                    round(
-                        testPerformance.expectedValueR
-                    ),
-
-                testProfitFactor:
-                    round(
-                        testPerformance.profitFactor
-                    ),
-
-                testAverageMAER:
-                    testPerformance.averageMAER !==
-                    null
-
-                        ? round(
-                            testPerformance.averageMAER
-                        )
-
-                        : null,
-
-                testAverageMFER:
-                    testPerformance.averageMFER !==
-                    null
-
-                        ? round(
-                            testPerformance.averageMFER
-                        )
-
-                        : null
-            });
-
-
-            candidate.trainExpectedValues.push(
-                pattern.expectedValueR
-            );
 
 
             candidate.testExpectedValues.push(
@@ -2298,9 +1359,9 @@ function walkForwardAnalysis(
 
             if (
                 testPerformance.samples >=
-                MIN_FOLD_SAMPLES &&
+                    MIN_FOLD_SAMPLES &&
                 testPerformance.decisive >=
-                MIN_FOLD_DECISIVE
+                    MIN_FOLD_DECISIVE
             ) {
 
                 candidate.testSamples +=
@@ -2313,6 +1374,7 @@ function walkForwardAnalysis(
                 ) {
 
                     candidate.positiveFolds++;
+
                 }
 
 
@@ -2322,8 +1384,100 @@ function walkForwardAnalysis(
                 ) {
 
                     candidate.stableFolds++;
+
                 }
+
             }
+
+
+            candidate.foldDetails.push({
+
+                fold:
+                    fold.fold,
+
+                trainingSamples:
+                    pattern.samples,
+
+                trainingWinRate:
+                    round(
+                        pattern.winRate,
+                        3
+                    ),
+
+                trainingExpectedValueR:
+                    round(
+                        pattern.expectedValueR,
+                        3
+                    ),
+
+                trainingProfitFactor:
+                    round(
+                        pattern.profitFactor,
+                        3
+                    ),
+
+                testSamples:
+                    testPerformance.samples,
+
+                testWins:
+                    testPerformance.wins,
+
+                testLosses:
+                    testPerformance.losses,
+
+                testTimeouts:
+                    testPerformance.timeouts,
+
+                testWinRate:
+                    round(
+                        testPerformance.winRate,
+                        3
+                    ),
+
+                testExpectedValueR:
+                    round(
+                        testPerformance.expectedValueR,
+                        3
+                    ),
+
+                testProfitFactor:
+                    round(
+                        testPerformance.profitFactor,
+                        3
+                    ),
+
+                testAverageMAER:
+                    testPerformance.averageMAER ===
+                    null
+                        ? null
+                        : round(
+                            testPerformance.averageMAER,
+                            3
+                        ),
+
+                testAverageMFER:
+                    testPerformance.averageMFER ===
+                    null
+                        ? null
+                        : round(
+                            testPerformance.averageMFER,
+                            3
+                        ),
+
+                testObservedRiskReward:
+                    testPerformance.observedRiskReward ===
+                    null
+                        ? null
+                        : round(
+                            testPerformance.observedRiskReward,
+                            3
+                        ),
+
+                actualExecutionRiskReward:
+                    2
+
+            });
+
         }
 
 
@@ -2343,7 +1497,9 @@ function walkForwardAnalysis(
 
             eligiblePatterns:
                 eligible.length
+
         });
+
     }
 
 
@@ -2367,7 +1523,7 @@ function walkForwardAnalysis(
             );
 
 
-        const averageTestWR =
+        const averageTestWinRate =
             average(
                 candidate.testWinRates
             );
@@ -2375,45 +1531,104 @@ function walkForwardAnalysis(
 
         const minimumTestEV =
             candidate.testExpectedValues.length
-
                 ? Math.min(
                     ...candidate.testExpectedValues
                 )
-
                 : 0;
 
 
         const maximumTestEV =
             candidate.testExpectedValues.length
-
                 ? Math.max(
                     ...candidate.testExpectedValues
                 )
-
                 : 0;
 
 
         const foldStability =
             candidate.foldsSeen > 0
-
-                ? (
-                    candidate.stableFolds /
-                    candidate.foldsSeen
-                )
-
+                ? candidate.stableFolds /
+                  candidate.foldsSeen
                 : 0;
 
 
         const positiveFoldRate =
             candidate.foldsSeen > 0
-
-                ? (
-                    candidate.positiveFolds /
-                    candidate.foldsSeen
-                )
-
+                ? candidate.positiveFolds /
+                  candidate.foldsSeen
                 : 0;
 
+
+        /*
+        Actual execution RR is fixed by
+        the historical V11.1 execution model:
+
+            1R risk
+            2R reward
+
+        */
+
+        const actualExecutionRR =
+            MIN_RISK_REWARD;
+
+
+        const observedRRValues =
+            candidate.foldDetails
+                .map(
+                    fold =>
+                        Number(
+                            fold.testObservedRiskReward
+                        )
+                )
+                .filter(
+                    Number.isFinite
+                );
+
+
+        const observedRR =
+            observedRRValues.length
+                ? average(
+                    observedRRValues
+                )
+                : null;
+
+
+        candidate.averageTestEV =
+            averageTestEV;
+
+        candidate.averageTestPF =
+            averageTestPF;
+
+        candidate.averageTestWinRate =
+            averageTestWinRate;
+
+        candidate.minimumTestEV =
+            minimumTestEV;
+
+        candidate.maximumTestEV =
+            maximumTestEV;
+
+        candidate.foldStability =
+            foldStability;
+
+        candidate.positiveFoldRate =
+            positiveFoldRate;
+
+        candidate.testSampleCount =
+            candidate.testSamples;
+
+
+        candidate.actualExecutionRiskReward =
+            actualExecutionRR;
+
+
+        candidate.observedRiskReward =
+            observedRR;
+
+
+        /*
+        Score components.
+        */
 
         const evScore =
             clamp(
@@ -2470,69 +1685,66 @@ function walkForwardAnalysis(
             );
 
 
-        candidate.averageTestEV =
-            averageTestEV;
-
-
-        candidate.averageTestPF =
-            averageTestPF;
-
-
-        candidate.averageTestWinRate =
-            averageTestWR;
-
-
-        candidate.minimumTestEV =
-            minimumTestEV;
-
-
-        candidate.maximumTestEV =
-            maximumTestEV;
-
-
-        candidate.foldStability =
-            foldStability;
-
-
-        candidate.positiveFoldRate =
-            positiveFoldRate;
-
-
-        candidate.testSampleCount =
-            candidate.testSamples;
-
-
-        candidate.observedRiskReward =
-            observedRiskReward(candidate);
-
-        candidate.riskPlan =
-            buildRiskPlan(candidate);
+        const rrScore =
+            clamp(
+                (
+                    actualExecutionRR -
+                    MIN_RISK_REWARD
+                ) /
+                (
+                    PREFERRED_RISK_REWARD -
+                    MIN_RISK_REWARD
+                ),
+                0,
+                1
+            );
 
 
         candidate.robustnessScore =
+
             (
                 evScore *
                 30
             ) +
+
             (
                 pfScore *
                 20
             ) +
+
             (
                 stabilityScore *
-                25
+                20
             ) +
+
             (
                 positiveScore *
                 15
             ) +
+
             (
                 sampleScore *
+                5
+            ) +
+
+            (
+                rrScore *
                 10
             );
 
 
+        candidate.tradeQualityScore =
+            candidate.robustnessScore;
+
+
+        /*
+        ROBUST candidate.
+
+        Every requirement must pass.
+        */
+
         candidate.robust =
+
             candidate.foldsSeen >=
             MIN_STABLE_FOLDS &&
 
@@ -2549,12 +1761,16 @@ function walkForwardAnalysis(
             MIN_PROFIT_FACTOR &&
 
             candidate.testSamples >=
-            30;
+            MIN_TEST_TRADES &&
+
+            actualExecutionRR >=
+            MIN_RISK_REWARD;
 
 
         candidates.push(
             candidate
         );
+
     }
 
 
@@ -2563,8 +1779,8 @@ function walkForwardAnalysis(
             a,
             b
         ) =>
-            b.robustnessScore -
-            a.robustnessScore
+            b.tradeQualityScore -
+            a.tradeQualityScore
     );
 
 
@@ -2578,286 +1794,257 @@ function walkForwardAnalysis(
 
         robustCandidates:
             candidates.filter(
-                c =>
-                    c.robust
+                candidate =>
+                    candidate.robust
             ).length,
 
         robustBuyCandidates:
             candidates.filter(
-                c =>
-                    c.robust &&
-                    c.side === "BUY"
+                candidate =>
+                    candidate.robust &&
+                    candidate.side ===
+                    "BUY"
             ).length,
 
         robustSellCandidates:
             candidates.filter(
-                c =>
-                    c.robust &&
-                    c.side === "SELL"
+                candidate =>
+                    candidate.robust &&
+                    candidate.side ===
+                    "SELL"
             ).length,
 
         candidates
+
     };
+
 }
 
 
-// =====================================================
-// V11.8 RISK / REWARD QUALIFICATION
-// =====================================================
+// ============================================================
+// ACTUAL TRADE-BY-TRADE BACKTEST
+// ============================================================
 
-function observedRiskReward(candidate) {
+function executionBacktest(
+    rows,
+    pattern
+) {
 
-    const foldDetails =
-        Array.isArray(candidate.foldDetails)
-            ? candidate.foldDetails
-            : [];
+    let equityR = 0;
 
-    const mfe = foldDetails
-        .map(
-            fold =>
-                safeNumber(
-                    fold.testAverageMFER,
-                    NaN
-                )
-        )
-        .filter(
-            Number.isFinite
-        );
+    let peakR = 0;
 
-    const mae = foldDetails
-        .map(
-            fold =>
-                safeNumber(
-                    fold.testAverageMAER,
-                    NaN
-                )
-        )
-        .filter(
-            Number.isFinite
-        );
+    let maxDrawdownR = 0;
 
-    if (
-        !mfe.length ||
-        !mae.length
+    let wins = 0;
+
+    let losses = 0;
+
+    let timeouts = 0;
+
+    let trades = 0;
+
+    let consecutiveLosses = 0;
+
+    let maxConsecutiveLosses = 0;
+
+
+    const tradeResults = [];
+
+
+    for (
+        const row
+        of rows
     ) {
-        return null;
+
+        if (
+            !patternMatches(
+                row,
+                pattern
+            )
+        ) {
+
+            continue;
+
+        }
+
+
+        const execution =
+            getExecution(
+                row,
+                pattern.side
+            );
+
+
+        if (
+            execution.outcome ===
+            "WIN"
+        ) {
+
+            equityR += 2;
+
+            wins++;
+
+            trades++;
+
+            consecutiveLosses = 0;
+
+            tradeResults.push(
+                2
+            );
+
+        }
+
+        else if (
+            execution.outcome ===
+            "LOSS"
+        ) {
+
+            equityR -= 1;
+
+            losses++;
+
+            trades++;
+
+            consecutiveLosses++;
+
+            maxConsecutiveLosses =
+                Math.max(
+                    maxConsecutiveLosses,
+                    consecutiveLosses
+                );
+
+            tradeResults.push(
+                -1
+            );
+
+        }
+
+        else {
+
+            timeouts++;
+
+            /*
+            TIMEOUT is not counted
+            as a loss.
+
+            It remains a neutral
+            non-decisive trade.
+            */
+
+        }
+
+
+        peakR =
+            Math.max(
+                peakR,
+                equityR
+            );
+
+
+        maxDrawdownR =
+            Math.max(
+                maxDrawdownR,
+                peakR -
+                equityR
+            );
+
     }
 
-    const averageMFE =
-        average(mfe);
 
-    const averageMAE =
-        average(mae);
-
-    if (
-        !(averageMAE > 0)
-    ) {
-        return null;
-    }
-
-    return (
-        averageMFE /
-        averageMAE
-    );
-}
+    const decisiveTrades =
+        wins +
+        losses;
 
 
-// =====================================================
-// V11.8 RISK PLAN
-// =====================================================
-
-function buildRiskPlan(candidate) {
-
-    const observedRR =
-        observedRiskReward(
-            candidate
-        );
+    const totalWinR =
+        wins * 2;
 
 
-    /*
-    If historical MAE/MFE exists,
-    use it.
-
-    Otherwise we use a clearly
-    labelled execution policy floor.
-    */
-
-    const effectiveRR =
-        observedRR !== null
-            ? observedRR
-            : V118_MIN_RISK_REWARD;
-
-
-    const riskRewardSource =
-        observedRR !== null
-            ? "WALK_FORWARD_MAE_MFE"
-            : "EXECUTION_POLICY_NOT_BACKTESTED";
-
-
-    const riskRewardQualified =
-        observedRR === null ||
-        observedRR >=
-        V118_MIN_RISK_REWARD;
-
-
-    const riskScore =
-        clamp(
-            (
-                effectiveRR -
-                V118_MIN_RISK_REWARD
-            ) /
-            (
-                V118_PREFERRED_RISK_REWARD -
-                V118_MIN_RISK_REWARD
-            ),
-            0,
-            1
-        );
+    const totalLossR =
+        losses * 1;
 
 
     return {
 
-        riskPerTradeR:
-            V118_MAX_OPEN_RISK,
+        trades,
 
-        minimumRewardR:
-            V118_MIN_RISK_REWARD,
+        wins,
 
-        preferredRewardR:
-            V118_PREFERRED_RISK_REWARD,
+        losses,
 
-        plannedMinimumRR:
-            `${V118_MIN_RISK_REWARD}:1`,
+        timeouts,
 
-        plannedPreferredRR:
-            `${V118_PREFERRED_RISK_REWARD}:1`,
+        decisiveTrades,
 
-        observedRiskReward:
-            observedRR !== null
-                ? round(
-                    observedRR,
-                    2
-                )
-                : null,
-
-        effectiveRiskReward:
-            round(
-                effectiveRR,
-                2
+        winRate:
+            rate(
+                wins,
+                decisiveTrades
             ),
 
-        riskRewardSource,
+        totalWinR,
 
-        riskRewardQualified,
+        totalLossR,
 
-        riskScore:
-            round(
-                riskScore * 100,
-                2
-            ),
+        netR:
+            equityR,
 
-        executionRule:
-            "Risk 1R maximum; reject the setup if a 2R target cannot be reasonably defined; prefer 2.5R+ when market structure permits.",
+        expectedValueR:
+            trades > 0
+                ? equityR /
+                  trades
+                : 0,
 
-        stopRule:
-            "Stop must be defined before entry. Do not widen the initial stop after entry.",
+        profitFactor:
+            totalLossR > 0
+                ? totalWinR /
+                  totalLossR
+                : 0,
 
-        profitRule:
-            "At +1R, protect the position; allow the remaining position to seek the planned 2R+ objective."
+        maxDrawdownR,
+
+        maxConsecutiveLosses,
+
+        finalEquityR:
+            equityR,
+
+        executionRiskReward:
+            2,
+
+        stopR:
+            1,
+
+        targetR:
+            2,
+
+        preferredTargetR:
+            2.5,
+
+        tradeResults
+
     };
+
 }
 
 
-// =====================================================
-// V11.8 TRADE QUALITY SCORE
-// =====================================================
+// ============================================================
+// QUALIFICATION
+// ============================================================
 
-function v118TradeScore(
+function qualifiesForV119(
     candidate
 ) {
-
-    const base =
-        finalTradeScore(
-            candidate
-        );
-
-
-    const evScore =
-        clamp(
-            (
-                candidate.averageTestEV -
-                V118_MIN_EXPECTED_VALUE_R
-            ) /
-            (
-                PREFERRED_EXPECTED_VALUE_R -
-                V118_MIN_EXPECTED_VALUE_R
-            ),
-            0,
-            1
-        );
-
-
-    const pfScore =
-        clamp(
-            (
-                candidate.averageTestPF -
-                V118_MIN_PROFIT_FACTOR
-            ) /
-            (
-                PREFERRED_PROFIT_FACTOR -
-                V118_MIN_PROFIT_FACTOR
-            ),
-            0,
-            1
-        );
-
-
-    const riskPlan =
-        buildRiskPlan(
-            candidate
-        );
-
-
-    const riskScore =
-        riskPlan.riskScore /
-        100;
-
-
-    return (
-        base * 0.60
-    ) + (
-        evScore * 15
-    ) + (
-        pfScore * 15
-    ) + (
-        riskScore * 10
-    );
-}
-
-
-// =====================================================
-// V11.8 QUALIFICATION
-// =====================================================
-
-function qualifiesForV118(
-    candidate
-) {
-
-    const riskPlan =
-        buildRiskPlan(
-            candidate
-        );
-
 
     return (
 
         candidate.robust === true &&
 
         candidate.averageTestEV >=
-            V118_MIN_EXPECTED_VALUE_R &&
+            MIN_EXPECTED_VALUE_R &&
 
         candidate.averageTestPF >=
-            V118_MIN_PROFIT_FACTOR &&
+            MIN_PROFIT_FACTOR &&
 
         candidate.positiveFolds >=
             MIN_STABLE_FOLDS &&
@@ -2866,254 +2053,22 @@ function qualifiesForV118(
             MIN_STABLE_FOLDS &&
 
         candidate.testSamples >=
-            ROBUST_MIN_SAMPLES &&
+            MIN_TEST_TRADES &&
 
-        riskPlan.riskRewardQualified &&
+        candidate.actualExecutionRiskReward >=
+            MIN_RISK_REWARD &&
 
-        v118TradeScore(
-            candidate
-        ) >=
-            V118_MIN_TRADE_SCORE
+        candidate.tradeQualityScore >=
+            MIN_TRADE_SCORE
+
     );
+
 }
 
 
-// =====================================================
-// FINAL TRADE QUALITY SCORE
-// =====================================================
-
-function finalTradeScore(
-    candidate
-) {
-
-    const ev =
-        clamp(
-            (
-                candidate.averageTestEV -
-                MIN_EXPECTED_VALUE_R
-            ) /
-            0.75,
-            0,
-            1
-        );
-
-
-    const pf =
-        clamp(
-            (
-                candidate.averageTestPF -
-                MIN_PROFIT_FACTOR
-            ) /
-            1.5,
-            0,
-            1
-        );
-
-
-    const stability =
-        clamp(
-            candidate.foldStability,
-            0,
-            1
-        );
-
-
-    const positive =
-        clamp(
-            candidate.positiveFoldRate,
-            0,
-            1
-        );
-
-
-    return (
-        ev * 35
-    ) +
-    (
-        pf * 25
-    ) +
-    (
-        stability * 25
-    ) +
-    (
-        positive * 15
-    );
-}
-
-
-// =====================================================
-// FINAL RECOMMENDATION
-// =====================================================
-
-function buildRecommendation(
-    analysis
-) {
-
-    const robust =
-        analysis.candidates.filter(
-            candidate =>
-                qualifiesForV118(
-                    candidate
-                )
-        );
-
-
-    if (
-        !robust.length
-    ) {
-
-        return {
-
-            status:
-                "NO_V118_EDGE",
-
-            candidateCount:
-                analysis.candidateCount,
-
-            robustCandidates:
-                analysis.robustCandidates,
-
-            riskQualifiedCandidates:
-                0,
-
-            message:
-                "No candidate currently satisfies the V11.8 out-of-sample EV, profit-factor, stability and minimum 1:2 risk/reward rules. PAPER NO-TRADE.",
-
-            paperAction:
-                "NO_TRADE"
-        };
-    }
-
-
-    const ranked =
-        robust
-            .map(
-                candidate => {
-
-                    const riskPlan =
-                        buildRiskPlan(
-                            candidate
-                        );
-
-
-                    return {
-
-                        ...candidate,
-
-                        riskPlan,
-
-                        tradeQualityScore:
-                            round(
-                                v118TradeScore(
-                                    candidate
-                                ),
-                                2
-                            ),
-
-                        paperAction:
-                            "TAKE_IF_LIVE_MARKET_MATCHES_PATTERN"
-                    };
-                }
-            )
-            .sort(
-                (
-                    a,
-                    b
-                ) =>
-                    b.tradeQualityScore -
-                    a.tradeQualityScore
-            );
-
-
-    const buy =
-        ranked.filter(
-            p =>
-                p.side === "BUY"
-        );
-
-
-    const sell =
-        ranked.filter(
-            p =>
-                p.side === "SELL"
-        );
-
-
-    return {
-
-        status:
-            "V118_RISK_QUALIFIED_CANDIDATES_FOUND",
-
-        candidateCount:
-            analysis.candidateCount,
-
-        robustCandidates:
-            analysis.robustCandidates,
-
-        riskQualifiedCandidates:
-            ranked.length,
-
-        riskQualifiedBUY:
-            buy.length,
-
-        riskQualifiedSELL:
-            sell.length,
-
-        bestExpectedValueR:
-            round(
-                Math.max(
-                    ...ranked.map(
-                        p =>
-                            p.averageTestEV
-                    )
-                )
-            ),
-
-        bestProfitFactor:
-            round(
-                Math.max(
-                    ...ranked.map(
-                        p =>
-                            p.averageTestPF
-                    )
-                )
-            ),
-
-        bestTradeQualityScore:
-            round(
-                Math.max(
-                    ...ranked.map(
-                        p =>
-                            p.tradeQualityScore
-                    )
-                ),
-                2
-            ),
-
-        message:
-            "V11.8 found statistically robust PAPER candidates and added a minimum 1:2 risk/reward execution policy. No real orders are permitted.",
-
-        paperAction:
-            "WAIT_FOR_LIVE_PATTERN_MATCH",
-
-        topBUY:
-            buy.slice(
-                0,
-                10
-            ),
-
-        topSELL:
-            sell.slice(
-                0,
-                10
-            )
-    };
-}
-
-
-// =====================================================
-// FETCH V11.1 DATA
-// =====================================================
+// ============================================================
+// FETCH LEARNING DATASET
+// ============================================================
 
 async function fetchLearningDataset(
     req,
@@ -3121,7 +2076,9 @@ async function fetchLearningDataset(
 ) {
 
     const protocol =
-        req.headers["x-forwarded-proto"] ||
+        req.headers[
+            "x-forwarded-proto"
+        ] ||
         "https";
 
 
@@ -3134,6 +2091,7 @@ async function fetchLearningDataset(
         throw new Error(
             "Unable to determine Vercel host"
         );
+
     }
 
 
@@ -3150,11 +2108,14 @@ async function fetchLearningDataset(
         );
 
 
-    if (!response.ok) {
+    if (
+        !response.ok
+    ) {
 
         throw new Error(
-            `V11.1 dataset request failed: ${response.status}`
+            `Learning dataset request failed: ${response.status}`
         );
+
     }
 
 
@@ -3168,8 +2129,9 @@ async function fetchLearningDataset(
     ) {
 
         throw new Error(
-            "V11.1 learning dataset returned unsuccessful response"
+            "Learning dataset returned unsuccessful response"
         );
+
     }
 
 
@@ -3180,18 +2142,223 @@ async function fetchLearningDataset(
     ) {
 
         throw new Error(
-            "V11.1 did not return learning rows"
+            "Learning dataset did not return rows"
         );
+
     }
 
 
     return data;
+
 }
 
 
-// =====================================================
+// ============================================================
+// RECOMMENDATION
+// ============================================================
+
+function buildRecommendation(
+    analysis,
+    rows
+) {
+
+    const qualified =
+        analysis.candidates
+            .filter(
+                qualifiesForV119
+            )
+            .map(
+                candidate => ({
+
+                    ...candidate,
+
+                    executionBacktest:
+                        executionBacktest(
+                            rows,
+                            candidate
+                        ),
+
+                    riskPlan: {
+
+                        riskPerTradeR:
+                            1,
+
+                        stopR:
+                            1,
+
+                        minimumTargetR:
+                            2,
+
+                        preferredTargetR:
+                            2.5,
+
+                        actualExecutionRiskReward:
+                            2,
+
+                        observedMFERiskReward:
+                            candidate.observedRiskReward,
+
+                        riskRewardSource:
+                            "ACTUAL_V11_1_EXECUTION_MODEL",
+
+                        riskRewardQualified:
+                            true,
+
+                        stopRule:
+                            "Stop is fixed at 1R. Never widen the initial stop.",
+
+                        profitRule:
+                            "Base target is 2R. Prefer 2.5R only when market structure supports it."
+
+                    }
+
+                })
+            );
+
+
+    qualified.sort(
+        (
+            a,
+            b
+        ) =>
+            b.tradeQualityScore -
+            a.tradeQualityScore
+    );
+
+
+    const buy =
+        qualified.filter(
+            candidate =>
+                candidate.side ===
+                "BUY"
+        );
+
+
+    const sell =
+        qualified.filter(
+            candidate =>
+                candidate.side ===
+                "SELL"
+        );
+
+
+    if (
+        !qualified.length
+    ) {
+
+        return {
+
+            status:
+                "NO_V119_EXECUTION_EDGE",
+
+            candidateCount:
+                analysis.candidateCount,
+
+            robustCandidates:
+                analysis.robustCandidates,
+
+            riskQualifiedCandidates:
+                0,
+
+            riskQualifiedBUY:
+                0,
+
+            riskQualifiedSELL:
+                0,
+
+            paperAction:
+                "NO_TRADE",
+
+            message:
+                "No pattern passed the V11.9 real execution backtest. PAPER NO-TRADE."
+
+        };
+
+    }
+
+
+    return {
+
+        status:
+            "V119_EXECUTION_EDGE_FOUND",
+
+        candidateCount:
+            analysis.candidateCount,
+
+        robustCandidates:
+            analysis.robustCandidates,
+
+        riskQualifiedCandidates:
+            qualified.length,
+
+        riskQualifiedBUY:
+            buy.length,
+
+        riskQualifiedSELL:
+            sell.length,
+
+        bestExpectedValueR:
+            round(
+                Math.max(
+                    ...qualified.map(
+                        candidate =>
+                            candidate.averageTestEV
+                    )
+                ),
+                3
+            ),
+
+        bestProfitFactor:
+            round(
+                Math.max(
+                    ...qualified.map(
+                        candidate =>
+                            candidate.averageTestPF
+                    )
+                ),
+                3
+            ),
+
+        bestTradeQualityScore:
+            round(
+                Math.max(
+                    ...qualified.map(
+                        candidate =>
+                            candidate.tradeQualityScore
+                    )
+                ),
+                2
+            ),
+
+        actualExecutionModel:
+            "1R STOP / 2R TARGET",
+
+        paperAction:
+            "WAIT_FOR_LIVE_PATTERN_MATCH",
+
+        message:
+            "V11.9 found patterns with positive walk-forward expected value and an actual historical 1R stop / 2R target execution model.",
+
+        topBUY:
+            buy.slice(
+                0,
+                5
+            ),
+
+        topSELL:
+            sell.slice(
+                0,
+                5
+            )
+
+    };
+
+}
+
+
+// ============================================================
 // MAIN HANDLER
-// =====================================================
+// ============================================================
 
 export default async function handler(
     req,
@@ -3206,7 +2373,7 @@ export default async function handler(
                 Math.min(
                     30,
                     Number(
-                        req.query.days ||
+                        req.query?.days ||
                         30
                     )
                 )
@@ -3214,10 +2381,9 @@ export default async function handler(
 
 
         /*
-        V11.1 remains the ONLY
-        market-data source.
-
-        No real orders.
+        --------------------------------------------------------
+        FETCH HISTORICAL DATA
+        --------------------------------------------------------
         */
 
         const dataset =
@@ -3228,7 +2394,20 @@ export default async function handler(
 
 
         const rows =
-            dataset.rows;
+            dataset.rows
+                .slice()
+                .sort(
+                    (
+                        a,
+                        b
+                    ) =>
+                        safeNumber(
+                            a.timestamp
+                        ) -
+                        safeNumber(
+                            b.timestamp
+                        )
+                );
 
 
         if (
@@ -3236,49 +2415,44 @@ export default async function handler(
             300
         ) {
 
-            return res.status(400).json({
+            return res
+                .status(400)
+                .json({
 
-                success:
-                    false,
+                    success:
+                        false,
 
-                version:
-                    VERSION,
+                    version:
+                        VERSION,
 
-                error:
-                    "Not enough historical rows for walk-forward analysis.",
+                    status:
+                        "INSUFFICIENT_DATA",
 
-                learningRows:
-                    rows.length,
+                    error:
+                        "Not enough historical rows for walk-forward execution testing.",
 
-                minimumRows:
-                    300,
+                    learningRows:
+                        rows.length,
 
-                paperOnly:
-                    true,
+                    minimumRows:
+                        300,
 
-                realOrders:
-                    false
-            });
+                    paperOnly:
+                        true,
+
+                    realOrders:
+                        false
+
+                });
+
         }
 
 
         /*
-        Enforce chronological order.
+        --------------------------------------------------------
+        WALK FORWARD
+        --------------------------------------------------------
         */
-
-        rows.sort(
-            (
-                a,
-                b
-            ) =>
-                safeNumber(
-                    a.timestamp
-                ) -
-                safeNumber(
-                    b.timestamp
-                )
-        );
-
 
         const analysis =
             walkForwardAnalysis(
@@ -3286,395 +2460,320 @@ export default async function handler(
             );
 
 
+        /*
+        --------------------------------------------------------
+        ACTUAL EXECUTION RECOMMENDATION
+        --------------------------------------------------------
+        */
+
         const recommendation =
             buildRecommendation(
-                analysis
+                analysis,
+                rows
             );
 
 
-        const allCandidates =
-            analysis.candidates;
+        /*
+        --------------------------------------------------------
+        QUALIFIED CANDIDATES
+        --------------------------------------------------------
+        */
 
-
-        const robustCandidates =
-            allCandidates.filter(
-                candidate =>
-                    candidate.robust
-            );
-
-
-        const buyCandidates =
-            robustCandidates
+        const qualifiedCandidates =
+            analysis.candidates
                 .filter(
-                    candidate =>
-                        candidate.side ===
-                        "BUY"
+                    qualifiesForV119
                 )
                 .map(
                     candidate => ({
 
                         ...candidate,
 
-                        tradeQualityScore:
-                            round(
-                                v118TradeScore(
-                                    candidate
-                                ),
-                                2
-                            ),
-
-                        riskPlan:
-                            buildRiskPlan(
+                        executionBacktest:
+                            executionBacktest(
+                                rows,
                                 candidate
                             ),
 
-                        v118Qualified:
-                            qualifiesForV118(
-                                candidate
-                            )
+                        riskPlan: {
+
+                            riskPerTradeR:
+                                1,
+
+                            minimumRewardR:
+                                2,
+
+                            preferredRewardR:
+                                2.5,
+
+                            actualExecutionRiskReward:
+                                2,
+
+                            observedRiskReward:
+                                candidate.observedRiskReward,
+
+                            riskRewardSource:
+                                "ACTUAL_V11_1_EXECUTION_MODEL",
+
+                            riskRewardQualified:
+                                true
+
+                        }
+
                     })
                 );
 
 
-        const sellCandidates =
-            robustCandidates
-                .filter(
-                    candidate =>
-                        candidate.side ===
-                        "SELL"
-                )
-                .map(
-                    candidate => ({
+        /*
+        --------------------------------------------------------
+        FINAL RESPONSE
+        --------------------------------------------------------
+        */
 
-                        ...candidate,
+        return res
+            .status(200)
+            .json({
 
-                        tradeQualityScore:
-                            round(
-                                v118TradeScore(
-                                    candidate
-                                ),
-                                2
-                            ),
-
-                        riskPlan:
-                            buildRiskPlan(
-                                candidate
-                            ),
-
-                        v118Qualified:
-                            qualifiesForV118(
-                                candidate
-                            )
-                    })
-                );
-
-
-        buyCandidates.sort(
-            (
-                a,
-                b
-            ) =>
-                b.tradeQualityScore -
-                a.tradeQualityScore
-        );
-
-
-        sellCandidates.sort(
-            (
-                a,
-                b
-            ) =>
-                b.tradeQualityScore -
-                a.tradeQualityScore
-        );
-
-
-        return res.status(200).json({
-
-            success:
-                true,
-
-            version:
-                VERSION,
-
-            status:
-                "COMPLETED",
-
-            mode:
-                "ROBUST_EDGE_RISK_REWARD_LEARNING",
-
-            paperOnly:
-                true,
-
-            realOrders:
-                false,
-
-            instrument:
-                "NIFTY 50",
-
-            interval:
-                "5minute",
-
-            requestedDays,
-
-            source:
-                "V11.1_LEARNING_DATASET",
-
-
-            objective: {
-
-                primary:
-                    "MAXIMIZE_EXPECTED_VALUE",
-
-                secondary:
-                    "MINIMIZE_LOSS",
-
-                tertiary:
-                    "SELECT_STABLE_HIGH_QUALITY_ASYMMETRIC_TRADES",
-
-                allowNoTrade:
+                success:
                     true,
 
-                minimumExpectedValueR:
-                    MIN_EXPECTED_VALUE_R,
+                version:
+                    VERSION,
 
-                preferredExpectedValueR:
-                    PREFERRED_EXPECTED_VALUE_R,
+                status:
+                    "COMPLETED",
 
-                minimumProfitFactor:
-                    MIN_PROFIT_FACTOR,
+                mode:
+                    "REAL_EXECUTION_RISK_REWARD_BACKTEST",
 
-                preferredProfitFactor:
-                    PREFERRED_PROFIT_FACTOR,
-
-                v118MinimumExpectedValueR:
-                    V118_MIN_EXPECTED_VALUE_R,
-
-                v118MinimumProfitFactor:
-                    V118_MIN_PROFIT_FACTOR,
-
-                v118MinimumRiskReward:
-                    V118_MIN_RISK_REWARD,
-
-                v118PreferredRiskReward:
-                    V118_PREFERRED_RISK_REWARD,
-
-                v118MaximumOpenRiskR:
-                    V118_MAX_OPEN_RISK,
-
-                v118MinimumTradeQualityScore:
-                    V118_MIN_TRADE_SCORE,
-
-                minimumStableFolds:
-                    MIN_STABLE_FOLDS
-            },
-
-
-            sourceStatistics: {
-
-                candlesTested:
-                    dataset.candlesTested,
-
-                learningRows:
-                    dataset.learningRows,
-
-                tradingDays:
-                    dataset.tradingDays,
-
-                dataQuality:
-                    dataset.dataQuality
-            },
-
-
-            walkForward: {
-
-                foldCount:
-                    analysis.folds.length,
-
-                chronological:
+                paperOnly:
                     true,
 
-                shuffled:
+                realOrders:
                     false,
 
-                expandingTrainingWindow:
-                    true,
+                instrument:
+                    "NIFTY 50",
 
-                folds:
-                    analysis.folds
-            },
+                interval:
+                    "5minute",
 
+                requestedDays,
 
-            learning: {
+                /*
+                ------------------------------------------------
+                OBJECTIVE
+                ------------------------------------------------
+                */
 
-                minimumPatternSamples:
-                    MIN_PATTERN_SAMPLES,
+                objective: {
 
-                minimumDecisiveSamples:
-                    MIN_DECISIVE_SAMPLES,
+                    primary:
+                        "ACTUAL_EXECUTION_EXPECTANCY",
 
-                robustMinimumSamples:
-                    ROBUST_MIN_SAMPLES,
+                    secondary:
+                        "MINIMIZE_DRAWDOWN",
 
-                patternsDiscovered:
-                    analysis.candidateCount,
+                    tertiary:
+                        "MAXIMIZE_ASYMMETRIC_WINNING_TRADES",
 
-                robustPatterns:
-                    analysis.robustCandidates,
+                    allowNoTrade:
+                        true,
 
-                robustBuyPatterns:
-                    analysis.robustBuyCandidates,
+                    minimumExpectedValueR:
+                        MIN_EXPECTED_VALUE_R,
 
-                robustSellPatterns:
-                    analysis.robustSellCandidates
-            },
+                    preferredExpectedValueR:
+                        PREFERRED_EXPECTED_VALUE_R,
 
+                    minimumProfitFactor:
+                        MIN_PROFIT_FACTOR,
 
-            candidates:
-                allCandidates
-                    .slice(
-                        0,
-                        50
-                    )
-                    .map(
-                        candidate => ({
+                    preferredProfitFactor:
+                        PREFERRED_PROFIT_FACTOR,
 
-                            ...candidate,
+                    minimumRiskReward:
+                        MIN_RISK_REWARD,
 
-                            tradeQualityScore:
-                                round(
-                                    finalTradeScore(
-                                        candidate
-                                    ),
-                                    2
-                                )
-                        })
-                    ),
+                    preferredRiskReward:
+                        PREFERRED_RISK_REWARD,
+
+                    minimumTradeQualityScore:
+                        MIN_TRADE_SCORE
+
+                },
 
 
-            robustCandidates: {
+                /*
+                ------------------------------------------------
+                SOURCE
+                ------------------------------------------------
+                */
 
-                BUY:
-                    buyCandidates
+                sourceStatistics: {
+
+                    candlesTested:
+                        dataset.candlesTested,
+
+                    learningRows:
+                        dataset.learningRows,
+
+                    tradingDays:
+                        dataset.tradingDays,
+
+                    dataQuality:
+                        dataset.dataQuality
+
+                },
+
+
+                /*
+                ------------------------------------------------
+                WALK FORWARD
+                ------------------------------------------------
+                */
+
+                walkForward: {
+
+                    foldCount:
+                        analysis.folds.length,
+
+                    chronological:
+                        true,
+
+                    shuffled:
+                        false,
+
+                    expandingTrainingWindow:
+                        true,
+
+                    folds:
+                        analysis.folds
+
+                },
+
+
+                /*
+                ------------------------------------------------
+                LEARNING
+                ------------------------------------------------
+                */
+
+                learning: {
+
+                    minimumPatternSamples:
+                        MIN_PATTERN_SAMPLES,
+
+                    minimumDecisiveSamples:
+                        MIN_DECISIVE_SAMPLES,
+
+                    patternsDiscovered:
+                        analysis.candidateCount,
+
+                    robustPatterns:
+                        analysis.robustCandidates,
+
+                    robustBuyPatterns:
+                        analysis.robustBuyCandidates,
+
+                    robustSellPatterns:
+                        analysis.robustSellCandidates
+
+                },
+
+
+                /*
+                ------------------------------------------------
+                CANDIDATES
+                ------------------------------------------------
+                */
+
+                candidates:
+                    analysis.candidates
                         .slice(
                             0,
-                            15
+                            50
                         ),
 
-                SELL:
-                    sellCandidates
-                        .slice(
-                            0,
-                            15
-                        )
-            },
 
+                /*
+                ------------------------------------------------
+                V11.9 EXECUTION RESULTS
+                ------------------------------------------------
+                */
 
-            riskAnalysis: {
+                executionBacktest: {
 
-                objective:
-                    "MINIMIZE_LOSS_AND_MAXIMIZE_FAVORABLE_MOVE",
+                    model:
+                        "1R STOP / 2R TARGET",
 
-                maeAvailable:
-                    rows.some(
-                        row =>
-                            extractMAE(
-                                row,
-                                "BUY"
-                            ) !== null ||
-                            extractMAE(
-                                row,
-                                "SELL"
-                            ) !== null
-                    ),
+                    stopR:
+                        1,
 
-                mfeAvailable:
-                    rows.some(
-                        row =>
-                            extractMFE(
-                                row,
-                                "BUY"
-                            ) !== null ||
-                            extractMFE(
-                                row,
-                                "SELL"
-                            ) !== null
-                    ),
+                    targetR:
+                        2,
 
-                message:
-                    "MAE/MFE are consumed when supplied by V11.1. If unavailable, V11.8 uses a clearly labelled 1:2 execution-policy floor and does not pretend that the 1:2 target was historically backtested."
-            },
+                    preferredTargetR:
+                        2.5,
 
+                    note:
+                        "Historical execution outcomes are taken from the V11.1 dataset. A WIN is +2R and a LOSS is -1R.",
 
-            riskRewardSelection: {
+                    qualifiedCandidateCount:
+                        qualifiedCandidates.length,
 
-                minimumRiskReward:
-                    V118_MIN_RISK_REWARD,
-
-                preferredRiskReward:
-                    V118_PREFERRED_RISK_REWARD,
-
-                maximumOpenRiskR:
-                    V118_MAX_OPEN_RISK,
-
-                minimumExpectedValueR:
-                    V118_MIN_EXPECTED_VALUE_R,
-
-                minimumProfitFactor:
-                    V118_MIN_PROFIT_FACTOR,
-
-                minimumTradeQualityScore:
-                    V118_MIN_TRADE_SCORE,
-
-                riskQualifiedCandidates:
-                    allCandidates.filter(
-                        candidate =>
-                            qualifiesForV118(
-                                candidate
+                    qualifiedCandidates:
+                        qualifiedCandidates
+                            .slice(
+                                0,
+                                10
                             )
-                    ).length
-            },
+
+                },
 
 
-            recommendation: {
+                /*
+                ------------------------------------------------
+                FINAL RECOMMENDATION
+                ------------------------------------------------
+                */
 
-                ...recommendation,
+                recommendation
+
+            });
+
+
+    }
+
+    catch (
+        error
+    ) {
+
+        return res
+            .status(500)
+            .json({
+
+                success:
+                    false,
+
+                version:
+                    VERSION,
+
+                status:
+                    "ERROR",
+
+                error:
+                    error?.message ||
+                    String(error),
 
                 paperOnly:
                     true,
 
                 realOrders:
                     false
-            }
 
-        });
+            });
 
     }
 
-    catch (error) {
-
-        console.error(
-            "V11.8 ERROR:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            success:
-                false,
-
-            version:
-                VERSION,
-
-            error:
-                error.message,
-
-            paperOnly:
-                true,
-
-            realOrders:
-                false
-        });
-    }
 }
