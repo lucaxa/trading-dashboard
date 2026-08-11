@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.7 — EDGE PIPELINE DIAGNOSTIC ENGINE
+ V14.8 — CORE EDGE EVIDENCE ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,12 +12,12 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.7 PURPOSE
+ V14.8 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
 
- V14.7 DOES NOT loosen profitability thresholds.
+ V14.8 DOES NOT loosen profitability thresholds.
 
  Instead it makes the complete candidate pipeline visible:
 
@@ -39,7 +39,7 @@
       ↓
    TRUE OOS
 
- Main V14.7 changes:
+ Main V14.8 changes:
  1. Explicit candidate-flow diagnostics
  2. Every qualified candidate gets a diagnostic status
  3. Exact reason for family/pattern rejection
@@ -59,13 +59,13 @@
 17. Paper only
 
  IMPORTANT:
- V14.7 is diagnostic, NOT a strategy-loosening version.
+ V14.8 is an evidence-grouping version, NOT a strategy-loosening version.
 ===========================================================
 */
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.7";
+    const VERSION = "V14.8";
 
     try {
 
@@ -141,7 +141,7 @@ export default async function handler(req, res) {
         const MAX_PATTERN_CONCENTRATION = 0.70;
 
         // =====================================================
-        // V14.7 DIVERSIFICATION LIMITS
+        // V14.8 DIVERSIFICATION LIMITS
         // Explicitly defined.
         // =====================================================
 
@@ -1495,6 +1495,26 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
+        // V14.8 CORE PATTERN
+        // Primary evidence groups by the underlying edge:
+        // side + setup + trend + VWAP direction.
+        // Regime, time bucket and RSI remain in the detailed
+        // fingerprint for diagnostics but no longer fragment
+        // the primary learning sample.
+        function corePatternKey(
+            side,
+            setup,
+            f
+        ) {
+
+            return [
+                side,
+                `S:${setup}`,
+                `T:${f.trend}`,
+                `V:${f.vwapDirection}`
+            ].join("|");
+        }
+
         // =====================================================
         // TRADE EVALUATION
         // =====================================================
@@ -1758,6 +1778,13 @@ export default async function handler(req, res) {
 
                 pattern:
                     patternKey(
+                        side,
+                        setup,
+                        f
+                    ),
+
+                corePattern:
+                    corePatternKey(
                         side,
                         setup,
                         f
@@ -2068,6 +2095,9 @@ export default async function handler(req, res) {
             const patternMap =
                 new Map();
 
+            const corePatternMap =
+                new Map();
+
             const rawRecords = [];
 
             const stop =
@@ -2140,6 +2170,21 @@ export default async function handler(req, res) {
 
                     patternMap
                         .get(record.pattern)
+                        .push(record);
+
+                    if (
+                        !corePatternMap.has(
+                            record.corePattern
+                        )
+                    ) {
+                        corePatternMap.set(
+                            record.corePattern,
+                            []
+                        );
+                    }
+
+                    corePatternMap
+                        .get(record.corePattern)
                         .push(record);
                 }
             }
@@ -2410,11 +2455,41 @@ export default async function handler(req, res) {
                 );
             }
 
+            const corePatterns = [];
+
+            for (
+                const [
+                    key,
+                    records
+                ] of corePatternMap
+            ) {
+
+                const summary =
+                    summarize(
+                        key,
+                        records,
+                        "PATTERN"
+                    );
+
+                summary.contextVariants =
+                    new Set(
+                        records.map(
+                            x => x.pattern
+                        )
+                    ).size;
+
+                corePatterns.push(
+                    summary
+                );
+            }
+
             return {
 
                 families,
 
                 patterns,
+
+                corePatterns,
 
                 rawRecords
             };
@@ -2608,6 +2683,14 @@ export default async function handler(req, res) {
                 for (const setup of setups) {
 
                     const key =
+                        corePatternKey(
+                            setup.side,
+                            setup.setup,
+                            f
+                        );
+
+                    
+                    const detailedPattern =
                         patternKey(
                             setup.side,
                             setup.setup,
@@ -2733,6 +2816,8 @@ export default async function handler(req, res) {
 
                         pattern:
                             key,
+
+                        detailedPattern,
 
                         family:
                             currentFamily,
@@ -2888,7 +2973,7 @@ export default async function handler(req, res) {
 
             const validationResults = [];
 
-            // V14.7: validation survivors promoted from the
+            // V14.8: validation survivors promoted from the
             // candidate pipeline are collected here.
             const candidates = [];
 
@@ -2898,7 +2983,9 @@ export default async function handler(req, res) {
                 );
 
             const qualifiedPatterns =
-                discovery.patterns.filter(
+                safeArray(
+                    discovery.corePatterns
+                ).filter(
                     x => x.qualified
                 );
 
@@ -3026,7 +3113,7 @@ export default async function handler(req, res) {
                 }
 
                 /*
-                 * This is the important V14.7 distinction:
+                 * This is the important V14.8 distinction:
                  *
                  * A candidate reaching this point is explicitly
                  * counted as a VALIDATION CANDIDATE.
@@ -3442,7 +3529,7 @@ export default async function handler(req, res) {
                 ) {
 
                     const key =
-                        patternKey(
+                        corePatternKey(
                             setup.side,
                             setup.setup,
                             f
@@ -4308,12 +4395,19 @@ export default async function handler(req, res) {
                     ).length,
 
                 discoveredPatterns:
-                    discovery.patterns.length,
+                    safeArray(
+                        discovery.corePatterns
+                    ).length,
 
                 qualifiedPatterns:
-                    discovery.patterns.filter(
+                    safeArray(
+                        discovery.corePatterns
+                    ).filter(
                         x => x.qualified
                     ).length,
+
+                detailedPatterns:
+                    discovery.patterns.length,
 
                 validationCandidates:
                     promoted
@@ -4662,7 +4756,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.7 edge has survived discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
+                "No V14.8 edge has survived discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -4693,6 +4787,14 @@ export default async function handler(req, res) {
             ) {
 
                 const key =
+                    corePatternKey(
+                        setup.side,
+                        setup.setup,
+                        currentFeatures
+                    );
+
+                
+                const detailedPattern =
                     patternKey(
                         setup.side,
                         setup.setup,
@@ -4781,6 +4883,8 @@ export default async function handler(req, res) {
                     pattern:
                         key,
 
+                    detailedPattern,
+
                     family,
 
                     learningLevel:
@@ -4836,7 +4940,7 @@ export default async function handler(req, res) {
                         currentMarket,
 
                     reason:
-                        "V14.7 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
+                        "V14.8 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
 
                     nextAction:
                         "PAPER_REVIEW_ONLY"
@@ -4972,7 +5076,9 @@ export default async function handler(req, res) {
 
         for (
             const pattern of
-            finalDiscovery.patterns
+            safeArray(
+                finalDiscovery.corePatterns
+            )
         ) {
 
             if (
@@ -5044,17 +5150,21 @@ export default async function handler(req, res) {
                         .length,
 
                 discoveredPatterns:
-                    finalDiscovery
-                        .patterns
-                        .length,
+                    safeArray(
+                        finalDiscovery.corePatterns
+                    ).length,
 
                 qualifiedPatterns:
+                    safeArray(
+                        finalDiscovery.corePatterns
+                    ).filter(
+                        x =>
+                            x.qualified
+                    ).length,
+
+                detailedPatterns:
                     finalDiscovery
                         .patterns
-                        .filter(
-                            x =>
-                                x.qualified
-                        )
                         .length,
 
                 totalQualified:
@@ -5119,7 +5229,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_7_ANTI_OVERFITTING_EDGE_PIPELINE_DIAGNOSTIC_TRUE_WALK_FORWARD",
+                "V14_8_CORE_EDGE_EVIDENCE_GROUPING_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -5723,7 +5833,7 @@ export default async function handler(req, res) {
     } catch (error) {
 
         console.error(
-            "TradeMind Pro V14.7 ERROR:",
+            "TradeMind Pro V14.8 ERROR:",
             error
         );
 
