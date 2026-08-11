@@ -4688,4 +4688,1880 @@ export default async function handler(req, res) {
                         : "PASSED_SINGLE_FAMILY"
             };
         }
+             // =====================================================
+        // HISTORICAL API FETCH
+        // =====================================================
+
+        async function fetchHistoricalChunk(
+            accessToken,
+            startMs,
+            endMs
+        ) {
+
+            const url =
+                `${API_BASE}/market/historical/${INTERVAL}` +
+                `?scrip-codes=${encodeURIComponent(
+                    SCRIP_CODE
+                )}` +
+                `&start_time=${startMs}` +
+                `&end_time=${endMs}`;
+
+            const response =
+                await fetch(
+                    url,
+                    {
+                        method: "GET",
+
+                        headers: {
+
+                            Authorization:
+                                accessToken,
+
+                            "Content-Type":
+                                "application/json"
+                        }
+                    }
+                );
+
+            const text =
+                await response.text();
+
+            let payload;
+
+            try {
+
+                payload =
+                    JSON.parse(text);
+
+            } catch {
+
+                payload = {
+                    raw: text
+                };
+            }
+
+            if (
+                !response.ok
+            ) {
+
+                throw new Error(
+                    `INDstocks historical API failed: HTTP ${response.status} ${text}`
+                );
+            }
+
+            return payload;
+        }
+
+        // =====================================================
+        // LOAD HISTORICAL DATA
+        // =====================================================
+
+        async function loadHistoricalData() {
+
+            const accessToken =
+                (
+                    process.env.INDSTOCKS_TOKEN ||
+                    process.env.INDSTOCKS_ACCESS_TOKEN ||
+                    ""
+                ).trim();
+
+            if (!accessToken) {
+
+                throw new Error(
+                    "INDSTOCKS_TOKEN is not configured."
+                );
+            }
+
+            const endMs =
+                Date.now();
+
+            const startMs =
+                endMs -
+                REQUESTED_DAYS *
+                24 *
+                60 *
+                60 *
+                1000;
+
+            const MAX_CHUNK_MS =
+                7 *
+                24 *
+                60 *
+                60 *
+                1000;
+
+            const chunks = [];
+
+            let cursor =
+                startMs;
+
+            while (
+                cursor <
+                endMs
+            ) {
+
+                const chunkEnd =
+                    Math.min(
+                        cursor +
+                        MAX_CHUNK_MS -
+                        1000,
+                        endMs
+                    );
+
+                chunks.push({
+
+                    start:
+                        cursor,
+
+                    end:
+                        chunkEnd
+                });
+
+                cursor =
+                    chunkEnd + 1000;
+            }
+
+            const all = [];
+
+            for (
+                const chunk
+                of chunks
+            ) {
+
+                const payload =
+                    await fetchHistoricalChunk(
+                        accessToken,
+                        chunk.start,
+                        chunk.end
+                    );
+
+                const extracted =
+                    extractRows(
+                        payload
+                    );
+
+                all.push(
+                    ...extracted
+                );
+            }
+
+            const prepared =
+                prepareData(all);
+
+            return {
+
+                chunksRequested:
+                    chunks.length,
+
+                rawCandles:
+                    all.length,
+
+                normalizedCandles:
+                    prepared.length,
+
+                deduplicated:
+                    all.length -
+                    prepared.length,
+
+                candles:
+                    prepared
+            };
+        }
+
+        // =====================================================
+        // LOAD MARKET DATA
+        // =====================================================
+
+        const historicalData =
+            await loadHistoricalData();
+
+        const rows =
+            historicalData.candles;
+
+        if (
+            rows.length < 500
+        ) {
+
+            return fail(
+                "Insufficient candle data from INDstocks.",
+                {
+
+                    rawCandles:
+                        historicalData.rawCandles,
+
+                    normalizedCandles:
+                        historicalData.normalizedCandles,
+
+                    minimumRequired:
+                        500
+                }
+            );
+        }
+
+        // =====================================================
+        // CURRENT CANDLE EXCLUSION
+        // =====================================================
+
+        /*
+         * The most recent candle is NEVER used for:
+         *
+         * - discovery
+         * - validation
+         * - OOS learning
+         *
+         * It is used only for current-market analysis.
+         */
+
+        const currentCandle =
+            rows[
+                rows.length - 1
+            ];
+
+        const historicalCandles =
+            rows.slice(
+                0,
+                -1
+            );
+
+        // =====================================================
+        // WALK-FORWARD CONFIGURATION
+        // =====================================================
+
+        const total =
+            historicalCandles.length;
+
+        const foldCount =
+            6;
+
+        const initialTraining =
+            250;
+
+        const remaining =
+            total -
+            initialTraining;
+
+        const testSize =
+            Math.floor(
+                remaining /
+                foldCount
+            );
+
+        const folds = [];
+
+        let trainingEnd =
+            initialTraining;
+
+        for (
+            let fold = 1;
+            fold <= foldCount;
+            fold++
+        ) {
+
+            const testStart =
+                trainingEnd;
+
+            const testEnd =
+                fold === foldCount
+                    ? total
+                    : Math.min(
+                        total,
+                        testStart +
+                        testSize
+                    );
+
+            if (
+                testStart >=
+                testEnd
+            ) {
+
+                break;
+            }
+
+            folds.push({
+
+                fold,
+
+                trainingStart:
+                    0,
+
+                trainingEnd,
+
+                testStart,
+
+                testEnd,
+
+                trainingRows:
+                    trainingEnd,
+
+                testRows:
+                    testEnd -
+                    testStart
+            });
+
+            trainingEnd =
+                testEnd;
+        }
+
+        // =====================================================
+        // WALK-FORWARD EXECUTION
+        // =====================================================
+
+        const foldResults = [];
+
+        const allTrades = [];
+
+        let profitableFolds =
+            0;
+
+        for (
+            const fold
+            of folds
+        ) {
+
+            /*
+             * -------------------------------------------------
+             * TRAINING WINDOW
+             * -------------------------------------------------
+             *
+             * Example:
+             *
+             * Training:
+             * [===============================]
+             *
+             * Discovery:
+             * [======================]
+             *
+             * Validation:
+             *                       [=========]
+             *
+             * OOS:
+             *                                  [=========]
+             *
+             * No information flows backwards.
+             */
+
+            const trainingRows =
+                fold.trainingEnd -
+                fold.trainingStart;
+
+            const validationSize =
+                Math.max(
+                    50,
+                    Math.floor(
+                        trainingRows *
+                        VALIDATION_FRACTION
+                    )
+                );
+
+            /*
+             * Keep enough data for discovery.
+             */
+
+            const discoveryEnd =
+                Math.max(
+                    fold.trainingStart +
+                    100,
+                    fold.trainingEnd -
+                    validationSize
+                );
+
+            const validationStart =
+                discoveryEnd;
+
+            /*
+             * -------------------------------------------------
+             * DISCOVERY
+             * -------------------------------------------------
+             */
+
+            const discovery =
+                discoverCandidates(
+                    historicalCandles,
+                    fold.trainingStart,
+                    discoveryEnd
+                );
+
+            /*
+             * -------------------------------------------------
+             * INTERNAL VALIDATION
+             * -------------------------------------------------
+             */
+
+            const promoted =
+                promoteCandidates(
+                    historicalCandles,
+                    discovery,
+                    fold.trainingStart,
+                    discoveryEnd
+                );
+
+            /*
+             * Only candidates which survived the untouched
+             * validation stage are eligible for OOS.
+             */
+
+            const diversified =
+                diversifyCandidates(
+                    promoted.candidates
+                );
+
+            const selected =
+                diversified.selected;
+
+            /*
+             * -------------------------------------------------
+             * TRUE OOS
+             * -------------------------------------------------
+             */
+
+            const trades =
+                executeOOS(
+                    historicalCandles,
+                    fold.testStart,
+                    fold.testEnd,
+                    selected,
+                    fold.fold
+                );
+
+            allTrades.push(
+                ...trades
+            );
+
+            const metrics =
+                calculateMetrics(
+                    trades
+                );
+
+            const independentFamilies =
+                new Set(
+                    trades.map(
+                        x =>
+                            x.family
+                    )
+                ).size;
+
+            const foldQuality =
+                evaluateFoldQuality(
+                    metrics,
+                    independentFamilies
+                );
+
+            if (
+                foldQuality.profitable
+            ) {
+
+                profitableFolds++;
+            }
+
+            foldResults.push({
+
+                fold:
+                    fold.fold,
+
+                trainingRows:
+                    fold.trainingRows,
+
+                discoveryRows:
+                    discoveryEnd -
+                    fold.trainingStart,
+
+                validationRows:
+                    fold.trainingEnd -
+                    discoveryEnd,
+
+                testRows:
+                    fold.testRows,
+
+                discoveredFamilies:
+                    discovery.families.length,
+
+                qualifiedFamilies:
+                    discovery.families.filter(
+                        x =>
+                            x.qualified
+                    ).length,
+
+                discoveredPatterns:
+                    discovery.patterns.length,
+
+                qualifiedPatterns:
+                    discovery.patterns.filter(
+                        x =>
+                            x.qualified
+                    ).length,
+
+                validationCandidates:
+                    promoted.candidates.length,
+
+                selectedEdges:
+                    selected.length,
+
+                selectedLevels:
+                    selected.map(
+                        x =>
+                            x.level
+                    ),
+
+                selectedKeys:
+                    selected.map(
+                        x =>
+                            x.key
+                    ),
+
+                independentFamilies,
+
+                profitableFold:
+                    foldQuality.profitable,
+
+                foldQualityReason:
+                    foldQuality.reason,
+
+                metrics,
+
+                tradeResults:
+                    trades.map(
+                        x =>
+                            x.resultR
+                    ),
+
+                trades
+            });
+        }
+
+        // =====================================================
+        // GLOBAL TRUE OOS METRICS
+        // =====================================================
+
+        const globalStats =
+            calculateMetrics(
+                allTrades
+            );
+
+        // =====================================================
+        // PATTERN CONCENTRATION
+        // =====================================================
+
+        const patternCounts = {};
+
+        for (
+            const trade
+            of allTrades
+        ) {
+
+            patternCounts[
+                trade.pattern
+            ] =
+                (
+                    patternCounts[
+                        trade.pattern
+                    ] || 0
+                ) + 1;
+        }
+
+        const patternValues =
+            Object.values(
+                patternCounts
+            );
+
+        const maximumPatternShare =
+            allTrades.length &&
+            patternValues.length
+                ? Math.max(
+                    ...patternValues
+                ) /
+                  allTrades.length
+                : 0;
+
+        // =====================================================
+        // INDEPENDENT FAMILY COUNT
+        // =====================================================
+
+        const independentFamilies =
+            new Set(
+                allTrades.map(
+                    x =>
+                        x.family
+                )
+            ).size;
+
+        // =====================================================
+        // DIVERSITY
+        // =====================================================
+
+        const patternDiversity =
+            independentFamilies >=
+                MIN_INDEPENDENT_FAMILIES &&
+
+            maximumPatternShare <=
+                MAX_PATTERN_CONCENTRATION;
+
+        // =====================================================
+        // OOS VALIDATION
+        // =====================================================
+
+        const foldValidation =
+            profitableFolds >=
+            MIN_OOS_PROFITABLE_FOLDS;
+
+        const sufficientEvidence =
+            globalStats.decisiveTrades >=
+            MIN_OOS_DECISIVE;
+
+        const profitabilityProof =
+            foldValidation &&
+
+            sufficientEvidence &&
+
+            globalStats.expectedValueR >=
+                MIN_OOS_EV &&
+
+            globalStats.profitFactor >=
+                MIN_OOS_PF &&
+
+            independentFamilies >=
+                MIN_INDEPENDENT_FAMILIES &&
+
+            patternDiversity;
+
+        const riskControl =
+            globalStats.maxDrawdownR <=
+                MAX_OOS_DRAWDOWN &&
+
+            globalStats.maxConsecutiveLosses <=
+                MAX_LOSS_STREAK;
+
+        // =====================================================
+        // BUY / SELL EVIDENCE
+        // =====================================================
+
+        const buyStats =
+            calculateMetrics(
+                allTrades.filter(
+                    x =>
+                        x.side ===
+                        "BUY"
+                )
+            );
+
+        const sellStats =
+            calculateMetrics(
+                allTrades.filter(
+                    x =>
+                        x.side ===
+                        "SELL"
+                )
+            );
+
+        // =====================================================
+        // SETUP PERFORMANCE
+        // =====================================================
+
+        const trendFollowStats =
+            calculateMetrics(
+                allTrades.filter(
+                    x =>
+                        x.setup ===
+                        "TREND_FOLLOW"
+                )
+            );
+
+        const vwapPullbackStats =
+            calculateMetrics(
+                allTrades.filter(
+                    x =>
+                        x.setup ===
+                        "VWAP_PULLBACK"
+                )
+            );
+
+        // =====================================================
+        // CURRENT MARKET
+        // =====================================================
+
+        function getCurrentMarket() {
+
+            const index =
+                rows.length - 1;
+
+            const f =
+                features(
+                    rows,
+                    index
+                );
+
+            if (!f) {
+
+                return {
+
+                    available:
+                        false
+                };
+            }
+
+            return {
+
+                available:
+                    true,
+
+                candleTimestamp:
+                    rows[index].ts,
+
+                price:
+                    round(
+                        f.close,
+                        2
+                    ),
+
+                date:
+                    istDate(
+                        rows[index].ts
+                    ),
+
+                time:
+                    getTimeBucket(
+                        rows[index].ts
+                    ),
+
+                trend:
+                    f.trend,
+
+                regime:
+                    f.regime,
+
+                rsi:
+                    round(
+                        f.rsi,
+                        2
+                    ),
+
+                vwap:
+                    round(
+                        f.vwap,
+                        2
+                    ),
+
+                vwapPosition:
+                    f.vwapDirection,
+
+                vwapDistanceATR:
+                    round(
+                        f.vwapDistanceATR,
+                        4
+                    ),
+
+                ema9:
+                    round(
+                        f.ema9,
+                        2
+                    ),
+
+                ema21:
+                    round(
+                        f.ema21,
+                        2
+                    ),
+
+                atr:
+                    round(
+                        f.atr14,
+                        2
+                    ),
+
+                trendStrength:
+                    round(
+                        f.trendStrength,
+                        4
+                    ),
+
+                emaSpreadATR:
+                    round(
+                        f.emaSpreadATR,
+                        4
+                    ),
+
+                ema9SlopeATR:
+                    round(
+                        f.ema9SlopeATR,
+                        4
+                    ),
+
+                volatility:
+                    f.volatility
+            };
+        }
+
+        const currentMarket =
+            getCurrentMarket();
+
+        // =====================================================
+        // CURRENT SIGNAL
+        // =====================================================
+
+        let currentSignal = {
+
+            status:
+                "NO_TRADE",
+
+            side:
+                null,
+
+            setup:
+                null,
+
+            reason:
+                "No V14.6 edge has survived discovery, internal validation and anti-overfitting filters.",
+
+            nextAction:
+                "WAIT"
+        };
+
+        /*
+         * Current candle is NOT used to learn.
+         *
+         * Historical candles only are used to create the
+         * final learning model.
+         */
+
+        const finalDiscovery =
+            discoverCandidates(
+                historicalCandles,
+                0,
+                historicalCandles.length
+            );
+
+        const finalPromoted =
+            promoteCandidates(
+                historicalCandles,
+                finalDiscovery,
+                0,
+                historicalCandles.length
+            );
+
+        const finalDiversified =
+            diversifyCandidates(
+                finalPromoted.candidates
+            );
+
+        const finalSelected =
+            finalDiversified.selected;
+
+        const currentIndex =
+            rows.length - 1;
+
+        const currentFeatures =
+            features(
+                rows,
+                currentIndex
+            );
+
+        if (
+            currentFeatures &&
+            finalSelected.length > 0
+        ) {
+
+            const setups =
+                detectSetups(
+                    rows,
+                    currentIndex
+                );
+
+            for (
+                const setup
+                of setups
+            ) {
+
+                const key =
+                    patternKey(
+                        setup.side,
+                        setup.setup,
+                        currentFeatures
+                    );
+
+                const family =
+                    familyKey(
+                        setup.side,
+                        setup.setup,
+                        currentFeatures.trend
+                    );
+
+                const match =
+                    finalSelected.find(
+                        candidate => {
+
+                            if (
+                                candidate.level ===
+                                "PATTERN"
+                            ) {
+
+                                return (
+                                    candidate.key ===
+                                    key
+                                );
+                            }
+
+                            if (
+                                candidate.level ===
+                                "FAMILY"
+                            ) {
+
+                                return (
+                                    candidate.key ===
+                                    family
+                                );
+                            }
+
+                            return false;
+                        }
+                    );
+
+                if (!match) {
+
+                    continue;
+                }
+
+                /*
+                 * Anti-chasing applies to current
+                 * TREND_FOLLOW entries too.
+                 */
+
+                if (
+                    setup.setup ===
+                    "TREND_FOLLOW"
+                ) {
+
+                    const chase =
+                        antiChaseCheck(
+                            currentFeatures,
+                            setup.side
+                        );
+
+                    if (
+                        !chase.passed
+                    ) {
+
+                        continue;
+                    }
+                }
+
+                const confirmation =
+                    confirmationScore(
+                        rows,
+                        currentIndex,
+                        setup.side
+                    );
+
+                if (
+                    !confirmation.passed
+                ) {
+
+                    continue;
+                }
+
+                currentSignal = {
+
+                    status:
+                        "SIGNAL",
+
+                    side:
+                        setup.side,
+
+                    setup:
+                        setup.setup,
+
+                    pattern:
+                        key,
+
+                    family,
+
+                    learningLevel:
+                        match.level,
+
+                    quality:
+                        round(
+                            match.quality,
+                            2
+                        ),
+
+                    discoveryEV:
+                        round(
+                            match.expectedValueR,
+                            4
+                        ),
+
+                    discoveryPF:
+                        round(
+                            match.profitFactor,
+                            4
+                        ),
+
+                    validationEV:
+                        round(
+                            match.validation.metrics
+                                .expectedValueR,
+                            4
+                        ),
+
+                    validationPF:
+                        round(
+                            match.validation.metrics
+                                .profitFactor,
+                            4
+                        ),
+
+                    validationTrades:
+                        match.validation.metrics
+                            .trades,
+
+                    validationDecisive:
+                        match.validation.metrics
+                            .decisiveTrades,
+
+                    confirmationScore:
+                        confirmation.score,
+
+                    confirmationReasons:
+                        confirmation.reasons,
+
+                    market:
+                        currentMarket,
+
+                    reason:
+                        "V14.6 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
+
+                    nextAction:
+                        "PAPER_REVIEW_ONLY"
+                };
+
+                break;
+            }
+        }
+
+        // =====================================================
+        // REJECTION DIAGNOSTICS
+        // =====================================================
+
+        const rejectionDiagnostics = {
+
+            family: {
+
+                insufficientSamples:
+                    0,
+
+                insufficientDecisive:
+                    0,
+
+                insufficientStability:
+                    0,
+
+                edgeBelowThreshold:
+                    0,
+
+                recentNegative:
+                    0
+            },
+
+            pattern: {
+
+                insufficientSamples:
+                    0,
+
+                insufficientDecisive:
+                    0,
+
+                insufficientStability:
+                    0,
+
+                edgeBelowThreshold:
+                    0,
+
+                recentNegative:
+                    0,
+
+                validationFailure:
+                    finalPromoted
+                        .validationResults
+                        .filter(
+                            x =>
+                                !x.passed &&
+                                (
+                                    x.reason ===
+                                    undefined ||
+                                    x.reason ===
+                                    null
+                                )
+                        )
+                        .length,
+
+                familyConflict:
+                    finalPromoted
+                        .validationResults
+                        .filter(
+                            x =>
+                                x.reason ===
+                                "FAMILY_CONFLICT"
+                        )
+                        .length
+            },
+
+            antiChasing: {
+
+                blockedVWAPDistance:
+                    0,
+
+                blockedEMAExtension:
+                    0,
+
+                blockedTrendExtension:
+                    0
+            }
+        };
+
+        // =====================================================
+        // DISCOVERY REJECTION ANALYSIS
+        // =====================================================
+
+        for (
+            const family
+            of finalDiscovery.families
+        ) {
+
+            if (
+                family.samples <
+                FAMILY_MIN_SAMPLES
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .insufficientSamples++;
+            }
+
+            if (
+                family.decisiveTrades <
+                FAMILY_MIN_DECISIVE
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .insufficientDecisive++;
+            }
+
+            if (
+                family.stableSections <
+                MIN_STABLE_SECTIONS
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .insufficientStability++;
+            }
+
+            if (
+                family.expectedValueR <
+                FAMILY_MIN_EV ||
+                family.profitFactor <
+                FAMILY_MIN_PF
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .edgeBelowThreshold++;
+            }
+
+            if (
+                family.recentEV < 0
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .recentNegative++;
+            }
+        }
+
+        for (
+            const pattern
+            of finalDiscovery.patterns
+        ) {
+
+            if (
+                pattern.samples <
+                PATTERN_MIN_SAMPLES
+            ) {
+
+                rejectionDiagnostics
+                    .pattern
+                    .insufficientSamples++;
+            }
+
+            if (
+                pattern.decisiveTrades <
+                PATTERN_MIN_DECISIVE
+            ) {
+
+                rejectionDiagnostics
+                    .pattern
+                    .insufficientDecisive++;
+            }
+
+            if (
+                pattern.stableSections <
+                MIN_STABLE_SECTIONS
+            ) {
+
+                rejectionDiagnostics
+                    .pattern
+                    .insufficientStability++;
+            }
+
+            if (
+                pattern.expectedValueR <
+                PATTERN_MIN_EV ||
+                pattern.profitFactor <
+                PATTERN_MIN_PF
+            ) {
+
+                rejectionDiagnostics
+                    .pattern
+                    .edgeBelowThreshold++;
+            }
+
+            if (
+                pattern.recentEV < 0
+            ) {
+
+                rejectionDiagnostics
+                    .pattern
+                    .recentNegative++;
+            }
+        }
+
+        // =====================================================
+        // FINAL RESPONSE
+        // =====================================================
+
+        return send({
+
+            success:
+                true,
+
+            version:
+                VERSION,
+
+            status:
+                "COMPLETED",
+
+            mode:
+                "V14_6_ANTI_OVERFITTING_EDGE_SURVIVAL_TRUE_WALK_FORWARD",
+
+            paperOnly:
+                true,
+
+            realOrders:
+                false,
+
+            brokerOrderEnabled:
+                false,
+
+            brokerOrderSent:
+                false,
+
+            instrument:
+                INSTRUMENT,
+
+            scripCode:
+                SCRIP_CODE,
+
+            interval:
+                INTERVAL,
+
+            dataSource:
+                "INDSTOCKS_HISTORICAL_API",
+
+            data: {
+
+                requestedDays:
+                    REQUESTED_DAYS,
+
+                chunks:
+                    historicalData
+                        .chunksRequested,
+
+                rawCandles:
+                    historicalData
+                        .rawCandles,
+
+                finalCandles:
+                    historicalData
+                        .normalizedCandles,
+
+                deduplicated:
+                    historicalData
+                        .deduplicated,
+
+                firstCandle:
+                    rows[0],
+
+                lastCandle:
+                    rows[
+                        rows.length - 1
+                    ],
+
+                currentCandleExcluded:
+                    true
+            },
+
+            antiLeakage: {
+
+                trueWalkForward:
+                    true,
+
+                chronological:
+                    true,
+
+                shuffled:
+                    false,
+
+                currentCandleExcluded:
+                    true,
+
+                currentCandleUsedForLearning:
+                    false,
+
+                futureDataUsedForTraining:
+                    false,
+
+                futureDataUsedForSignal:
+                    false,
+
+                discoverySeparatedFromValidation:
+                    true,
+
+                validationBeforeOOS:
+                    true,
+
+                validationOutcomesCannotCrossIntoOOS:
+                    true,
+
+                discoveryOutcomesCannotCrossIntoValidation:
+                    true,
+
+                strictFoldBoundaries:
+                    true,
+
+                noForcedTrades:
+                    true,
+
+                overlappingPaperTrades:
+                    false,
+
+                sameCandleStopTargetBias:
+                    "STOP_FIRST"
+            },
+
+            architecture: {
+
+                version:
+                    VERSION,
+
+                discovery:
+                    "Candidate edges are discovered only from the historical discovery segment.",
+
+                validation:
+                    "Candidates must survive an untouched chronological validation segment.",
+
+                oos:
+                    "Only validation survivors are allowed into chronological true OOS.",
+
+                antiOverfitting:
+                    "Validation quality is weighted more heavily than historical discovery quality.",
+
+                antiConcentration:
+                    "The final candidate set is diversified across families and sides.",
+
+                antiChasing:
+                    "Extended trend-follow entries are rejected.",
+
+                boundaryProtection:
+                    "Trade outcomes are capped at fold boundaries.",
+
+                objective:
+                    "Prefer NO_TRADE over weak or unstable evidence."
+            },
+
+            robustness: {
+
+                requestedHistoricalDays:
+                    REQUESTED_DAYS,
+
+                walkForwardFolds:
+                    folds.length,
+
+                initialTrainingRows:
+                    initialTraining,
+
+                requiredProfitableFolds:
+                    MIN_OOS_PROFITABLE_FOLDS,
+
+                actualProfitableFolds:
+                    profitableFolds,
+
+                foldValidation:
+                    foldValidation
+                        ? "PASSED"
+                        : "NOT_PASSED",
+
+                purpose:
+                    "Require an edge to survive discovery, isolated validation and multiple independent chronological OOS periods."
+            },
+
+            learning: {
+
+                familiesDiscovered:
+                    finalDiscovery
+                        .families
+                        .length,
+
+                qualifiedFamilies:
+                    finalDiscovery
+                        .families
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
+                        .length,
+
+                patternsDiscovered:
+                    finalDiscovery
+                        .patterns
+                        .length,
+
+                qualifiedPatterns:
+                    finalDiscovery
+                        .patterns
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
+                        .length,
+
+                validationSurvivors:
+                    finalPromoted
+                        .candidates
+                        .length,
+
+                selectedEdges:
+                    finalSelected.length,
+
+                familyEdges:
+                    finalSelected.filter(
+                        x =>
+                            x.level ===
+                            "FAMILY"
+                    ).length,
+
+                detailedPatternEdges:
+                    finalSelected.filter(
+                        x =>
+                            x.level ===
+                            "PATTERN"
+                    ).length,
+
+                independentSelectedFamilies:
+                    finalDiversified
+                        .independentFamilies
+            },
+
+            internalValidation: {
+
+                fraction:
+                    VALIDATION_FRACTION,
+
+                minimumSamples:
+                    VALIDATION_MIN_SAMPLES,
+
+                minimumDecisive:
+                    VALIDATION_MIN_DECISIVE,
+
+                minimumEV:
+                    VALIDATION_MIN_EV,
+
+                minimumPF:
+                    VALIDATION_MIN_PF,
+
+                maximumLossStreak:
+                    MAX_VALIDATION_LOSS_STREAK,
+
+                validationRequired:
+                    true,
+
+                validationBoundaryStrict:
+                    true,
+
+                purpose:
+                    "Prevent historically attractive patterns from entering true OOS without independent validation."
+            },
+
+            walkForward: {
+
+                method:
+                    "STRICT_TRUE_EXPANDING_WALK_FORWARD_WITH_ISOLATED_INTERNAL_VALIDATION",
+
+                folds:
+                    folds.length,
+
+                profitableFolds,
+
+                requiredProfitableFolds:
+                    MIN_OOS_PROFITABLE_FOLDS,
+
+                chronological:
+                    true,
+
+                shuffled:
+                    false,
+
+                results:
+                    foldResults.map(
+                        x => ({
+
+                            fold:
+                                x.fold,
+
+                            trainingRows:
+                                x.trainingRows,
+
+                            discoveryRows:
+                                x.discoveryRows,
+
+                            validationRows:
+                                x.validationRows,
+
+                            testRows:
+                                x.testRows,
+
+                            discoveredFamilies:
+                                x.discoveredFamilies,
+
+                            qualifiedFamilies:
+                                x.qualifiedFamilies,
+
+                            discoveredPatterns:
+                                x.discoveredPatterns,
+
+                            qualifiedPatterns:
+                                x.qualifiedPatterns,
+
+                            validationCandidates:
+                                x.validationCandidates,
+
+                            selectedEdges:
+                                x.selectedEdges,
+
+                            selectedLevels:
+                                x.selectedLevels,
+
+                            independentFamilies:
+                                x.independentFamilies,
+
+                            profitableFold:
+                                x.profitableFold,
+
+                            foldQualityReason:
+                                x.foldQualityReason,
+
+                            metrics:
+                                x.metrics,
+
+                            tradeResults:
+                                x.tradeResults
+                        })
+                    )
+            },
+
+            trueOOS: {
+
+                metrics:
+                    globalStats,
+
+                profitabilityProof:
+                    profitabilityProof
+                        ? "PROVEN"
+                        : "NOT_PROVEN",
+
+                riskControl:
+                    riskControl
+                        ? "PASSED"
+                        : "FAILED",
+
+                sufficientEvidence:
+                    sufficientEvidence
+                        ? "PASSED"
+                        : "INSUFFICIENT",
+
+                foldValidation:
+                    foldValidation
+                        ? "PASSED"
+                        : "FAILED",
+
+                independentFamilies,
+
+                requiredIndependentFamilies:
+                    MIN_INDEPENDENT_FAMILIES,
+
+                maximumPatternShare:
+                    round(
+                        maximumPatternShare,
+                        4
+                    ),
+
+                patternDiversity:
+                    patternDiversity
+                        ? "PASSED"
+                        : "FAILED"
+            },
+
+            buySellEvidence: {
+
+                BUY:
+                    buyStats,
+
+                SELL:
+                    sellStats
+            },
+
+            setupPerformance: {
+
+                trendFollow:
+                    trendFollowStats,
+
+                vwapPullback:
+                    vwapPullbackStats
+            },
+
+            antiChasing: {
+
+                enabled:
+                    true,
+
+                maximumTrendVWAPDistanceATR:
+                    MAX_TREND_VWAP_DISTANCE_ATR,
+
+                maximumTrendEMASpreadATR:
+                    MAX_TREND_EMA_SPREAD_ATR,
+
+                maximumTrendStrengthATR:
+                    MAX_TREND_STRENGTH_ATR,
+
+                purpose:
+                    "Prevent entries after excessive price extension."
+            },
+
+            latestLearning: {
+
+                trainingRows:
+                    historicalCandles.length,
+
+                discoveryRows:
+                    finalPromoted
+                        .validationStart,
+
+                validationRows:
+                    historicalCandles.length -
+                    finalPromoted
+                        .validationStart,
+
+                familiesDiscovered:
+                    finalDiscovery
+                        .families
+                        .length,
+
+                qualifiedFamilies:
+                    finalDiscovery
+                        .families
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
+                        .length,
+
+                patternsDiscovered:
+                    finalDiscovery
+                        .patterns
+                        .length,
+
+                qualifiedPatterns:
+                    finalDiscovery
+                        .patterns
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
+                        .length,
+
+                validationSurvivors:
+                    finalPromoted
+                        .candidates
+                        .length,
+
+                selectedEdges:
+                    finalSelected.map(
+                        x => ({
+
+                            key:
+                                x.key,
+
+                            level:
+                                x.level,
+
+                            quality:
+                                round(
+                                    x.quality,
+                                    2
+                                ),
+
+                            discoveryEV:
+                                round(
+                                    x.expectedValueR,
+                                    4
+                                ),
+
+                            discoveryPF:
+                                round(
+                                    x.profitFactor,
+                                    4
+                                ),
+
+                            validationEV:
+                                round(
+                                    x.validation.metrics
+                                        .expectedValueR,
+                                    4
+                                ),
+
+                            validationPF:
+                                round(
+                                    x.validation.metrics
+                                        .profitFactor,
+                                    4
+                                ),
+
+                            validationTrades:
+                                x.validation.metrics
+                                    .trades,
+
+                            validationDecisive:
+                                x.validation.metrics
+                                    .decisiveTrades,
+
+                            familyEV:
+                                x.familyEvidence
+                                    ? round(
+                                        x.familyEvidence
+                                            .expectedValueR,
+                                        4
+                                    )
+                                    : null,
+
+                            familyPF:
+                                x.familyEvidence
+                                    ? round(
+                                        x.familyEvidence
+                                            .profitFactor,
+                                        4
+                                    )
+                                    : null
+                        })
+                    ),
+
+                rejectionDiagnostics
+            },
+
+            currentMarket:
+                currentMarket,
+
+            currentSignal,
+
+            riskPlan: {
+
+                stopR:
+                    STOP_R,
+
+                targetR:
+                    TARGET_R,
+
+                preferredTargetR:
+                    PREFERRED_TARGET_R,
+
+                riskReward:
+                    "1:2",
+
+                preferredRiskReward:
+                    "1:2.5",
+
+                maxHoldCandles:
+                    MAX_HOLD_CANDLES,
+
+                maxDrawdownR:
+                    MAX_OOS_DRAWDOWN,
+
+                maxLossStreak:
+                    MAX_LOSS_STREAK,
+
+                noStopWidening:
+                    true
+            },
+
+            paperTradeLog:
+                allTrades,
+
+            nextAction:
+                currentSignal.status ===
+                    "SIGNAL"
+                    ? "PAPER_REVIEW_ONLY"
+                    : "WAIT"
+        });
+
+    } catch (error) {
+
+        console.error(
+            "TradeMind Pro V14.6 ERROR:",
+            error
+        );
+
+        return res
+            .status(500)
+            .json({
+
+                success:
+                    false,
+
+                version:
+                    VERSION,
+
+                status:
+                    "ERROR",
+
+                paperOnly:
+                    true,
+
+                realOrders:
+                    false,
+
+                brokerOrderEnabled:
+                    false,
+
+                brokerOrderSent:
+                    false,
+
+                error:
+                    error?.message ||
+                    String(error),
+
+                stack:
+                    process.env.NODE_ENV ===
+                    "development"
+                        ? error?.stack
+                        : undefined
+            });
+    }
+}
      
