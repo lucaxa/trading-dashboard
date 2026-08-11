@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V17";
+    const VERSION = "V18";
 
     try {
 
@@ -2928,7 +2928,7 @@ export default async function handler(req, res) {
                 regimeSetupPatterns
                     .filter(x =>
                         String(x.key).startsWith(`${V17_REGIME_AWARE_SIDE}|`) &&
-                        x.trades >= V17_REGIME_AWARE_MIN_SAMPLES &&
+                        x.samples >= V17_REGIME_AWARE_MIN_SAMPLES &&
                         x.decisiveTrades >= V17_REGIME_AWARE_MIN_DECISIVE &&
                         x.expectedValueR >= V17_REGIME_AWARE_MIN_EV &&
                         x.profitFactor >= V17_REGIME_AWARE_MIN_PF &&
@@ -3855,7 +3855,15 @@ export default async function handler(req, res) {
                 stableSections: x.stableSections,
                 recentEV: x.recentEV,
                 recentPF: x.recentPF,
-                qualified: !!x.qualified,
+                genericQualified: !!x.qualified,
+                qualifiedByRegimeRules:
+                    String(x.key).startsWith(`${V17_REGIME_AWARE_SIDE}|`) &&
+                    x.samples >= V17_REGIME_AWARE_MIN_SAMPLES &&
+                    x.decisiveTrades >= V17_REGIME_AWARE_MIN_DECISIVE &&
+                    x.expectedValueR >= V17_REGIME_AWARE_MIN_EV &&
+                    x.profitFactor >= V17_REGIME_AWARE_MIN_PF &&
+                    x.stableSections >= V17_REGIME_AWARE_MIN_STABLE_SECTIONS &&
+                    x.recentEV >= 0,
                 entersV17Pool: qualified.some(q => q.key === x.key)
             }));
 
