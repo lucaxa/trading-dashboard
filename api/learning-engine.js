@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V22";
+    const VERSION = "V22.2";
 
     try {
 
@@ -8052,6 +8052,820 @@ export default async function handler(req, res) {
 
 
         // =====================================================
+        // V22.2 EDGE-DECAY DIAGNOSIS
+        // -----------------------------------------------------
+        // Diagnostic only.
+        //
+        // V22.1 showed that the historical SELL evidence was
+        // strongest in an earlier chronological window and then
+        // weakened in the latest window. V22.2 investigates the
+        // WINDOW-3 -> WINDOW-4 transition without changing:
+        //   - discovery
+        //   - qualification
+        //   - validation
+        //   - diversification
+        //   - OOS
+        //   - exits
+        //   - risk
+        //
+        // All feature measurements below are entry-time features.
+        // Outcome/mechanics measurements are kept separate so that
+        // no outcome-derived rule can accidentally become a signal.
+        // =====================================================
+
+        function buildV222EdgeDecayDiagnosis(
+            candles,
+            records,
+            start,
+            end
+        ) {
+
+            const safe =
+                safeArray(records)
+                    .filter(
+                        x =>
+                            x &&
+                            x.side === "SELL" &&
+                            Number.isFinite(x.index) &&
+                            Number.isFinite(x.resultR)
+                    )
+                    .sort(
+                        (a, b) =>
+                            a.index - b.index
+                    );
+
+            const windows =
+                Array.from(
+                    { length: 4 },
+                    () => []
+                );
+
+            if (safe.length) {
+                const minIndex = safe[0].index;
+                const maxIndex = safe[safe.length - 1].index;
+                const span = Math.max(
+                    1,
+                    maxIndex - minIndex + 1
+                );
+
+                for (const record of safe) {
+                    const relative =
+                        record.index - minIndex;
+
+                    const window =
+                        Math.min(
+                            3,
+                            Math.max(
+                                0,
+                                Math.floor(
+                                    (relative / span) * 4
+                                )
+                            )
+                        );
+
+                    windows[window].push(record);
+                }
+            }
+
+            function roundValue(value, digits = 4) {
+                return Number.isFinite(value)
+                    ? round(value, digits)
+                    : null;
+            }
+
+            function outcomeMetrics(rows) {
+
+                const wins =
+                    rows.filter(
+                        x => x.resultR > 0
+                    ).length;
+
+                const losses =
+                    rows.filter(
+                        x => x.resultR < 0
+                    ).length;
+
+                const timeouts =
+                    rows.filter(
+                        x => x.resultR === 0
+                    ).length;
+
+                const decisive =
+                    wins + losses;
+
+                const winR =
+                    rows
+                        .filter(
+                            x => x.resultR > 0
+                        )
+                        .reduce(
+                            (sum, x) =>
+                                sum + x.resultR,
+                            0
+                        );
+
+                const lossR =
+                    Math.abs(
+                        rows
+                            .filter(
+                                x => x.resultR < 0
+                            )
+                            .reduce(
+                                (sum, x) =>
+                                    sum + x.resultR,
+                                0
+                            )
+                    );
+
+                const netR =
+                    rows.reduce(
+                        (sum, x) =>
+                            sum + x.resultR,
+                        0
+                    );
+
+                return {
+                    trades: rows.length,
+                    wins,
+                    losses,
+                    timeouts,
+                    decisiveTrades: decisive,
+                    winRate:
+                        decisive
+                            ? roundValue(
+                                wins / decisive * 100,
+                                2
+                            )
+                            : 0,
+                    netR:
+                        roundValue(netR),
+                    expectedValueR:
+                        rows.length
+                            ? roundValue(
+                                netR / rows.length
+                            )
+                            : 0,
+                    profitFactor:
+                        lossR > 0
+                            ? roundValue(
+                                winR / lossR
+                            )
+                            : 0
+                };
+            }
+
+            function numericValues(rows, field) {
+                return rows
+                    .map(
+                        row => {
+                            if (
+                                Number.isFinite(
+                                    row[field]
+                                )
+                            ) {
+                                return row[field];
+                            }
+
+                            const f =
+                                features(
+                                    candles,
+                                    row.index
+                                );
+
+                            return f &&
+                                Number.isFinite(f[field])
+                                ? f[field]
+                                : null;
+                        }
+                    )
+                    .filter(
+                        Number.isFinite
+                    );
+            }
+
+            function numericStats(rows, field) {
+
+                const values =
+                    numericValues(
+                        rows,
+                        field
+                    );
+
+                if (!values.length) {
+                    return {
+                        field,
+                        samples: 0,
+                        mean: null,
+                        median: null,
+                        min: null,
+                        max: null,
+                        stdDev: null
+                    };
+                }
+
+                const sorted =
+                    [...values].sort(
+                        (a, b) => a - b
+                    );
+
+                const mean =
+                    values.reduce(
+                        (sum, x) =>
+                            sum + x,
+                        0
+                    ) / values.length;
+
+                const variance =
+                    values.reduce(
+                        (sum, x) =>
+                            sum +
+                            Math.pow(
+                                x - mean,
+                                2
+                            ),
+                        0
+                    ) / values.length;
+
+                const midpoint =
+                    Math.floor(
+                        sorted.length / 2
+                    );
+
+                const median =
+                    sorted.length % 2
+                        ? sorted[midpoint]
+                        : (
+                            sorted[midpoint - 1] +
+                            sorted[midpoint]
+                        ) / 2;
+
+                return {
+                    field,
+                    samples: values.length,
+                    mean: roundValue(mean, 4),
+                    median: roundValue(median, 4),
+                    min: roundValue(sorted[0], 4),
+                    max: roundValue(
+                        sorted[sorted.length - 1],
+                        4
+                    ),
+                    stdDev: roundValue(
+                        Math.sqrt(variance),
+                        4
+                    )
+                };
+            }
+
+            function categoricalStats(rows, field) {
+
+                const counts = {};
+
+                for (const row of rows) {
+                    const f =
+                        features(
+                            candles,
+                            row.index
+                        );
+
+                    const value =
+                        row[field] ??
+                        (f ? f[field] : null) ??
+                        "UNKNOWN";
+
+                    counts[value] =
+                        (counts[value] || 0) + 1;
+                }
+
+                const total =
+                    rows.length;
+
+                return Object.entries(
+                    counts
+                )
+                    .map(
+                        ([value, count]) => ({
+                            field,
+                            value,
+                            records: count,
+                            sharePct:
+                                total
+                                    ? roundValue(
+                                        count /
+                                        total *
+                                        100,
+                                        2
+                                    )
+                                    : 0
+                        })
+                    )
+                    .sort(
+                        (a, b) =>
+                            b.records -
+                            a.records
+                    );
+            }
+
+            function entryFeatureSnapshot(rows) {
+
+                const numericFields = [
+                    "rsi",
+                    "atr14",
+                    "emaSpreadATR",
+                    "ema9SlopeATR",
+                    "vwapDistanceATR",
+                    "trendStrength"
+                ];
+
+                const categoricalFields = [
+                    "setup",
+                    "trend",
+                    "regime",
+                    "vwapDirection",
+                    "rsiBucket",
+                    "volatility",
+                    "timeBucket"
+                ];
+
+                return {
+                    numeric:
+                        numericFields.map(
+                            field =>
+                                numericStats(
+                                    rows,
+                                    field
+                                )
+                        ),
+                    categorical:
+                        Object.fromEntries(
+                            categoricalFields.map(
+                                field => [
+                                    field,
+                                    categoricalStats(
+                                        rows,
+                                        field
+                                    )
+                                ]
+                            )
+                        )
+                };
+            }
+
+            function numericShift(
+                earlier,
+                latest
+            ) {
+
+                const latestByField =
+                    new Map(
+                        latest.map(
+                            x => [
+                                x.field,
+                                x
+                            ]
+                        )
+                    );
+
+                return earlier.map(
+                    item => {
+
+                        const other =
+                            latestByField.get(
+                                item.field
+                            );
+
+                        if (!other) {
+                            return {
+                                field: item.field,
+                                available: false
+                            };
+                        }
+
+                        const meanChange =
+                            other.mean !== null &&
+                            item.mean !== null
+                                ? other.mean -
+                                  item.mean
+                                : null;
+
+                        const pooledStd =
+                            item.stdDev !== null &&
+                            other.stdDev !== null
+                                ? Math.sqrt(
+                                    (
+                                        Math.pow(
+                                            item.stdDev,
+                                            2
+                                        ) +
+                                        Math.pow(
+                                            other.stdDev,
+                                            2
+                                        )
+                                    ) / 2
+                                )
+                                : null;
+
+                        const standardizedShift =
+                            pooledStd &&
+                            pooledStd > 0 &&
+                            meanChange !== null
+                                ? meanChange /
+                                  pooledStd
+                                : null;
+
+                        return {
+                            field: item.field,
+                            earlierMean: item.mean,
+                            latestMean: other.mean,
+                            meanChange:
+                                roundValue(
+                                    meanChange
+                                ),
+                            standardizedShift:
+                                roundValue(
+                                    standardizedShift
+                                ),
+                            earlierMedian: item.median,
+                            latestMedian: other.median,
+                            earlierSamples: item.samples,
+                            latestSamples: other.samples
+                        };
+                    }
+                );
+            }
+
+            function categoricalShift(
+                earlier,
+                latest
+            ) {
+
+                const allValues =
+                    new Set([
+                        ...earlier.map(
+                            x => x.value
+                        ),
+                        ...latest.map(
+                            x => x.value
+                        )
+                    ]);
+
+                const eMap =
+                    new Map(
+                        earlier.map(
+                            x => [
+                                x.value,
+                                x.sharePct
+                            ]
+                        )
+                    );
+
+                const lMap =
+                    new Map(
+                        latest.map(
+                            x => [
+                                x.value,
+                                x.sharePct
+                            ]
+                        )
+                    );
+
+                return Array.from(
+                    allValues
+                )
+                    .map(
+                        value => ({
+                            value,
+                            earlierSharePct:
+                                roundValue(
+                                    eMap.get(value) || 0,
+                                    2
+                                ),
+                            latestSharePct:
+                                roundValue(
+                                    lMap.get(value) || 0,
+                                    2
+                                ),
+                            shareChangePct:
+                                roundValue(
+                                    (
+                                        lMap.get(value) || 0
+                                    ) -
+                                    (
+                                        eMap.get(value) || 0
+                                    ),
+                                    2
+                                )
+                        })
+                    )
+                    .sort(
+                        (a, b) =>
+                            Math.abs(
+                                b.shareChangePct
+                            ) -
+                            Math.abs(
+                                a.shareChangePct
+                            )
+                    );
+            }
+
+            const outcomeWindows =
+                windows.map(
+                    (rows, index) => ({
+                        window: index + 1,
+                        firstIndex:
+                            rows.length
+                                ? rows[0].index
+                                : null,
+                        lastIndex:
+                            rows.length
+                                ? rows[
+                                    rows.length - 1
+                                ].index
+                                : null,
+                        outcomes:
+                            outcomeMetrics(rows)
+                    })
+                );
+
+            const window3 =
+                windows[2] || [];
+
+            const window4 =
+                windows[3] || [];
+
+            const w3Features =
+                entryFeatureSnapshot(
+                    window3
+                );
+
+            const w4Features =
+                entryFeatureSnapshot(
+                    window4
+                );
+
+            const numericShifts =
+                numericShift(
+                    w3Features.numeric,
+                    w4Features.numeric
+                );
+
+            const categoricalShifts =
+                Object.fromEntries(
+                    Object.keys(
+                        w3Features.categorical
+                    ).map(
+                        field => [
+                            field,
+                            categoricalShift(
+                                w3Features
+                                    .categorical[
+                                        field
+                                    ],
+                                w4Features
+                                    .categorical[
+                                        field
+                                    ]
+                            )
+                        ]
+                    )
+                );
+
+            const mechanicsFields = [
+                "exitType"
+            ];
+
+            const mechanicsShift =
+                Object.fromEntries(
+                    mechanicsFields.map(
+                        field => [
+                            field,
+                            categoricalShift(
+                                categoricalStats(
+                                    window3,
+                                    field
+                                ),
+                                categoricalStats(
+                                    window4,
+                                    field
+                                )
+                            )
+                        ]
+                    )
+                );
+
+            const bySetup = {};
+
+            for (const setup of [
+                "TREND_FOLLOW",
+                "VWAP_PULLBACK"
+            ]) {
+
+                const w3 =
+                    window3.filter(
+                        x =>
+                            x.setup ===
+                            setup
+                    );
+
+                const w4 =
+                    window4.filter(
+                        x =>
+                            x.setup ===
+                            setup
+                    );
+
+                bySetup[setup] = {
+                    window3: {
+                        outcomes:
+                            outcomeMetrics(w3),
+                        features:
+                            entryFeatureSnapshot(w3)
+                    },
+                    window4: {
+                        outcomes:
+                            outcomeMetrics(w4),
+                        features:
+                            entryFeatureSnapshot(w4)
+                    }
+                };
+            }
+
+            const failureModes = {
+                window3: {
+                    exitTypes:
+                        categoricalStats(
+                            window3,
+                            "exitType"
+                        ),
+                    resultBuckets: {
+                        winners:
+                            window3.filter(
+                                x => x.resultR > 0
+                            ).length,
+                        losers:
+                            window3.filter(
+                                x => x.resultR < 0
+                            ).length,
+                        timeouts:
+                            window3.filter(
+                                x => x.resultR === 0
+                            ).length
+                    }
+                },
+                window4: {
+                    exitTypes:
+                        categoricalStats(
+                            window4,
+                            "exitType"
+                        ),
+                    resultBuckets: {
+                        winners:
+                            window4.filter(
+                                x => x.resultR > 0
+                            ).length,
+                        losers:
+                            window4.filter(
+                                x => x.resultR < 0
+                            ).length,
+                        timeouts:
+                            window4.filter(
+                                x => x.resultR === 0
+                            ).length
+                    }
+                }
+            };
+
+            const strongestNumericShifts =
+                [...numericShifts]
+                    .filter(
+                        x =>
+                            Number.isFinite(
+                                x.standardizedShift
+                            )
+                    )
+                    .sort(
+                        (a, b) =>
+                            Math.abs(
+                                b.standardizedShift
+                            ) -
+                            Math.abs(
+                                a.standardizedShift
+                            )
+                    )
+                    .slice(0, 10);
+
+            const categoricalAlerts = [];
+
+            for (
+                const [field, shifts]
+                of Object.entries(
+                    categoricalShifts
+                )
+            ) {
+                for (const shift of shifts) {
+                    if (
+                        Math.abs(
+                            shift.shareChangePct
+                        ) >= 15
+                    ) {
+                        categoricalAlerts.push({
+                            field,
+                            ...shift
+                        });
+                    }
+                }
+            }
+
+            categoricalAlerts.sort(
+                (a, b) =>
+                    Math.abs(
+                        b.shareChangePct
+                    ) -
+                    Math.abs(
+                        a.shareChangePct
+                    )
+            );
+
+            const preTradeObservableShifts =
+                [
+                    ...strongestNumericShifts.map(
+                        x => ({
+                            type:
+                                "NUMERIC_FEATURE_SHIFT",
+                            ...x
+                        })
+                    ),
+                    ...categoricalAlerts.map(
+                        x => ({
+                            type:
+                                "CATEGORICAL_FEATURE_SHIFT",
+                            ...x
+                        })
+                    )
+                ].slice(0, 20);
+
+            const outcomeChange =
+                outcomeMetrics(window4).expectedValueR -
+                outcomeMetrics(window3).expectedValueR;
+
+            let classification =
+                "INSUFFICIENT_DATA";
+
+            if (
+                window3.length >= 20 &&
+                window4.length >= 20
+            ) {
+                if (
+                    outcomeChange < -0.10 &&
+                    preTradeObservableShifts.length > 0
+                ) {
+                    classification =
+                        "DECAY_WITH_OBSERVABLE_CONTEXT_SHIFT";
+                } else if (
+                    outcomeChange < -0.10
+                ) {
+                    classification =
+                        "DECAY_WITHOUT_CLEAR_CONTEXT_SHIFT";
+                } else {
+                    classification =
+                        "NO_MATERIAL_WINDOW3_TO_WINDOW4_DECAY";
+                }
+            }
+
+            return {
+                purpose:
+                    "Diagnose why the Window-3 edge weakened in Window 4 using entry-time context and separate outcome/mechanics evidence. Diagnostic only.",
+                sample: {
+                    sellRecords: safe.length,
+                    chronologicalWindows: 4,
+                    window3Records:
+                        window3.length,
+                    window4Records:
+                        window4.length
+                },
+                chronologicalOutcomeWindows:
+                    outcomeWindows,
+                window3ToWindow4: {
+                    classification,
+                    outcomeEVChange:
+                        roundValue(
+                            outcomeChange
+                        ),
+                    featureShiftMagnitude:
+                        preTradeObservableShifts.length,
+                    strongestNumericShifts,
+                    categoricalShifts,
+                    preTradeObservableShifts,
+                    mechanicsShift,
+                    failureModes
+                },
+                bySetup,
+                guard:
+                    "Diagnostic only. V22.2 does not create candidates, change thresholds, select exits, alter validation/OOS, or use Window-4 outcomes to modify earlier decisions."
+            };
+        }
+
+
+        // =====================================================
         // V15 STRATEGY MECHANICS LAB
         // -----------------------------------------------------
         // Diagnostic-only exit-model comparison.
@@ -8473,6 +9287,14 @@ export default async function handler(req, res) {
         // are passed into the temporal regime audit.
         const v22TemporalRegimeAudit =
             buildV22TemporalRegimeAudit(finalDiscovery.rawRecords);
+
+        const v222EdgeDecayDiagnosis =
+            buildV222EdgeDecayDiagnosis(
+                historicalCandles,
+                finalDiscovery.rawRecords,
+                0,
+                historicalCandles.length
+            );
 
         const edgeAnatomy =
             buildEdgeAnatomy(
@@ -9215,7 +10037,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics; V22.2 diagnoses Window-3 to Window-4 edge decay using entry-time feature shifts and separate outcome/mechanics evidence without changing strategy mechanics.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -9403,6 +10225,8 @@ export default async function handler(req, res) {
             },
 
             edgeDecayDiagnostics,
+
+            v222EdgeDecayDiagnosis,
 
             regimeFingerprintDiagnostics,
 
