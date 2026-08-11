@@ -7007,9 +7007,6 @@ export default async function handler(req, res) {
             };
         }
 
-        const v22TemporalRegimeAudit =
-            buildV22TemporalRegimeAudit(finalDiscovery.rawRecords);
-
         // =====================================================
         // GLOBAL TRUE OOS METRICS
         // =====================================================
@@ -8471,6 +8468,11 @@ export default async function handler(req, res) {
                 0,
                 historicalCandles.length
             );
+
+        // V22.1 FIX: finalDiscovery must exist before its raw records
+        // are passed into the temporal regime audit.
+        const v22TemporalRegimeAudit =
+            buildV22TemporalRegimeAudit(finalDiscovery.rawRecords);
 
         const edgeAnatomy =
             buildEdgeAnatomy(
