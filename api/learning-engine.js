@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V16.1";
+    const VERSION = "V16.2";
 
     try {
 
@@ -4547,145 +4547,59 @@ export default async function handler(req, res) {
         // validate, select, or alter any candidate.
         // =====================================================
 
-        function buildV16ActiveContextStabilityAudit(records, start, end) {
+        function buildV16ActiveContextStabilityAudit(contextPatterns) {
 
-            const safe = safeArray(records)
-                .filter(x =>
-                    x &&
-                    x.side === ADAPTIVE_CONTEXT_SIDE &&
-                    Number.isFinite(x.index) &&
-                    Number.isFinite(x.resultR)
-                );
-
-            const contextMap = new Map();
-
-            function contextKey(record) {
-                return [
-                    record.side,
-                    `S:${record.setup}`,
-                    `T:${record.trend}`,
-                    `V:${record.vwapDirection}`,
-                    `G:${record.regime}`,
-                    `H:${record.timeBucket}`
-                ].join("|");
-            }
-
-            function metrics(rows) {
-                const trades = rows.length;
-                const wins = rows.filter(x => x.resultR > 0).length;
-                const losses = rows.filter(x => x.resultR < 0).length;
-                const timeouts = rows.filter(x => x.resultR === 0).length;
-                const decisiveTrades = wins + losses;
-                const netR = rows.reduce((sum, x) => sum + x.resultR, 0);
-                const winR = rows.filter(x => x.resultR > 0)
-                    .reduce((sum, x) => sum + x.resultR, 0);
-                const lossR = Math.abs(rows.filter(x => x.resultR < 0)
-                    .reduce((sum, x) => sum + x.resultR, 0));
-                return {
-                    trades,
-                    wins,
-                    losses,
-                    timeouts,
-                    decisiveTrades,
-                    winRate: decisiveTrades ? round((wins / decisiveTrades) * 100, 2) : 0,
-                    netR: round(netR, 4),
-                    expectedValueR: trades ? round(netR / trades, 4) : 0,
-                    profitFactor: lossR > 0 ? round(winR / lossR, 4) : 0
-                };
-            }
-
-            const width = Math.max(1, (end - start) / 8);
-            const recentStart = start + Math.floor((end - start) * 0.75);
-            const earlyEnd = start + Math.floor((end - start) * 0.5);
-
-            for (const record of safe) {
-                const key = contextKey(record);
-                if (!contextMap.has(key)) contextMap.set(key, []);
-                contextMap.get(key).push(record);
-            }
-
-            const variants = Array.from(contextMap.entries()).map(([key, rows]) => {
-                const sorted = [...rows].sort((a,b) => a.index - b.index);
-                const early = sorted.filter(x => x.index < earlyEnd);
-                const recent = sorted.filter(x => x.index >= recentStart);
-                const sections = Array.from({length: 8}, (_, i) => {
-                    const sectionStart = start + Math.floor(i * width);
-                    const sectionEnd = i === 7 ? end : start + Math.floor((i + 1) * width);
-                    return metrics(sorted.filter(x => x.index >= sectionStart && x.index < sectionEnd));
-                });
-
-                // Exponential recency weighting over records. The half-life is
-                // intentionally fixed and diagnostic-only; it is not the
-                // adaptive gate and never controls promotion.
-                const halfLife = 30;
-                const lambda = Math.log(2) / halfLife;
-                const latestIndex = sorted.length ? sorted[sorted.length - 1].index : end;
-                let weightedSum = 0;
-                let weightSum = 0;
-                for (const r of sorted) {
-                    const age = Math.max(0, latestIndex - r.index);
-                    const w = Math.exp(-lambda * age / 30);
-                    weightedSum += r.resultR * w;
-                    weightSum += w;
-                }
-                const weightedEV = weightSum ? weightedSum / weightSum : 0;
-
-                const positiveSections = sections.filter(x => x.trades > 0 && x.expectedValueR > 0).length;
-                const negativeSections = sections.filter(x => x.trades > 0 && x.expectedValueR <= 0).length;
-                const recentRows = sorted.filter(x => x.index >= recentStart);
-                const recent = metrics(recentRows);
-                const overall = metrics(sorted);
-                const earlyMetrics = metrics(early);
-
-                let status = "INSUFFICIENT_RECENT_EVIDENCE";
-                if (recent.trades >= 4 && recent.decisiveTrades >= 3) {
-                    if (recent.expectedValueR > 0 && weightedEV > 0 && recent.profitFactor >= 1.05) {
-                        status = "RECENTLY_POSITIVE_CANDIDATE_PROFILE";
-                    } else if (recent.expectedValueR <= 0 || weightedEV <= 0) {
-                        status = "RECENT_WEAKNESS";
-                    } else {
-                        status = "MIXED_RECENT_EVIDENCE";
-                    }
-                }
-
-                return {
-                    key,
-                    overall,
-                    early: earlyMetrics,
-                    recent,
-                    recencyWeighted: {
-                        halfLifeRecords: halfLife,
-                        weightedEV: round(weightedEV, 4)
-                    },
-                    chronology: {
-                        sections,
-                        positiveSections,
-                        negativeOrFlatSections: negativeSections
-                    },
-                    status,
+            // V16.2 PERFORMANCE-SAFE AUDIT
+            // Uses already-computed discovery summaries instead of rescanning
+            // every raw discovery record. This keeps the diagnostic cheap enough
+            // for a Vercel serverless invocation while preserving its diagnostic
+            // only purpose.
+            const variants = safeArray(contextPatterns)
+                .filter(x => x && x.side === ADAPTIVE_CONTEXT_SIDE)
+                .map(x => ({
+                    key: x.key || null,
+                    level: x.level || "CONTEXT",
+                    trades: x.trades ?? 0,
+                    decisiveTrades: x.decisiveTrades ?? 0,
+                    EV: x.expectedValueR ?? 0,
+                    PF: x.profitFactor ?? 0,
+                    profitableSections: x.profitableSections ?? 0,
+                    recentTrades: x.recentTrades ?? null,
+                    recentDecisiveTrades: x.recentDecisiveTrades ?? null,
+                    recentEV: x.recentEV ?? null,
+                    recentPF: x.recentPF ?? null,
+                    contextVariants: x.contextVariants ?? 0,
+                    qualified: !!x.qualified,
+                    adaptiveGatePassed: !!x.adaptiveGate?.passed,
+                    adaptiveGateReasons: safeArray(x.adaptiveGate?.reasons),
+                    status:
+                        Number(x.recentEV) > 0 && Number(x.recentPF) >= 1.05
+                            ? "RECENTLY_POSITIVE_CANDIDATE_PROFILE"
+                            : Number(x.recentEV) < 0 || Number(x.recentPF) > 0 && Number(x.recentPF) < 1.05
+                                ? "RECENT_WEAKNESS"
+                                : "INSUFFICIENT_OR_MIXED_RECENT_EVIDENCE",
                     diagnosticOnly: true
-                };
-            });
+                }));
 
-            variants.sort((a,b) => {
-                const statusRank = {
+            variants.sort((a, b) => {
+                const rank = {
                     RECENTLY_POSITIVE_CANDIDATE_PROFILE: 3,
-                    MIXED_RECENT_EVIDENCE: 2,
-                    INSUFFICIENT_RECENT_EVIDENCE: 1,
+                    INSUFFICIENT_OR_MIXED_RECENT_EVIDENCE: 1,
                     RECENT_WEAKNESS: 0
                 };
-                if (statusRank[b.status] !== statusRank[a.status]) return statusRank[b.status] - statusRank[a.status];
-                if (b.recent.expectedValueR !== a.recent.expectedValueR) return b.recent.expectedValueR - a.recent.expectedValueR;
-                return b.overall.trades - a.overall.trades;
+                if (rank[b.status] !== rank[a.status]) {
+                    return rank[b.status] - rank[a.status];
+                }
+                if ((b.recentEV ?? -Infinity) !== (a.recentEV ?? -Infinity)) {
+                    return (b.recentEV ?? -Infinity) - (a.recentEV ?? -Infinity);
+                }
+                return (b.EV ?? 0) - (a.EV ?? 0);
             });
 
             return {
-                purpose: "Identify context variants with recent and recency-weighted discovery evidence without using validation/OOS outcomes.",
+                purpose: "Identify active SELL context variants from already-computed discovery summaries without rescanning raw records.",
                 sample: {
-                    sellDiscoveryRecords: safe.length,
-                    discoveredContextVariants: variants.length,
-                    recentWindowStart: recentStart,
-                    discoveryEnd: end
+                    sellDiscoveryVariants: variants.length
                 },
                 statusCounts: variants.reduce((acc, x) => {
                     acc[x.status] = (acc[x.status] || 0) + 1;
@@ -4693,7 +4607,8 @@ export default async function handler(req, res) {
                 }, {}),
                 strongestRecentVariants: variants.slice(0, 10),
                 allVariants: variants,
-                guard: "Diagnostic only. V16 does not promote candidates, lower thresholds, use validation/OOS outcomes for discovery, alter true-OOS selection, or place real orders."
+                performanceSafe: true,
+                guard: "Diagnostic only. V16.2 does not rescan candles, promote candidates, lower thresholds, use validation/OOS outcomes for discovery, alter true-OOS selection, or place real orders."
             };
         }
 
@@ -8101,7 +8016,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V16_1_ACTIVE_CONTEXT_STABILITY_AUDIT_TRUE_WALK_FORWARD",
+                "V16_2_ACTIVE_CONTEXT_STABILITY_AUDIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -8411,9 +8326,7 @@ export default async function handler(req, res) {
             v16ActiveContextStabilityAudit: (() => {
                 try {
                     return buildV16ActiveContextStabilityAudit(
-                        finalDiscovery?.rawRecords || [],
-                        0,
-                        historicalCandles.length
+                        finalDiscovery?.contextPatterns || []
                     );
                 } catch (auditError) {
                     return {
@@ -8421,7 +8334,7 @@ export default async function handler(req, res) {
                         status: "AUDIT_ERROR",
                         error: String(auditError?.message || auditError),
                         diagnosticOnly: true,
-                        guard: "V16.1 crash-safe diagnostic. Audit failure cannot affect promotion, validation, OOS, or trade execution."
+                        guard: "V16.2 crash-safe diagnostic. Audit failure cannot affect promotion, validation, OOS, or trade execution."
                     };
                 }
             })(),
@@ -8845,7 +8758,7 @@ export default async function handler(req, res) {
     } catch (error) {
 
         console.error(
-            "TradeMind Pro V14.9 ERROR:",
+            "TradeMind Pro V16.2 ERROR:",
             error
         );
 
