@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V16.2";
+    const VERSION = "V17";
 
     try {
 
@@ -183,6 +183,20 @@ export default async function handler(req, res) {
         const V153_TARGET_SIDE = "SELL";
         const V153_TARGET_SETUP = "VWAP_PULLBACK";
         const V153_TARGET_TREND = "BEARISH";
+
+        // =====================================================
+        // V17 REGIME-AWARE CANDIDATE REDESIGN
+        // -----------------------------------------------------
+        // Predefined hypothesis lane: evaluate setup + trend +
+        // regime as a single candidate identity. This separates
+        // TRANSITION from TRENDING without changing validation/OOS.
+        // =====================================================
+        const V17_REGIME_AWARE_SIDE = "SELL";
+        const V17_REGIME_AWARE_MIN_SAMPLES = PATTERN_MIN_SAMPLES;
+        const V17_REGIME_AWARE_MIN_DECISIVE = PATTERN_MIN_DECISIVE;
+        const V17_REGIME_AWARE_MIN_EV = PATTERN_MIN_EV;
+        const V17_REGIME_AWARE_MIN_PF = PATTERN_MIN_PF;
+        const V17_REGIME_AWARE_MIN_STABLE_SECTIONS = MIN_STABLE_SECTIONS;
 
         // V14.9 CORE EDGE THRESHOLDS (UNCHANGED)
         // Core edges aggregate detailed context variants and
@@ -1627,6 +1641,23 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
+        // V17 REGIME-AWARE KEY
+        // Aggregates across time bucket and RSI while preserving
+        // side + setup + trend + regime.
+        function regimeSetupKey(
+            side,
+            setup,
+            f
+        ) {
+
+            return [
+                side,
+                `S:${setup}`,
+                `T:${f.trend}`,
+                `G:${f.regime}`
+            ].join("|");
+        }
+
         // =====================================================
         // TRADE EVALUATION
         // =====================================================
@@ -2417,6 +2448,9 @@ export default async function handler(req, res) {
             const contextMap =
                 new Map();
 
+            const regimeSetupMap =
+                new Map();
+
             const rawRecords = [];
 
             const stop =
@@ -2526,6 +2560,24 @@ export default async function handler(req, res) {
 
                     contextMap
                         .get(record.regimeContext)
+                        .push(record);
+
+                    const regimeSetup =
+                        regimeSetupKey(
+                            record.side,
+                            record.setup,
+                            {
+                                trend: record.trend,
+                                regime: record.regime
+                            }
+                        );
+
+                    if (!regimeSetupMap.has(regimeSetup)) {
+                        regimeSetupMap.set(regimeSetup, []);
+                    }
+
+                    regimeSetupMap
+                        .get(regimeSetup)
                         .push(record);
                 }
             }
@@ -2862,6 +2914,29 @@ export default async function handler(req, res) {
                 );
             }
 
+            const regimeSetupPatterns = [];
+
+            for (const [key, records] of regimeSetupMap) {
+                const summary = summarize(key, records, "PATTERN");
+                summary.level = "REGIME_SETUP";
+                summary.direction = V17_REGIME_AWARE_SIDE;
+                summary.regimeAware = true;
+                regimeSetupPatterns.push(summary);
+            }
+
+            const qualifiedRegimeSetupPatterns =
+                regimeSetupPatterns
+                    .filter(x =>
+                        String(x.key).startsWith(`${V17_REGIME_AWARE_SIDE}|`) &&
+                        x.trades >= V17_REGIME_AWARE_MIN_SAMPLES &&
+                        x.decisiveTrades >= V17_REGIME_AWARE_MIN_DECISIVE &&
+                        x.expectedValueR >= V17_REGIME_AWARE_MIN_EV &&
+                        x.profitFactor >= V17_REGIME_AWARE_MIN_PF &&
+                        x.stableSections >= V17_REGIME_AWARE_MIN_STABLE_SECTIONS &&
+                        x.recentEV >= 0
+                    )
+                    .map(x => ({ ...x, level: "REGIME_SETUP", direction: V17_REGIME_AWARE_SIDE }));
+
             const directionalPatterns =
                 patterns
                     .filter(x =>
@@ -2930,6 +3005,10 @@ export default async function handler(req, res) {
                 directionalPatterns,
 
                 contextPatterns,
+
+                regimeSetupPatterns,
+
+                qualifiedRegimeSetupPatterns,
 
                 qualifiedContextPatterns,
 
@@ -3151,6 +3230,8 @@ export default async function handler(req, res) {
                     const trendToken = candidateKey.match(/\|T:([^|]+)/);
                     const candidateSetup = setupToken ? setupToken[1] : null;
                     const candidateTrend = trendToken ? trendToken[1] : null;
+                    const regimeToken = candidateKey.match(/\|G:([^|]+)/);
+                    const candidateRegime = regimeToken ? regimeToken[1] : null;
 
                     if (candidateSide && setup.side !== candidateSide) {
                         continue;
@@ -3160,10 +3241,14 @@ export default async function handler(req, res) {
                         continue;
                     }
 
-                    if (candidate.level === "CONTEXT" || candidate.level === "ADAPTIVE_CONTEXT") {
+                    if (candidate.level === "CONTEXT" || candidate.level === "ADAPTIVE_CONTEXT" || candidate.level === "REGIME_SETUP") {
                         if (candidateTrend && f.trend !== candidateTrend) {
                             continue;
                         }
+                    }
+
+                    if (candidate.level === "REGIME_SETUP" && candidateRegime && f.regime !== candidateRegime) {
+                        continue;
                     }
 
                     const key =
@@ -3205,7 +3290,13 @@ export default async function handler(req, res) {
                                             setup.setup,
                                             f
                                         ) === candidate.key
-                                        : key === candidate.key;
+                                        : candidate.level === "REGIME_SETUP"
+                                            ? regimeSetupKey(
+                                                setup.side,
+                                                setup.setup,
+                                                f
+                                            ) === candidate.key
+                                            : key === candidate.key;
 
                     if (!matched) {
                         continue;
@@ -3639,8 +3730,10 @@ export default async function handler(req, res) {
                 const trendToken = key.match(/\|T:([^|]+)/);
                 const candidateSetup = setupToken ? setupToken[1] : null;
                 const candidateTrend = trendToken ? trendToken[1] : null;
+                const regimeToken = candidateKey.match(/\|G:([^|]+)/);
+                const candidateRegime = regimeToken ? regimeToken[1] : null;
 
-                if (!candidateSide || !candidateSetup || !candidateTrend) {
+                if (!candidateSide || !candidateSetup || !candidateTrend || (candidate.level === "REGIME_SETUP" && !candidateRegime)) {
                     reasons.push("CANDIDATE_IDENTITY_UNRESOLVED");
                 }
 
@@ -3740,6 +3833,52 @@ export default async function handler(req, res) {
             };
         }
 
+        // =====================================================
+        // V17 REGIME-AWARE CANDIDATE AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. Shows the setup x regime cells that
+        // pass the unchanged discovery evidence floor.
+        // =====================================================
+        function buildV17RegimeAwareCandidateAudit(discovery) {
+            const all = safeArray(discovery?.regimeSetupPatterns);
+            const qualified = safeArray(discovery?.qualifiedRegimeSetupPatterns);
+
+            const candidates = all.map(x => ({
+                key: x.key,
+                setup: String(x.key).match(/\|S:([^|]+)/)?.[1] || null,
+                trend: String(x.key).match(/\|T:([^|]+)/)?.[1] || null,
+                regime: String(x.key).match(/\|G:([^|]+)/)?.[1] || null,
+                samples: x.samples,
+                decisiveTrades: x.decisiveTrades,
+                EV: x.expectedValueR,
+                PF: x.profitFactor,
+                stableSections: x.stableSections,
+                recentEV: x.recentEV,
+                recentPF: x.recentPF,
+                qualified: !!x.qualified,
+                entersV17Pool: qualified.some(q => q.key === x.key)
+            }));
+
+            candidates.sort((a,b) => (b.recentEV ?? -999) - (a.recentEV ?? -999));
+
+            return {
+                purpose: "Compare setup + regime cells before untouched validation without changing validation/OOS rules.",
+                hypothesis: "Separate TRANSITION from TRENDING and evaluate VWAP_PULLBACK versus TREND_FOLLOW using the unchanged discovery evidence floor.",
+                thresholds: {
+                    minimumSamples: V17_REGIME_AWARE_MIN_SAMPLES,
+                    minimumDecisive: V17_REGIME_AWARE_MIN_DECISIVE,
+                    minimumEV: V17_REGIME_AWARE_MIN_EV,
+                    minimumPF: V17_REGIME_AWARE_MIN_PF,
+                    minimumStableSections: V17_REGIME_AWARE_MIN_STABLE_SECTIONS,
+                    minimumRecentEV: 0
+                },
+                discoveredCells: all.length,
+                qualifiedCells: qualified.length,
+                candidates,
+                diagnosticOnly: true
+            };
+        }
+
         function promoteCandidates(
             candles,
             discovery,
@@ -3810,6 +3949,11 @@ export default async function handler(req, res) {
                     discovery.adaptiveContextPatterns
                 );
 
+            const regimeAware =
+                safeArray(
+                    discovery.qualifiedRegimeSetupPatterns
+                );
+
             const v154QualificationDiagnostics =
                 buildV154QualificationDiagnostics(
                     discovery,
@@ -3832,7 +3976,8 @@ export default async function handler(req, res) {
             const qualified =
                 [
                     ...qualifiedContext,
-                    ...adaptiveContext
+                    ...adaptiveContext,
+                    ...regimeAware
                 ].filter(
                     x => !!x && !!x.key
                 );
@@ -3883,7 +4028,8 @@ export default async function handler(req, res) {
                  */
                 if (
                     candidate.level === "CONTEXT" ||
-                    candidate.level === "ADAPTIVE_CONTEXT"
+                    candidate.level === "ADAPTIVE_CONTEXT" ||
+                    candidate.level === "REGIME_SETUP"
                 ) {
 
                     if (!family) {
@@ -4281,6 +4427,9 @@ export default async function handler(req, res) {
 
                     adaptiveContext:
                         adaptiveContext.length,
+
+                    regimeAware:
+                        regimeAware.length,
 
                     totalQualified:
                         qualified.length,
@@ -5056,6 +5205,20 @@ export default async function handler(req, res) {
                                     return (
                                         candidate.key ===
                                         regimeContextKey(
+                                            setup.side,
+                                            setup.setup,
+                                            f
+                                        )
+                                    );
+                                }
+
+                                if (
+                                    candidate.level ===
+                                    "REGIME_SETUP"
+                                ) {
+                                    return (
+                                        candidate.key ===
+                                        regimeSetupKey(
                                             setup.side,
                                             setup.setup,
                                             f
@@ -7564,6 +7727,20 @@ export default async function handler(req, res) {
 
                             if (
                                 candidate.level ===
+                                "REGIME_SETUP"
+                            ) {
+                                return (
+                                    candidate.key ===
+                                    regimeSetupKey(
+                                        setup.side,
+                                        setup.setup,
+                                        currentFeatures
+                                    )
+                                );
+                            }
+
+                            if (
+                                candidate.level ===
                                 "DIRECTIONAL"
                             ) {
 
@@ -8016,7 +8193,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V16_2_ACTIVE_CONTEXT_STABILITY_AUDIT_TRUE_WALK_FORWARD",
+                "V17_REGIME_AWARE_CANDIDATE_REDESIGN_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -8216,6 +8393,12 @@ export default async function handler(req, res) {
                 adaptiveContextPatterns:
                     safeArray(finalDiscovery.adaptiveContextPatterns).length,
 
+                regimeSetupPatterns:
+                    safeArray(finalDiscovery.regimeSetupPatterns).length,
+
+                qualifiedRegimeSetupPatterns:
+                    safeArray(finalDiscovery.qualifiedRegimeSetupPatterns).length,
+
                 rawLearningRecords:
                     edgeAnatomy.rawLearningRecords,
 
@@ -8273,11 +8456,21 @@ export default async function handler(req, res) {
                             "ADAPTIVE_CONTEXT"
                     ).length,
 
+                regimeSetupEdges:
+                    finalSelected.filter(
+                        x =>
+                            x.level ===
+                            "REGIME_SETUP"
+                    ).length,
+
                 independentSelectedFamilies:
                     finalDiversified
                         .independentFamilies,
 
                 candidateFlow,
+
+                v17RegimeAwareCandidateAudit:
+                    buildV17RegimeAwareCandidateAudit(finalDiscovery),
 
                 v157ValidationFailureAudit:
                     buildV157ValidationFailureAudit(
@@ -8758,7 +8951,7 @@ export default async function handler(req, res) {
     } catch (error) {
 
         console.error(
-            "TradeMind Pro V16.2 ERROR:",
+            "TradeMind Pro V17 ERROR:",
             error
         );
 
