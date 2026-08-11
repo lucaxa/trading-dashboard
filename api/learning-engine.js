@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V15.1 — SELL REGIME EDGE + FAST EXIT VALIDATION ENGINE
+ V15.4 — SELL REGIME EDGE + FAST EXIT QUALIFICATION DIAGNOSTIC ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.3";
+    const VERSION = "V15.4";
 
     try {
 
@@ -172,7 +172,7 @@ export default async function handler(req, res) {
         const V152_GATE_MAX_RECENT_TIMEOUTS = 4;
 
         // =====================================================
-        // V15.3 FOCUSED SURVIVAL TEST
+        // V15.4 FOCUSED SURVIVAL TEST + QUALIFICATION DIAGNOSTIC
         // -----------------------------------------------------
         // V15.2 showed that SELL|VWAP_PULLBACK|BEARISH is the
         // strongest currently surviving family candidate. V15.3
@@ -7367,7 +7367,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V15_1_SELL_REGIME_FAST_EXIT_TRUE_WALK_FORWARD",
+                "V15_4_QUALIFICATION_DIAGNOSTIC_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
