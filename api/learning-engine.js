@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V21";
+    const VERSION = "V22";
 
     try {
 
@@ -6824,6 +6824,193 @@ export default async function handler(req, res) {
             buildV21EdgePersistenceAudit(foldResults);
 
         // =====================================================
+        // V22 TEMPORAL-REGIME ADAPTATION AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. Measures whether SELL setup/regime
+        // combinations persist, decay, or rotate across
+        // chronological learning windows. It does not create
+        // candidates, alter thresholds, promote edges, or affect
+        // validation/OOS execution.
+        // =====================================================
+        function buildV22TemporalRegimeAudit(records) {
+
+            const safe = safeArray(records)
+                .filter(x =>
+                    x &&
+                    x.side === "SELL" &&
+                    Number.isFinite(x.resultR) &&
+                    Number.isFinite(x.index)
+                )
+                .sort((a,b) => a.index - b.index);
+
+            const windowCount = 4;
+            const windows = [];
+
+            if (safe.length) {
+                for (let w = 0; w < windowCount; w++) {
+                    const start = Math.floor((safe.length * w) / windowCount);
+                    const end = w === windowCount - 1
+                        ? safe.length
+                        : Math.floor((safe.length * (w + 1)) / windowCount);
+                    const slice = safe.slice(start, end);
+                    const metrics = calculateMetrics(slice);
+                    windows.push({
+                        window: w + 1,
+                        recordStartOrdinal: start + 1,
+                        recordEndOrdinal: end,
+                        firstIndex: slice.length ? slice[0].index : null,
+                        lastIndex: slice.length ? slice[slice.length - 1].index : null,
+                        records: slice.length,
+                        metrics
+                    });
+                }
+            }
+
+            const keys = new Map();
+            for (const r of safe) {
+                const key = `${r.side}|S:${r.setup}|T:${r.trend}|G:${r.regime}`;
+                if (!keys.has(key)) {
+                    keys.set(key, {
+                        key,
+                        side: r.side,
+                        setup: r.setup,
+                        trend: r.trend,
+                        regime: r.regime,
+                        windows: Array.from({length: windowCount}, () => [])
+                    });
+                }
+                const ordinal = safe.indexOf(r);
+                const w = Math.min(windowCount - 1, Math.floor((ordinal * windowCount) / safe.length));
+                keys.get(key).windows[w].push(r);
+            }
+
+            function compactMetrics(input) {
+                const m = calculateMetrics(input);
+                return {
+                    samples: m.trades,
+                    decisiveTrades: m.decisiveTrades,
+                    wins: m.wins,
+                    losses: m.losses,
+                    timeouts: m.timeouts,
+                    netR: round(m.netR, 4),
+                    EV: round(m.expectedValueR, 4),
+                    PF: round(m.profitFactor, 4),
+                    winRate: round(m.winRate, 2)
+                };
+            }
+
+            const cells = [];
+            for (const cell of keys.values()) {
+                const byWindow = cell.windows.map((arr, i) => ({
+                    window: i + 1,
+                    ...compactMetrics(arr)
+                }));
+
+                const positiveWindows = byWindow.filter(x => x.EV > 0).length;
+                const negativeWindows = byWindow.filter(x => x.EV < 0).length;
+                const activeWindows = byWindow.filter(x => x.samples > 0).length;
+                const latest = byWindow[byWindow.length - 1];
+                const earlier = byWindow.slice(0, -1).filter(x => x.samples > 0);
+                const earlierEV = earlier.length
+                    ? earlier.reduce((a,x) => a + x.EV, 0) / earlier.length
+                    : 0;
+
+                let classification = "INSUFFICIENT_DATA";
+                if (activeWindows >= 3) {
+                    if (positiveWindows >= 3 && latest.EV >= 0 && latest.samples > 0) {
+                        classification = "PERSISTENT_REGIME_EDGE";
+                    } else if (positiveWindows >= 2 && latest.EV < 0) {
+                        classification = "RECENT_REGIME_DECAY";
+                    } else if (positiveWindows >= 2 && negativeWindows >= 1) {
+                        classification = "REGIME_INCONSISTENCY";
+                    } else if (positiveWindows === 1 && latest.EV > 0) {
+                        classification = "LATE_EMERGING_REGIME_EDGE";
+                    } else {
+                        classification = "NO_STABLE_REGIME_EDGE";
+                    }
+                } else if (activeWindows >= 2) {
+                    classification = positiveWindows === activeWindows
+                        ? "RECURRING_BUT_LIMITED_REGIME_EDGE"
+                        : "LIMITED_REGIME_EVIDENCE";
+                }
+
+                cells.push({
+                    key: cell.key,
+                    setup: cell.setup,
+                    trend: cell.trend,
+                    regime: cell.regime,
+                    activeWindows,
+                    positiveWindows,
+                    negativeWindows,
+                    earlierAverageEV: round(earlierEV, 4),
+                    latestEV: latest.EV,
+                    EVChangeLatestVsEarlier: round(latest.EV - earlierEV, 4),
+                    windows: byWindow,
+                    classification,
+                    diagnosticOnly: true
+                });
+            }
+
+            cells.sort((a,b) => {
+                const order = {
+                    PERSISTENT_REGIME_EDGE: 1,
+                    RECURRING_BUT_LIMITED_REGIME_EDGE: 2,
+                    LATE_EMERGING_REGIME_EDGE: 3,
+                    REGIME_INCONSISTENCY: 4,
+                    RECENT_REGIME_DECAY: 5,
+                    NO_STABLE_REGIME_EDGE: 6,
+                    LIMITED_REGIME_EVIDENCE: 7,
+                    INSUFFICIENT_DATA: 8
+                };
+                return (order[a.classification] || 99) - (order[b.classification] || 99);
+            });
+
+            const setupRegimeMatrix = {};
+            for (const c of cells) {
+                const k = `${c.setup}|${c.regime}`;
+                if (!setupRegimeMatrix[k]) {
+                    setupRegimeMatrix[k] = {
+                        setup: c.setup,
+                        regime: c.regime,
+                        candidateKeys: [],
+                        classifications: []
+                    };
+                }
+                setupRegimeMatrix[k].candidateKeys.push(c.key);
+                setupRegimeMatrix[k].classifications.push(c.classification);
+            }
+
+            return {
+                purpose: "Measure temporal persistence and regime rotation of SELL setup/trend/regime combinations across four chronological learning windows.",
+                windowing: {
+                    method: "Equal-count chronological quartiles over completed learning records.",
+                    windows: windows.map(x => ({
+                        window: x.window,
+                        records: x.records,
+                        firstIndex: x.firstIndex,
+                        lastIndex: x.lastIndex,
+                        metrics: x.metrics
+                    }))
+                },
+                cells,
+                setupRegimeMatrix: Object.values(setupRegimeMatrix),
+                summary: {
+                    persistentRegimeEdges: cells.filter(x => x.classification === "PERSISTENT_REGIME_EDGE").length,
+                    recurringButLimitedEdges: cells.filter(x => x.classification === "RECURRING_BUT_LIMITED_REGIME_EDGE").length,
+                    lateEmergingEdges: cells.filter(x => x.classification === "LATE_EMERGING_REGIME_EDGE").length,
+                    recentDecayEdges: cells.filter(x => x.classification === "RECENT_REGIME_DECAY").length,
+                    inconsistentEdges: cells.filter(x => x.classification === "REGIME_INCONSISTENCY").length,
+                    noStableEdges: cells.filter(x => x.classification === "NO_STABLE_REGIME_EDGE").length,
+                    stableRegimeEdgeDetected: cells.some(x => x.classification === "PERSISTENT_REGIME_EDGE")
+                },
+                interpretationGuard: "Diagnostic only. V22 does not create candidates, lower thresholds, promote edges, modify validation/OOS, or use future outcomes. Temporal windows are retrospective summaries of completed learning records."
+            };
+        }
+
+        const v22TemporalRegimeAudit =
+            buildV22TemporalRegimeAudit(finalDiscovery.rawRecords);
+
+        // =====================================================
         // GLOBAL TRUE OOS METRICS
         // =====================================================
 
@@ -9412,6 +9599,8 @@ export default async function handler(req, res) {
             v20CrossFoldCandidateStability,
 
             v21EdgePersistenceAudit,
+
+            v22TemporalRegimeAudit,
 
             trueOOS: {
                 metrics:
