@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V16 — ACTIVE CONTEXT STABILITY AUDIT ENGINE
+ V16.1 — ACTIVE CONTEXT STABILITY AUDIT ENGINE (CRASH-SAFE)
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V16";
+    const VERSION = "V16.1";
 
     try {
 
@@ -8101,7 +8101,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V16_ACTIVE_CONTEXT_STABILITY_AUDIT_TRUE_WALK_FORWARD",
+                "V16_1_ACTIVE_CONTEXT_STABILITY_AUDIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -8408,12 +8408,23 @@ export default async function handler(req, res) {
                     finalPromoted?.validationEnd ?? 0
                 ),
 
-            v16ActiveContextStabilityAudit:
-                buildV16ActiveContextStabilityAudit(
-                    finalDiscovery?.rawRecords || [],
-                    0,
-                    historicalCandles.length
-                ),
+            v16ActiveContextStabilityAudit: (() => {
+                try {
+                    return buildV16ActiveContextStabilityAudit(
+                        finalDiscovery?.rawRecords || [],
+                        0,
+                        historicalCandles.length
+                    );
+                } catch (auditError) {
+                    return {
+                        purpose: "Identify active context stability without affecting the trading pipeline.",
+                        status: "AUDIT_ERROR",
+                        error: String(auditError?.message || auditError),
+                        diagnosticOnly: true,
+                        guard: "V16.1 crash-safe diagnostic. Audit failure cannot affect promotion, validation, OOS, or trade execution."
+                    };
+                }
+            })(),
 
             strategyMechanicsDiagnostics,
 
