@@ -2888,6 +2888,10 @@ export default async function handler(req, res) {
 
             const validationResults = [];
 
+            // V14.7: validation survivors promoted from the
+            // candidate pipeline are collected here.
+            const candidates = [];
+
             const qualifiedFamilies =
                 discovery.families.filter(
                     x => x.qualified
