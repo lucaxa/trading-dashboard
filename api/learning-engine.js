@@ -2928,7 +2928,7 @@ export default async function handler(req, res) {
                 regimeSetupPatterns
                     .filter(x =>
                         String(x.key).startsWith(`${V17_REGIME_AWARE_SIDE}|`) &&
-                        x.trades >= V17_REGIME_AWARE_MIN_SAMPLES &&
+                        x.samples >= V17_REGIME_AWARE_MIN_SAMPLES &&
                         x.decisiveTrades >= V17_REGIME_AWARE_MIN_DECISIVE &&
                         x.expectedValueR >= V17_REGIME_AWARE_MIN_EV &&
                         x.profitFactor >= V17_REGIME_AWARE_MIN_PF &&
@@ -3010,12 +3010,58 @@ export default async function handler(req, res) {
 
                 qualifiedRegimeSetupPatterns,
 
+                v191RegimePromotionAudit:
+                    buildV191RegimePromotionAudit({
+                        regimeSetupPatterns,
+                        qualifiedRegimeSetupPatterns
+                    }),
+
                 qualifiedContextPatterns,
 
                 adaptiveContextPatterns,
 
                 rawRecords
             };
+        }
+
+        // =====================================================
+        // V19.1 REGIME CANDIDATE PROMOTION CONSISTENCY AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. Qualification and promotion now use
+        // the same summarize() sample field: samples.
+        // =====================================================
+        function buildV191RegimePromotionAudit(discovery) {
+            const all = safeArray(discovery?.regimeSetupPatterns);
+            const qualified = safeArray(discovery?.qualifiedRegimeSetupPatterns);
+
+            return all.map(x => {
+                const thresholdQualified =
+                    String(x.key).startsWith(`${V17_REGIME_AWARE_SIDE}|`) &&
+                    x.samples >= V17_REGIME_AWARE_MIN_SAMPLES &&
+                    x.decisiveTrades >= V17_REGIME_AWARE_MIN_DECISIVE &&
+                    x.expectedValueR >= V17_REGIME_AWARE_MIN_EV &&
+                    x.profitFactor >= V17_REGIME_AWARE_MIN_PF &&
+                    x.stableSections >= V17_REGIME_AWARE_MIN_STABLE_SECTIONS &&
+                    x.recentEV >= 0;
+
+                const inQualifiedPool = qualified.some(q => q.key === x.key);
+
+                return {
+                    key: x.key,
+                    samples: x.samples,
+                    decisiveTrades: x.decisiveTrades,
+                    EV: x.expectedValueR,
+                    PF: x.profitFactor,
+                    stableSections: x.stableSections,
+                    recentEV: x.recentEV,
+                    thresholdQualified,
+                    inQualifiedRegimePool: inQualifiedPool,
+                    consistent: thresholdQualified === inQualifiedPool,
+                    discrepancy: thresholdQualified && !inQualifiedPool
+                        ? "QUALIFIED_BUT_MISSING_FROM_POOL"
+                        : null
+                };
+            });
         }
 
         // =====================================================
@@ -8703,6 +8749,9 @@ export default async function handler(req, res) {
 
                 v17RegimeAwareCandidateAudit:
                     buildV17RegimeAwareCandidateAudit(finalDiscovery),
+
+                v191RegimePromotionAudit:
+                    safeArray(finalDiscovery.v191RegimePromotionAudit),
 
                 v157ValidationFailureAudit:
                     buildV157ValidationFailureAudit(
