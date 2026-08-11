@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.14 — REGIME FINGERPRINT DIAGNOSTIC ENGINE
+ V14.15 — REGIME-GATED EDGE TEST + ROLLING EVIDENCE DECAY ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,7 +12,7 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.14 PURPOSE
+ V14.15 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.14";
+    const VERSION = "V14.15";
 
     try {
 
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
 
-        // V14.14 REGIME-CONTEXT DISCOVERY
+        // V14.15 REGIME-CONTEXT DISCOVERY
         // Only SELL-side detailed edges are eligible for this
         // additional discovery lane. The candidate must still
         // independently satisfy the existing PATTERN thresholds
@@ -121,7 +121,7 @@ export default async function handler(req, res) {
         const DIRECTIONAL_MIN_FAMILY_EV = FAMILY_MIN_EV;
         const DIRECTIONAL_MIN_FAMILY_PF = FAMILY_MIN_PF;
 
-        // V14.14 REGIME-CONTEXT DISCOVERY
+        // V14.15 REGIME-CONTEXT DISCOVERY
         // Aggregate SELL evidence across RSI buckets while keeping
         // setup + trend + VWAP direction + regime + time bucket.
         // The existing PATTERN evidence floor remains unchanged.
@@ -133,6 +133,25 @@ export default async function handler(req, res) {
         const CONTEXT_MIN_PF = PATTERN_MIN_PF;
         const CONTEXT_MIN_FAMILY_EV = FAMILY_MIN_EV;
         const CONTEXT_MIN_FAMILY_PF = FAMILY_MIN_PF;
+
+        // =====================================================
+        // V14.15 ADAPTIVE REGIME GATE
+        // -----------------------------------------------------
+        // This lane does NOT promote an edge directly. It creates
+        // a controlled SELL-side adaptive candidate from a regime
+        // context only when recent evidence remains positive after
+        // exponential recency weighting. The candidate must still
+        // pass untouched validation and the existing true-OOS gates.
+        // =====================================================
+        const ADAPTIVE_CONTEXT_SIDE = "SELL";
+        const ADAPTIVE_CONTEXT_MIN_TOTAL_SAMPLES = 12;
+        const ADAPTIVE_CONTEXT_MIN_RECENT_SAMPLES = 8;
+        const ADAPTIVE_CONTEXT_MIN_RECENT_DECISIVE = 5;
+        const ADAPTIVE_CONTEXT_MIN_RECENT_EV = 0.05;
+        const ADAPTIVE_CONTEXT_MIN_RECENT_PF = 1.05;
+        const ADAPTIVE_CONTEXT_MAX_RECENT_LOSS_STREAK = 3;
+        const ADAPTIVE_HALF_LIFE_RECORDS = 60;
+        const ADAPTIVE_MIN_EFFECTIVE_SAMPLES = 6;
 
         // V14.9 CORE EDGE THRESHOLDS (UNCHANGED)
         // Core edges aggregate detailed context variants and
@@ -1545,7 +1564,7 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
-        // V14.14 REGIME-CONTEXT KEY
+        // V14.15 REGIME-CONTEXT KEY
         // RSI is intentionally excluded so nearby RSI buckets do not
         // fragment the same time/regime edge into tiny samples.
         function regimeContextKey(
@@ -2136,6 +2155,156 @@ export default async function handler(req, res) {
         }
      
           // =====================================================
+        // V14.15 ROLLING / DECAY EVIDENCE
+        // =====================================================
+
+        function rollingEvidenceMetrics(records, endIndex) {
+
+            const safe = safeArray(records)
+                .filter(x => Number.isFinite(x.index))
+                .sort((a, b) => a.index - b.index);
+
+            if (!safe.length) {
+                return {
+                    weightedSamples: 0,
+                    effectiveSamples: 0,
+                    weightedDecisive: 0,
+                    weightedWins: 0,
+                    weightedLosses: 0,
+                    weightedNetR: 0,
+                    weightedEV: 0,
+                    weightedPF: 0,
+                    maxRecentLossStreak: 0
+                };
+            }
+
+            let weightSum = 0;
+            let weightSquareSum = 0;
+            let weightedDecisive = 0;
+            let weightedWins = 0;
+            let weightedLosses = 0;
+            let weightedNetR = 0;
+            let weightedWinR = 0;
+            let weightedLossR = 0;
+
+            let recentLossStreak = 0;
+            let maxRecentLossStreak = 0;
+
+            for (const record of safe) {
+                const age = Math.max(0, endIndex - record.index);
+                const weight = Math.pow(0.5, age / ADAPTIVE_HALF_LIFE_RECORDS);
+
+                weightSum += weight;
+                weightSquareSum += weight * weight;
+                weightedNetR += weight * record.resultR;
+
+                if (record.resultR > 0) {
+                    weightedWins += weight;
+                    weightedDecisive += weight;
+                    weightedWinR += weight * record.resultR;
+                    recentLossStreak = 0;
+                } else if (record.resultR < 0) {
+                    weightedLosses += weight;
+                    weightedDecisive += weight;
+                    weightedLossR += weight * Math.abs(record.resultR);
+                    recentLossStreak++;
+                    maxRecentLossStreak = Math.max(maxRecentLossStreak, recentLossStreak);
+                } else {
+                    recentLossStreak = 0;
+                }
+            }
+
+            const effectiveSamples =
+                weightSquareSum > 0
+                    ? (weightSum * weightSum) / weightSquareSum
+                    : 0;
+
+            const weightedEV =
+                weightSum > 0 ? weightedNetR / weightSum : 0;
+
+            const weightedPF =
+                weightedLossR > 0 ? weightedWinR / weightedLossR : 0;
+
+            return {
+                weightedSamples: round(weightSum, 4),
+                effectiveSamples: round(effectiveSamples, 2),
+                weightedDecisive: round(weightedDecisive, 4),
+                weightedWins: round(weightedWins, 4),
+                weightedLosses: round(weightedLosses, 4),
+                weightedNetR: round(weightedNetR, 4),
+                weightedEV: round(weightedEV, 4),
+                weightedPF: round(weightedPF, 4),
+                maxRecentLossStreak
+            };
+        }
+
+        function adaptiveContextGate(candidate, discoveryEnd) {
+
+            const records = safeArray(candidate?.records);
+            const minRecordIndex = records.length
+                ? Math.min(...records.map(x => Number.isFinite(x.index) ? x.index : discoveryEnd))
+                : 0;
+            const trainingSpan = Math.max(1, discoveryEnd - minRecordIndex);
+            const recentStart =
+                Math.floor(discoveryEnd - trainingSpan * 0.35);
+
+            const recentRecords = records.filter(
+                x => Number.isFinite(x.index) && x.index >= recentStart && x.index < discoveryEnd
+            );
+
+            const recentMetrics = calculateMetrics(recentRecords);
+            const rolling = rollingEvidenceMetrics(records, discoveryEnd - 1);
+
+            const reasons = [];
+
+            if (records.length < ADAPTIVE_CONTEXT_MIN_TOTAL_SAMPLES) {
+                reasons.push("ADAPTIVE_INSUFFICIENT_TOTAL_SAMPLES");
+            }
+
+            if (recentMetrics.trades < ADAPTIVE_CONTEXT_MIN_RECENT_SAMPLES) {
+                reasons.push("ADAPTIVE_INSUFFICIENT_RECENT_SAMPLES");
+            }
+
+            if (recentMetrics.decisiveTrades < ADAPTIVE_CONTEXT_MIN_RECENT_DECISIVE) {
+                reasons.push("ADAPTIVE_INSUFFICIENT_RECENT_DECISIVE");
+            }
+
+            if (recentMetrics.expectedValueR < ADAPTIVE_CONTEXT_MIN_RECENT_EV) {
+                reasons.push("ADAPTIVE_RECENT_EV_BELOW_THRESHOLD");
+            }
+
+            if (recentMetrics.profitFactor < ADAPTIVE_CONTEXT_MIN_RECENT_PF) {
+                reasons.push("ADAPTIVE_RECENT_PF_BELOW_THRESHOLD");
+            }
+
+            if (recentMetrics.maxConsecutiveLosses > ADAPTIVE_CONTEXT_MAX_RECENT_LOSS_STREAK) {
+                reasons.push("ADAPTIVE_RECENT_LOSS_STREAK_TOO_HIGH");
+            }
+
+            if (rolling.effectiveSamples < ADAPTIVE_MIN_EFFECTIVE_SAMPLES) {
+                reasons.push("ADAPTIVE_EFFECTIVE_SAMPLE_FLOOR");
+            }
+
+            if (rolling.weightedEV < ADAPTIVE_CONTEXT_MIN_RECENT_EV) {
+                reasons.push("ADAPTIVE_DECAYED_EV_BELOW_THRESHOLD");
+            }
+
+            if (rolling.weightedPF < ADAPTIVE_CONTEXT_MIN_RECENT_PF) {
+                reasons.push("ADAPTIVE_DECAYED_PF_BELOW_THRESHOLD");
+            }
+
+            return {
+                passed: reasons.length === 0,
+                reasons,
+                recentMetrics,
+                rolling,
+                recentStart,
+                recentEnd: discoveryEnd - 1,
+                halfLifeRecords: ADAPTIVE_HALF_LIFE_RECORDS
+            };
+        }
+
+        // =====================================================
         // DISCOVERY CANDIDATES
         // =====================================================
 
@@ -2627,6 +2796,31 @@ export default async function handler(req, res) {
                         direction: CONTEXT_SIDE
                     }));
 
+            // V14.15 adaptive lane: recent/decayed evidence can qualify
+            // a SELL regime-context candidate for untouched validation.
+            // This is intentionally NOT a proven edge; validation/OOS
+            // thresholds remain unchanged.
+            const adaptiveContextPatterns =
+                contextPatterns
+                    .filter(x =>
+                        String(x.key).startsWith(
+                            `${ADAPTIVE_CONTEXT_SIDE}|`
+                        )
+                    )
+                    .map(x => {
+                        const gate = adaptiveContextGate(
+                            x,
+                            end
+                        );
+                        return {
+                            ...x,
+                            level: "ADAPTIVE_CONTEXT",
+                            direction: ADAPTIVE_CONTEXT_SIDE,
+                            adaptiveGate: gate
+                        };
+                    })
+                    .filter(x => x.adaptiveGate.passed);
+
             return {
 
                 families,
@@ -2640,6 +2834,8 @@ export default async function handler(req, res) {
                 contextPatterns,
 
                 qualifiedContextPatterns,
+
+                adaptiveContextPatterns,
 
                 rawRecords
             };
@@ -2661,6 +2857,22 @@ export default async function handler(req, res) {
                 candidate.level === "FAMILY"
             ) {
                 return candidate.key;
+            }
+
+            if (
+                candidate.level === "ADAPTIVE_CONTEXT"
+            ) {
+                const parts = String(candidate.key).split("|");
+                if (parts.length < 3) return null;
+                let setup = null;
+                let trend = null;
+                const side = parts[0];
+                for (const part of parts) {
+                    if (part.startsWith("S:")) setup = part.slice(2);
+                    if (part.startsWith("T:")) trend = part.slice(2);
+                }
+                if (!side || !setup || !trend) return null;
+                return familyKey(side, setup, trend);
             }
 
             const parts =
@@ -3164,12 +3376,18 @@ export default async function handler(req, res) {
                     discovery.qualifiedContextPatterns
                 );
 
+            const adaptiveContext =
+                safeArray(
+                    discovery.adaptiveContextPatterns
+                );
+
             const qualified =
                 [
                     ...qualifiedFamilies,
                     ...qualifiedCoreEdges,
                     ...qualifiedDirectional,
-                    ...qualifiedContext
+                    ...qualifiedContext,
+                    ...adaptiveContext
                 ];
 
             for (const candidate of qualified) {
@@ -3199,7 +3417,10 @@ export default async function handler(req, res) {
                  * positive enough to avoid promoting a detailed
                  * edge out of an outright losing family.
                  */
-                if (candidate.level === "CONTEXT") {
+                if (
+                    candidate.level === "CONTEXT" ||
+                    candidate.level === "ADAPTIVE_CONTEXT"
+                ) {
 
                     if (!family) {
                         candidatesRejectedBeforeValidation.push({
@@ -3594,6 +3815,9 @@ export default async function handler(req, res) {
                     qualifiedContext:
                         qualifiedContext.length,
 
+                    adaptiveContext:
+                        adaptiveContext.length,
+
                     totalQualified:
                         qualified.length,
 
@@ -3864,6 +4088,22 @@ export default async function handler(req, res) {
 
                                 if (
                                     candidate.level ===
+                                    "CONTEXT" ||
+                                    candidate.level ===
+                                    "ADAPTIVE_CONTEXT"
+                                ) {
+                                    return (
+                                        candidate.key ===
+                                        regimeContextKey(
+                                            setup.side,
+                                            setup.setup,
+                                            f
+                                        )
+                                    );
+                                }
+
+                                if (
+                                    candidate.level ===
                                     "FAMILY"
                                 ) {
 
@@ -3879,6 +4119,17 @@ export default async function handler(req, res) {
 
                     if (!match) {
                         continue;
+                    }
+
+                    if (
+                        setup.side === ADAPTIVE_CONTEXT_SIDE &&
+                        match.level === "ADAPTIVE_CONTEXT"
+                    ) {
+                        const gate = match.adaptiveGate ||
+                            adaptiveContextGate(match, match.records?.length ? Math.max(...match.records.map(x => x.index)) + 1 : testStart);
+                        if (!gate.passed) {
+                            continue;
+                        }
                     }
 
                     if (
@@ -5245,7 +5496,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // V14.14 REGIME-SHIFT / EDGE-DECAY DIAGNOSTICS
+        // V14.15 REGIME-SHIFT / EDGE-DECAY DIAGNOSTICS
         // Diagnostic only. No promotion thresholds or validation
         // gates are changed by this layer.
         // =====================================================
@@ -5476,7 +5727,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // V14.14 REGIME-FINGERPRINT DIAGNOSTICS
+        // V14.15 REGIME-FINGERPRINT DIAGNOSTICS
         // Diagnostic only. This layer compares profitable and
         // losing SELL periods to identify recurring context
         // fingerprints. It NEVER creates candidates, changes
@@ -5843,7 +6094,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.14 edge has survived regime-context discovery, isolated validation, regime-fingerprint diagnostics and anti-overfitting filters.",
+                "No V14.15 edge has survived regime-context discovery, isolated validation, regime-fingerprint diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -5914,7 +6165,9 @@ export default async function handler(req, res) {
 
                             if (
                                 candidate.level ===
-                                "CONTEXT"
+                                "CONTEXT" ||
+                                candidate.level ===
+                                "ADAPTIVE_CONTEXT"
                             ) {
 
                                 return (
@@ -5955,6 +6208,17 @@ export default async function handler(req, res) {
 
                 if (!match) {
                     continue;
+                }
+
+                if (
+                    setup.side === ADAPTIVE_CONTEXT_SIDE &&
+                    match.level === "ADAPTIVE_CONTEXT"
+                ) {
+                    const gate = match.adaptiveGate ||
+                        adaptiveContextGate(match, historicalCandles.length);
+                    if (!gate.passed) {
+                        continue;
+                    }
                 }
 
                 if (
@@ -6370,7 +6634,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_13_REGIME_SHIFT_EDGE_DECAY_DIAGNOSTIC_TRUE_WALK_FORWARD",
+                "V14_15_REGIME_GATED_EDGE_TEST_ROLLING_EVIDENCE_DECAY_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -6489,7 +6753,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through pre-validation rejection, validation rejection, survival and diversification.",
+                    "Every qualified candidate is traceable through pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -6507,7 +6771,7 @@ export default async function handler(req, res) {
                     "Trade outcomes cannot cross fold boundaries.",
 
                 objective:
-                    "Prefer NO_TRADE over weak or unstable evidence."
+                    "Prefer NO_TRADE over weak or unstable evidence; test only regime-active SELL edges."
             },
 
             robustness: {
@@ -6567,6 +6831,9 @@ export default async function handler(req, res) {
                         .qualifiedContextPatterns
                         .length,
 
+                adaptiveContextPatterns:
+                    safeArray(finalDiscovery.adaptiveContextPatterns).length,
+
                 rawLearningRecords:
                     edgeAnatomy.rawLearningRecords,
 
@@ -6617,6 +6884,13 @@ export default async function handler(req, res) {
                             "CONTEXT"
                     ).length,
 
+                adaptiveContextEdges:
+                    finalSelected.filter(
+                        x =>
+                            x.level ===
+                            "ADAPTIVE_CONTEXT"
+                    ).length,
+
                 independentSelectedFamilies:
                     finalDiversified
                         .independentFamilies,
@@ -6645,6 +6919,22 @@ export default async function handler(req, res) {
             edgeDecayDiagnostics,
 
             regimeFingerprintDiagnostics,
+
+            adaptiveRegimeGate: {
+                enabled: true,
+                side: ADAPTIVE_CONTEXT_SIDE,
+                minTotalSamples: ADAPTIVE_CONTEXT_MIN_TOTAL_SAMPLES,
+                minRecentSamples: ADAPTIVE_CONTEXT_MIN_RECENT_SAMPLES,
+                minRecentDecisive: ADAPTIVE_CONTEXT_MIN_RECENT_DECISIVE,
+                minRecentEV: ADAPTIVE_CONTEXT_MIN_RECENT_EV,
+                minRecentPF: ADAPTIVE_CONTEXT_MIN_RECENT_PF,
+                maxRecentLossStreak: ADAPTIVE_CONTEXT_MAX_RECENT_LOSS_STREAK,
+                halfLifeRecords: ADAPTIVE_HALF_LIFE_RECORDS,
+                minEffectiveSamples: ADAPTIVE_MIN_EFFECTIVE_SAMPLES,
+                candidatesDiscovered: safeArray(finalDiscovery.adaptiveContextPatterns).length,
+                purpose: "Test whether a SELL regime-context edge remains active when older evidence is exponentially down-weighted.",
+                guard: "Adaptive candidates still require isolated validation and the existing true-OOS profitability proof. No validation or OOS outcome is used to construct the gate."
+            },
 
             internalValidation: {
 
