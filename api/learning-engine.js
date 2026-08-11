@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V15.7 — VALIDATION FAILURE AUDIT ENGINE
+ V15.8 — VALIDATION OCCURRENCE AUDIT ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.7";
+    const VERSION = "V15.8";
 
     try {
 
@@ -3199,7 +3199,13 @@ export default async function handler(req, res) {
                                         setup.setup,
                                         f
                                     ) === candidate.key
-                                    : key === candidate.key;
+                                    : candidate.level === "ADAPTIVE_CONTEXT"
+                                        ? regimeContextKey(
+                                            setup.side,
+                                            setup.setup,
+                                            f
+                                        ) === candidate.key
+                                        : key === candidate.key;
 
                     if (!matched) {
                         continue;
@@ -4391,6 +4397,134 @@ export default async function handler(req, res) {
                 candidates,
                 guard:
                     "Diagnostic only. V15.7 does not lower thresholds, promote failed candidates, alter true OOS selection, or place real orders."
+            };
+        }
+
+        // =====================================================
+        // V15.8 VALIDATION OCCURRENCE AUDIT
+        // -----------------------------------------------------
+        // Diagnostic + correctness fix for adaptive-context
+        // validation. V15.7 used corePatternKey() for the final
+        // ADAPTIVE_CONTEXT match even though adaptive candidates
+        // are regime-context keys. That could produce a validation
+        // candidate with zero matched occurrences.
+        // V15.8 matches ADAPTIVE_CONTEXT against regimeContextKey()
+        // and exposes the occurrence funnel before confirmation,
+        // cooldown and exit evaluation.
+        // =====================================================
+        function buildV158ValidationOccurrenceAudit(
+            candles,
+            candidate,
+            validationStart,
+            validationEnd
+        ) {
+
+            if (!candidate) {
+                return {
+                    audited: false,
+                    reason: "NO_VALIDATION_CANDIDATE"
+                };
+            }
+
+            const candidateKey = String(candidate.key || "");
+            const candidateSide = candidateKey.split("|")[0] || null;
+            const setupToken = candidateKey.match(/\|S:([^|]+)/);
+            const trendToken = candidateKey.match(/\|T:([^|]+)/);
+            const candidateSetup = setupToken ? setupToken[1] : null;
+            const candidateTrend = trendToken ? trendToken[1] : null;
+
+            const counts = {
+                candlesScanned: 0,
+                featureAvailable: 0,
+                setupInstances: 0,
+                sideMatches: 0,
+                setupMatches: 0,
+                trendMatches: 0,
+                contextKeyMatches: 0,
+                adaptiveGateRejected: 0,
+                matchedOccurrences: 0
+            };
+
+            const examples = [];
+
+            for (let i = validationStart; i < validationEnd - 1; i++) {
+                counts.candlesScanned++;
+
+                const f = features(candles, i);
+                if (!f) continue;
+                counts.featureAvailable++;
+
+                const setups = detectSetups(candles, i);
+                counts.setupInstances += setups.length;
+
+                for (const setup of setups) {
+                    if (candidateSide && setup.side !== candidateSide) continue;
+                    counts.sideMatches++;
+
+                    if (candidateSetup && setup.setup !== candidateSetup) continue;
+                    counts.setupMatches++;
+
+                    if (candidate.level === "CONTEXT" || candidate.level === "ADAPTIVE_CONTEXT") {
+                        if (candidateTrend && f.trend !== candidateTrend) continue;
+                    }
+                    counts.trendMatches++;
+
+                    const contextKey = regimeContextKey(
+                        setup.side,
+                        setup.setup,
+                        f
+                    );
+
+                    if (contextKey !== candidate.key) continue;
+                    counts.contextKeyMatches++;
+
+                    if (candidate.level === "ADAPTIVE_CONTEXT") {
+                        const gate = pointInTimeRegimeGate(candidate.records, i);
+                        if (!gate.passed) {
+                            counts.adaptiveGateRejected++;
+                            continue;
+                        }
+                    }
+
+                    counts.matchedOccurrences++;
+                    if (examples.length < 10) {
+                        examples.push({
+                            index: i,
+                            ts: candles[i].ts,
+                            contextKey,
+                            trend: f.trend,
+                            regime: f.regime,
+                            timeBucket: f.timeBucket,
+                            vwapDirection: f.vwapDirection
+                        });
+                    }
+                }
+            }
+
+            return {
+                audited: true,
+                candidate: {
+                    key: candidate.key,
+                    level: candidate.level,
+                    side: candidateSide,
+                    setup: candidateSetup,
+                    trend: candidateTrend
+                },
+                validationWindow: {
+                    start: validationStart,
+                    end: validationEnd,
+                    candles: Math.max(0, validationEnd - validationStart)
+                },
+                counts,
+                examples,
+                diagnosis:
+                    counts.contextKeyMatches > 0 && counts.matchedOccurrences === 0
+                        ? "CONTEXT_MATCHES_BLOCKED_BY_ADAPTIVE_GATE"
+                        : counts.contextKeyMatches === 0
+                            ? "NO_REGIME_CONTEXT_KEY_MATCHES"
+                            : "OCCURRENCES_FOUND",
+                guard:
+                    "V15.8 preserves validation thresholds and OOS rules. Adaptive-context candidates are matched using their regime-context identity."
             };
         }
 
@@ -7614,7 +7748,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V15_7_VALIDATION_FAILURE_AUDIT_TRUE_WALK_FORWARD",
+                "V15_8_VALIDATION_OCCURRENCE_AUDIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -7733,7 +7867,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.7 additionally audits exact validation failure reasons and threshold margins; exit mechanics are compared diagnostically on a fixed entry set.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.8 additionally audits validation occurrence matching for regime-context candidates and retains the V15.7 validation-failure audit; exit mechanics are compared diagnostically on a fixed entry set.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -7904,6 +8038,14 @@ export default async function handler(req, res) {
             edgeDecayDiagnostics,
 
             regimeFingerprintDiagnostics,
+
+            v158ValidationOccurrenceAudit:
+                buildV158ValidationOccurrenceAudit(
+                    rows,
+                    finalPromoted?.validationCandidates?.[0] || null,
+                    finalPromoted?.validationStart ?? 0,
+                    finalPromoted?.validationEnd ?? 0
+                ),
 
             strategyMechanicsDiagnostics,
 
