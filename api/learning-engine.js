@@ -21,35 +21,36 @@
 
      DISCOVERY
          ↓
-     INTERNAL VALIDATION
+     UNTOUCHED INTERNAL VALIDATION
          ↓
-     SURVIVAL TEST
+     EDGE SURVIVAL
          ↓
      TRUE OOS
          ↓
      EDGE PROMOTION
 
- Main protections:
+ IMPORTANT V14.5 LEAKAGE FIXES
+ ----------------------------------------------------------
 
- 1. Anti-overfitting validation
- 2. Pattern must survive validation
- 3. Pattern must not rely only on one historical section
- 4. Pattern must justify itself against its family
- 5. Anti-chasing protection
- 6. Stronger trend quality
- 7. VWAP pullback independently validated
- 8. Edge persistence tracking
- 9. Edge decay tracking
-10. Multiple profitable OOS folds required
-11. No overlapping trades
-12. Current candle excluded
-13. No future-data leakage
-14. No forced trades
-15. Paper only
+ 1. Discovery NEVER sees validation candles.
+ 2. Discovery outcomes cannot enter validation.
+ 3. Validation outcomes cannot enter OOS.
+ 4. Validation is a completely separate chronological block.
+ 5. OOS begins only after training + validation.
+ 6. No future candles are used to determine training outcomes.
+ 7. Current candle is excluded from learning.
+ 8. Pattern must survive internal validation.
+ 9. Pattern cannot override a losing family.
+10. Multiple profitable OOS folds are required.
+11. No overlapping trades.
+12. No forced trades.
+13. Paper only.
 
- IMPORTANT:
- This version intentionally prefers NO_TRADE over weak
- evidence.
+ V14.5 intentionally prefers:
+
+             NO_TRADE
+
+ over weak or over-fitted evidence.
 ===========================================================
 */
 
@@ -1062,9 +1063,12 @@ export default async function handler(req, res) {
                 "AT";
 
             if (close > vwap) {
+
                 vwapDirection =
                     "ABOVE";
+
             } else if (close < vwap) {
+
                 vwapDirection =
                     "BELOW";
             }
@@ -1078,15 +1082,22 @@ export default async function handler(req, res) {
                 "NEUTRAL";
 
             if (rsi14 >= 60) {
+
                 rsiBucket =
                     "HIGH";
+
             } else if (rsi14 >= 50) {
+
                 rsiBucket =
                     "NEUTRAL_HIGH";
+
             } else if (rsi14 <= 40) {
+
                 rsiBucket =
                     "LOW";
+
             } else {
+
                 rsiBucket =
                     "NEUTRAL_LOW";
             }
@@ -1095,9 +1106,12 @@ export default async function handler(req, res) {
                 "NORMAL";
 
             if (atr14 > 18) {
+
                 volatility =
                     "HIGH";
+
             } else if (atr14 < 8) {
+
                 volatility =
                     "LOW";
             }
@@ -1347,7 +1361,9 @@ export default async function handler(req, res) {
             if (!f) {
 
                 return {
+
                     passed: false,
+
                     reasons: [
                         "NO_FEATURES"
                     ]
@@ -1466,7 +1482,8 @@ export default async function handler(req, res) {
                         setup:
                             "TREND_FOLLOW",
 
-                        interaction: null
+                        interaction:
+                            null
                     });
                 }
             }
@@ -1493,7 +1510,8 @@ export default async function handler(req, res) {
                         setup:
                             "TREND_FOLLOW",
 
-                        interaction: null
+                        interaction:
+                            null
                     });
                 }
             }
@@ -1605,7 +1623,10 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-                reasons.push("TREND");
+
+                reasons.push(
+                    "TREND"
+                );
             }
 
             if (
@@ -1620,7 +1641,10 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-                reasons.push("VWAP");
+
+                reasons.push(
+                    "VWAP"
+                );
             }
 
             if (
@@ -1635,6 +1659,7 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
+
                 reasons.push(
                     "EMA_ALIGNMENT"
                 );
@@ -1647,6 +1672,7 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
+
                 reasons.push(
                     "EMA_SPREAD"
                 );
@@ -1664,7 +1690,10 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-                reasons.push("SLOPE");
+
+                reasons.push(
+                    "SLOPE"
+                );
             }
 
             if (
@@ -1679,7 +1708,10 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-                reasons.push("RSI");
+
+                reasons.push(
+                    "RSI"
+                );
             }
 
             return {
@@ -1732,6 +1764,10 @@ export default async function handler(req, res) {
 
         // =====================================================
         // TRADE EVALUATION
+        //
+        // IMPORTANT:
+        // maxEvaluationIndex prevents a trade outcome from
+        // crossing the boundary of discovery/validation/OOS.
         // =====================================================
 
         function evaluateTrade(
@@ -1740,15 +1776,46 @@ export default async function handler(req, res) {
             side,
             entry,
             stop,
-            target
+            target,
+            maxEvaluationIndex = null
         ) {
 
-            const end =
+            const naturalEnd =
                 Math.min(
                     candles.length - 1,
                     entryIndex +
                     MAX_HOLD_CANDLES
                 );
+
+            const end =
+                maxEvaluationIndex === null
+                    ? naturalEnd
+                    : Math.min(
+                        naturalEnd,
+                        maxEvaluationIndex
+                    );
+
+            /*
+             * If there are no candles after the entry
+             * inside the permitted evaluation window,
+             * return timeout.
+             */
+
+            if (
+                end <= entryIndex
+            ) {
+
+                return {
+
+                    exitIndex:
+                        entryIndex,
+
+                    exitType:
+                        "TIMEOUT",
+
+                    resultR: 0
+                };
+            }
 
             for (
                 let i =
@@ -1786,7 +1853,8 @@ export default async function handler(req, res) {
                             exitType:
                                 "STOP",
 
-                            resultR: -1
+                            resultR:
+                                -STOP_R
                         };
                     }
 
@@ -1801,7 +1869,8 @@ export default async function handler(req, res) {
                             exitType:
                                 "TARGET",
 
-                            resultR: 2
+                            resultR:
+                                TARGET_R
                         };
                     }
 
@@ -1824,7 +1893,8 @@ export default async function handler(req, res) {
                             exitType:
                                 "STOP",
 
-                            resultR: -1
+                            resultR:
+                                -STOP_R
                         };
                     }
 
@@ -1839,7 +1909,8 @@ export default async function handler(req, res) {
                             exitType:
                                 "TARGET",
 
-                            resultR: 2
+                            resultR:
+                                TARGET_R
                         };
                     }
                 }
@@ -1847,7 +1918,8 @@ export default async function handler(req, res) {
 
             return {
 
-                exitIndex: end,
+                exitIndex:
+                    end,
 
                 exitType:
                     "TIMEOUT",
@@ -1858,13 +1930,18 @@ export default async function handler(req, res) {
 
         // =====================================================
         // CREATE RECORD
+        //
+        // evaluationEnd is mandatory for historical learning.
+        // This prevents discovery outcomes from entering the
+        // validation segment.
         // =====================================================
 
         function createLearningRecord(
             candles,
             index,
             side,
-            setup
+            setup,
+            evaluationEnd
         ) {
 
             const f =
@@ -1970,7 +2047,8 @@ export default async function handler(req, res) {
                     side,
                     entry,
                     stop,
-                    target
+                    target,
+                    evaluationEnd
                 );
 
             return {
@@ -2012,6 +2090,9 @@ export default async function handler(req, res) {
 
                 exitIndex:
                     outcome.exitIndex,
+
+                exitType:
+                    outcome.exitType,
 
                 confirmationScore:
                     confirmation.score,
@@ -2293,6 +2374,13 @@ export default async function handler(req, res) {
 
         // =====================================================
         // DISCOVER CANDIDATES
+        //
+        // CRITICAL:
+        //
+        // [start, end) is the ONLY data discovery can see.
+        //
+        // Trade outcomes are additionally capped at
+        // end - 1 so they cannot spill into validation.
         // =====================================================
 
         function discoverCandidates(
@@ -2308,6 +2396,15 @@ export default async function handler(req, res) {
                 new Map();
 
             const rawRecords = [];
+
+            /*
+             * We need enough candles AFTER the entry to
+             * determine a complete trade outcome.
+             *
+             * Therefore the final MAX_HOLD_CANDLES candles
+             * of the discovery segment cannot be used as
+             * training entries.
+             */
 
             const stop =
                 Math.max(
@@ -2339,7 +2436,8 @@ export default async function handler(req, res) {
                             candles,
                             i,
                             setup.side,
-                            setup.setup
+                            setup.setup,
+                            end - 1
                         );
 
                     if (!record) {
@@ -2629,6 +2727,16 @@ export default async function handler(req, res) {
 
         // =====================================================
         // VALIDATE CANDIDATE
+        //
+        // CRITICAL V14.5 FIX:
+        //
+        // validationStart -> validationEnd is completely
+        // separate from discovery.
+        //
+        // No validation trade may evaluate beyond
+        // validationEnd - 1.
+        //
+        // Therefore validation cannot see OOS results.
         // =====================================================
 
         function validateCandidate(
@@ -2661,11 +2769,23 @@ export default async function handler(req, res) {
             const lossStreak =
                 new Map();
 
+            /*
+             * Entries must have enough candles remaining
+             * inside validation to obtain a complete outcome.
+             */
+
+            const validationTradeEnd =
+                Math.max(
+                    validationStart,
+                    validationEnd -
+                    MAX_HOLD_CANDLES
+                );
+
             for (
                 let i =
                     validationStart;
                 i <
-                    validationEnd - 1;
+                    validationTradeEnd;
                 i++
             ) {
 
@@ -2783,8 +2903,19 @@ export default async function handler(req, res) {
 
                     const target =
                         setup.side === "BUY"
-                            ? entry + TARGET_R * a
-                            : entry - TARGET_R * a;
+                            ? entry +
+                              TARGET_R *
+                              a
+                            : entry -
+                              TARGET_R *
+                              a;
+
+                    /*
+                     * IMPORTANT:
+                     *
+                     * Validation outcome is capped at
+                     * validationEnd - 1.
+                     */
 
                     const outcome =
                         evaluateTrade(
@@ -2793,7 +2924,8 @@ export default async function handler(req, res) {
                             setup.side,
                             entry,
                             stop,
-                            target
+                            target,
+                            validationEnd - 1
                         );
 
                     const trade = {
@@ -2899,24 +3031,24 @@ export default async function handler(req, res) {
 
         // =====================================================
         // PROMOTION
+        //
+        // IMPORTANT V14.5 FIX:
+        //
+        // validationStart and validationEnd are explicitly
+        // supplied by the caller.
+        //
+        // We DO NOT calculate validation from inside the
+        // discovery window anymore.
         // =====================================================
 
         function promoteCandidates(
             candles,
             discovery,
             discoveryStart,
-            discoveryEnd
+            discoveryEnd,
+            validationStart,
+            validationEnd
         ) {
-
-            const validationStart =
-                discoveryEnd -
-                Math.floor(
-                    (
-                        discoveryEnd -
-                        discoveryStart
-                    ) *
-                    VALIDATION_FRACTION
-                );
 
             const candidates = [];
 
@@ -2964,7 +3096,7 @@ export default async function handler(req, res) {
                         candles,
                         candidate,
                         validationStart,
-                        discoveryEnd
+                        validationEnd
                     );
 
                 if (
@@ -3043,9 +3175,7 @@ export default async function handler(req, res) {
 
             return {
 
-                candidates,
-
-                validationStart
+                candidates
             };
         }
 
@@ -3074,11 +3204,24 @@ export default async function handler(req, res) {
             const lossStreak =
                 new Map();
 
+            /*
+             * Do not start trades too close to the end of
+             * the OOS window because we need a complete
+             * MAX_HOLD_CANDLES outcome inside the OOS fold.
+             */
+
+            const oosTradeEnd =
+                Math.max(
+                    testStart,
+                    testEnd -
+                    MAX_HOLD_CANDLES
+                );
+
             for (
                 let i =
                     testStart;
                 i <
-                    testEnd - 1;
+                    oosTradeEnd;
                 i++
             ) {
 
@@ -3212,15 +3355,21 @@ export default async function handler(req, res) {
 
                     const target =
                         setup.side === "BUY"
-                            ? entry + TARGET_R * a
-                            : entry - TARGET_R * a;
+                            ? entry +
+                              TARGET_R *
+                              a
+                            : entry -
+                              TARGET_R *
+                              a;
 
                     const preferredTarget =
                         setup.side === "BUY"
                             ? entry +
-                              PREFERRED_TARGET_R * a
+                              PREFERRED_TARGET_R *
+                              a
                             : entry -
-                              PREFERRED_TARGET_R * a;
+                              PREFERRED_TARGET_R *
+                              a;
 
                     const outcome =
                         evaluateTrade(
@@ -3229,7 +3378,8 @@ export default async function handler(req, res) {
                             setup.side,
                             entry,
                             stop,
-                            target
+                            target,
+                            testEnd - 1
                         );
 
                     const trade = {
@@ -3239,9 +3389,11 @@ export default async function handler(req, res) {
 
                         fold,
 
-                        index: i,
+                        index:
+                            i,
 
-                        signalIndex: i,
+                        signalIndex:
+                            i,
 
                         timestamp:
                             candles[i].ts,
@@ -3640,6 +3792,11 @@ export default async function handler(req, res) {
         // CURRENT CANDLE EXCLUSION
         // =====================================================
 
+        /*
+         * The latest API candle is treated as the current
+         * candle and excluded from historical learning/OOS.
+         */
+
         const current =
             rows[
                 rows.length - 1
@@ -3658,9 +3815,11 @@ export default async function handler(req, res) {
         const total =
             candles.length;
 
-        const foldCount = 6;
+        const foldCount =
+            6;
 
-        const initialTraining = 250;
+        const initialTraining =
+            250;
 
         const remaining =
             total -
@@ -3744,51 +3903,89 @@ export default async function handler(req, res) {
         ) {
 
             /*
-             * IMPORTANT:
+             * =================================================
+             * STRICT THREE-STAGE STRUCTURE
              *
-             * The last portion of the training data is
-             * reserved as internal validation.
+             * TRAINING
+             *   ├── DISCOVERY
+             *   └── VALIDATION
              *
-             * It is NOT used for candidate discovery.
+             * TEST
+             *   └── TRUE OOS
+             *
+             * Discovery and validation are chronologically
+             * separated.
+             * =================================================
              */
+
+            const trainingLength =
+                fold.trainingEnd -
+                fold.trainingStart;
 
             const validationSize =
                 Math.max(
                     100,
                     Math.floor(
-                        (
-                            fold.trainingEnd -
-                            fold.trainingStart
-                        ) *
+                        trainingLength *
                         VALIDATION_FRACTION
                     )
                 );
 
-            const discoveryEnd =
+            /*
+             * Prevent impossible windows.
+             */
+
+            const maximumValidation =
                 Math.max(
-                    fold.trainingStart + 100,
-                    fold.trainingEnd -
-                    validationSize
+                    50,
+                    trainingLength -
+                    100
                 );
+
+            const actualValidationSize =
+                Math.min(
+                    validationSize,
+                    maximumValidation
+                );
+
+            const validationStart =
+                fold.trainingEnd -
+                actualValidationSize;
+
+            const discoveryStart =
+                fold.trainingStart;
+
+            const discoveryEnd =
+                validationStart;
+
+            /*
+             * Discovery MUST end before validation begins.
+             */
 
             const discovery =
                 discoverCandidates(
                     candles,
-                    fold.trainingStart,
+                    discoveryStart,
                     discoveryEnd
                 );
+
+            /*
+             * Validation is completely outside discovery.
+             */
 
             const promoted =
                 promoteCandidates(
                     candles,
                     discovery,
-                    fold.trainingStart,
-                    discoveryEnd
+                    discoveryStart,
+                    discoveryEnd,
+                    validationStart,
+                    fold.trainingEnd
                 );
 
             /*
-             * Only candidates that survived internal
-             * validation are allowed into OOS.
+             * Only candidates that survived internal validation
+             * are exposed to true OOS.
              */
 
             const selected =
@@ -3843,11 +4040,11 @@ export default async function handler(req, res) {
 
                 discoveryRows:
                     discoveryEnd -
-                    fold.trainingStart,
+                    discoveryStart,
 
                 validationRows:
                     fold.trainingEnd -
-                    discoveryEnd,
+                    validationStart,
 
                 testRows:
                     fold.testRows,
@@ -4057,13 +4254,16 @@ export default async function handler(req, res) {
             if (!f) {
 
                 return {
-                    available: false
+
+                    available:
+                        false
                 };
             }
 
             return {
 
-                available: true,
+                available:
+                    true,
 
                 candleTimestamp:
                     rows[index].ts,
@@ -4171,11 +4371,106 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.5 edge has passed discovery, internal validation and anti-overfitting requirements.",
+                "No V14.5 edge has passed discovery, untouched internal validation and anti-overfitting requirements.",
 
             nextAction:
                 "WAIT"
         };
+
+        /*
+         * IMPORTANT:
+         *
+         * Current candle is NOT added to learning.
+         *
+         * Historical learning ends at rows.length - 1.
+         *
+         * The latest completed historical candle is used to
+         * determine whether a PAPER REVIEW signal exists.
+         */
+
+        const historical =
+            rows.slice(
+                0,
+                -1
+            );
+
+        const finalDiscovery =
+            discoverCandidates(
+                historical,
+                0,
+                historical.length
+            );
+
+        /*
+         * Reserve the last 25% of historical data for
+         * untouched internal validation.
+         */
+
+        const finalTrainingLength =
+            historical.length;
+
+        const finalValidationSize =
+            Math.max(
+                100,
+                Math.floor(
+                    finalTrainingLength *
+                    VALIDATION_FRACTION
+                )
+            );
+
+        const finalMaximumValidation =
+            Math.max(
+                50,
+                finalTrainingLength -
+                100
+            );
+
+        const finalActualValidationSize =
+            Math.min(
+                finalValidationSize,
+                finalMaximumValidation
+            );
+
+        const finalValidationStart =
+            historical.length -
+            finalActualValidationSize;
+
+        /*
+         * IMPORTANT:
+         *
+         * The discovery must be rerun only on the discovery
+         * segment. We do NOT allow the final discovery snapshot
+         * above to include validation candles.
+         */
+
+        const strictFinalDiscovery =
+            discoverCandidates(
+                historical,
+                0,
+                finalValidationStart
+            );
+
+        const finalPromoted =
+            promoteCandidates(
+                historical,
+                strictFinalDiscovery,
+                0,
+                finalValidationStart,
+                finalValidationStart,
+                historical.length
+            );
+
+        const finalSelected =
+            finalPromoted.candidates
+                .slice(
+                    0,
+                    12
+                );
+
+        /*
+         * Current market/signal analysis is intentionally
+         * separate from historical learning.
+         */
 
         const currentIndex =
             rows.length - 1;
@@ -4189,41 +4484,6 @@ export default async function handler(req, res) {
         if (
             currentFeatures
         ) {
-
-            /*
-             * IMPORTANT:
-             *
-             * Current candle is NEVER used to learn
-             * the edge.
-             */
-
-            const historical =
-                rows.slice(
-                    0,
-                    -1
-                );
-
-            const finalDiscovery =
-                discoverCandidates(
-                    historical,
-                    0,
-                    historical.length
-                );
-
-            const finalPromoted =
-                promoteCandidates(
-                    historical,
-                    finalDiscovery,
-                    0,
-                    historical.length
-                );
-
-            const finalSelected =
-                finalPromoted.candidates
-                    .slice(
-                        0,
-                        12
-                    );
 
             const setups =
                 detectSetups(
@@ -4329,7 +4589,7 @@ export default async function handler(req, res) {
                             currentMarketData,
 
                         reason:
-                            "Candidate survived historical discovery and internal validation. PAPER REVIEW ONLY.",
+                            "Candidate survived strict historical discovery and untouched internal validation. PAPER REVIEW ONLY.",
 
                         nextAction:
                             "PAPER_REVIEW_ONLY"
@@ -4341,71 +4601,69 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // FINAL LEARNING SNAPSHOT
-        // =====================================================
-
-        const finalHistorical =
-            rows.slice(
-                0,
-                -1
-            );
-
-        const latestDiscovery =
-            discoverCandidates(
-                finalHistorical,
-                0,
-                finalHistorical.length
-            );
-
-        const latestPromoted =
-            promoteCandidates(
-                finalHistorical,
-                latestDiscovery,
-                0,
-                finalHistorical.length
-            );
-
-        // =====================================================
         // REJECTION DIAGNOSTICS
         // =====================================================
 
         const rejectionDiagnostics = {
 
-            family:
+            family: {
 
-                {
-                    insufficientSamples: 0,
-                    insufficientDecisive: 0,
-                    insufficientStability: 0,
-                    edgeBelowThreshold: 0,
-                    recentNegative: 0
-                },
+                insufficientSamples:
+                    0,
 
-            pattern:
+                insufficientDecisive:
+                    0,
 
-                {
-                    insufficientSamples: 0,
-                    insufficientDecisive: 0,
-                    insufficientStability: 0,
-                    edgeBelowThreshold: 0,
-                    recentNegative: 0,
-                    validationFailure: 0,
-                    familyConflict: 0
-                },
+                insufficientStability:
+                    0,
+
+                edgeBelowThreshold:
+                    0,
+
+                recentNegative:
+                    0
+            },
+
+            pattern: {
+
+                insufficientSamples:
+                    0,
+
+                insufficientDecisive:
+                    0,
+
+                insufficientStability:
+                    0,
+
+                edgeBelowThreshold:
+                    0,
+
+                recentNegative:
+                    0,
+
+                validationFailure:
+                    0,
+
+                familyConflict:
+                    0
+            },
 
             antiChasing: {
 
-                blockedVWAPDistance: 0,
+                blockedVWAPDistance:
+                    0,
 
-                blockedEMAExtension: 0,
+                blockedEMAExtension:
+                    0,
 
-                blockedTrendExtension: 0
+                blockedTrendExtension:
+                    0
             }
         };
 
         for (
             const family
-            of latestDiscovery.families
+            of strictFinalDiscovery.families
         ) {
 
             if (
@@ -4466,7 +4724,8 @@ export default async function handler(req, res) {
 
         return send({
 
-            success: true,
+            success:
+                true,
 
             version:
                 VERSION,
@@ -4557,13 +4816,16 @@ export default async function handler(req, res) {
                 futureDataUsedForSignal:
                     false,
 
-                internalValidation:
+                discoverySeparatedFromValidation:
                     true,
 
                 validationBeforeOOS:
                     true,
 
-                discoverySeparatedFromValidation:
+                validationOutcomesCannotCrossIntoOOS:
+                    true,
+
+                discoveryOutcomesCannotCrossIntoValidation:
                     true,
 
                 noForcedTrades:
@@ -4585,10 +4847,16 @@ export default async function handler(req, res) {
                     "Candidate edges are discovered only from the discovery portion of each training window.",
 
                 validation:
-                    "Candidate edges must survive an untouched internal validation segment before entering OOS.",
+                    "Candidate edges are tested on a completely untouched chronological validation segment.",
+
+                validationIsolation:
+                    "Validation trade outcomes are capped at the validation boundary and cannot enter OOS.",
+
+                discoveryIsolation:
+                    "Discovery trade outcomes are capped at the discovery boundary and cannot enter validation.",
 
                 oos:
-                    "Only internally validated candidates are exposed to the chronological OOS test.",
+                    "Only candidates that survive internal validation are exposed to chronological true OOS.",
 
                 familyProtection:
                     "Detailed patterns cannot automatically override a losing setup family.",
@@ -4623,18 +4891,18 @@ export default async function handler(req, res) {
                         : "NOT_PASSED",
 
                 purpose:
-                    "Require an edge to survive internal validation and multiple independent chronological OOS periods."
+                    "Require an edge to survive discovery, untouched internal validation and multiple independent chronological OOS periods."
             },
 
             learning: {
 
                 familiesDiscovered:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .families
                         .length,
 
                 qualifiedFamilies:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .families
                         .filter(
                             x =>
@@ -4643,12 +4911,12 @@ export default async function handler(req, res) {
                         .length,
 
                 patternsDiscovered:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .patterns
                         .length,
 
                 qualifiedPatterns:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .patterns
                         .filter(
                             x =>
@@ -4657,21 +4925,15 @@ export default async function handler(req, res) {
                         .length,
 
                 validationSurvivors:
-                    latestPromoted
+                    finalPromoted
                         .candidates
                         .length,
 
                 selectedEdges:
-                    latestPromoted
-                        .candidates
-                        .slice(
-                            0,
-                            12
-                        )
-                        .length,
+                    finalSelected.length,
 
                 familyEdges:
-                    latestPromoted
+                    finalPromoted
                         .candidates
                         .filter(
                             x =>
@@ -4681,7 +4943,7 @@ export default async function handler(req, res) {
                         .length,
 
                 detailedPatternEdges:
-                    latestPromoted
+                    finalPromoted
                         .candidates
                         .filter(
                             x =>
@@ -4714,6 +4976,19 @@ export default async function handler(req, res) {
                 validationRequired:
                     true,
 
+                validationStartIndex:
+                    finalValidationStart,
+
+                validationRows:
+                    historical.length -
+                    finalValidationStart,
+
+                discoveryRows:
+                    finalValidationStart,
+
+                leakageProtection:
+                    "STRICT_BOUNDARY",
+
                 purpose:
                     "Prevent historically attractive patterns from immediately entering true OOS."
             },
@@ -4721,7 +4996,7 @@ export default async function handler(req, res) {
             walkForward: {
 
                 method:
-                    "STRICT_TRUE_EXPANDING_WALK_FORWARD_WITH_INTERNAL_VALIDATION",
+                    "STRICT_TRUE_EXPANDING_WALK_FORWARD_WITH_ISOLATED_INTERNAL_VALIDATION",
 
                 folds:
                     folds.length,
@@ -4873,15 +5148,22 @@ export default async function handler(req, res) {
             latestLearning: {
 
                 trainingRows:
-                    finalHistorical.length,
+                    historical.length,
+
+                discoveryRows:
+                    finalValidationStart,
+
+                validationRows:
+                    historical.length -
+                    finalValidationStart,
 
                 familiesDiscovered:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .families
                         .length,
 
                 qualifiedFamilies:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .families
                         .filter(
                             x =>
@@ -4890,12 +5172,12 @@ export default async function handler(req, res) {
                         .length,
 
                 patternsDiscovered:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .patterns
                         .length,
 
                 qualifiedPatterns:
-                    latestDiscovery
+                    strictFinalDiscovery
                         .patterns
                         .filter(
                             x =>
@@ -4904,17 +5186,12 @@ export default async function handler(req, res) {
                         .length,
 
                 validationSurvivors:
-                    latestPromoted
+                    finalPromoted
                         .candidates
                         .length,
 
                 selectedEdges:
-                    latestPromoted
-                        .candidates
-                        .slice(
-                            0,
-                            12
-                        )
+                    finalSelected
                         .map(
                             x => ({
 
@@ -5018,7 +5295,8 @@ export default async function handler(req, res) {
             .status(500)
             .json({
 
-                success: false,
+                success:
+                    false,
 
                 version:
                     "V14.5",
