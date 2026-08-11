@@ -1,11 +1,12 @@
 /*
 ===========================================================
  TradeMind Pro
- V14 — HIERARCHICAL SETUP LEARNING ENGINE
-      + RECENT VWAP PULLBACK
-      + TREND STRENGTH
-      + TRUE WALK-FORWARD
-      + FAMILY + DETAIL LEARNING
+ V14.1 — HIERARCHICAL SETUP LEARNING ENGINE
+          + RECENT EDGE VALIDATION
+          + RECENT VWAP PULLBACK
+          + TREND STRENGTH
+          + TRUE WALK-FORWARD
+          + FAMILY + DETAIL LEARNING
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -16,35 +17,13 @@
  PAPER ONLY
  NO REAL ORDERS
 ===========================================================
-
- V14 OBJECTIVES
- ----------------------------------------------------------
- 1. Preserve V13.9 recent VWAP pullback detection
- 2. Preserve strong trend filtering
- 3. Add hierarchical setup-family learning
- 4. Allow detailed patterns to inherit family evidence
- 5. Reduce over-fragmentation
- 6. Maintain strict chronological walk-forward
- 7. No future-data leakage
- 8. Current candle excluded from learning
- 9. No overlapping trades
-10. Pattern / family circuit breakers
-11. Pattern concentration control
-12. Setup diversity control
-13. No forced trades
-14. Paper-only
-===========================================================
 */
 
 export default async function handler(req, res) {
 
     try {
 
-        // =====================================================
-        // CONFIG
-        // =====================================================
-
-        const VERSION = "V14.0";
+        const VERSION = "V14.1";
 
         const INSTRUMENT = "NIFTY 50";
         const SCRIP_CODE = "NIDX_40000001";
@@ -67,24 +46,34 @@ export default async function handler(req, res) {
         );
 
         // =====================================================
-        // LEARNING THRESHOLDS
+        // V14.1 LEARNING THRESHOLDS
         // =====================================================
 
-        const FAMILY_MIN_SAMPLES = 8;
-        const FAMILY_MIN_DECISIVE = 5;
+        const FAMILY_MIN_SAMPLES = 10;
+        const FAMILY_MIN_DECISIVE = 6;
 
-        const PATTERN_MIN_SAMPLES = 6;
-        const PATTERN_MIN_DECISIVE = 3;
+        const PATTERN_MIN_SAMPLES = 7;
+        const PATTERN_MIN_DECISIVE = 4;
 
         const MIN_STABLE_FOLDS = 2;
 
-        const FAMILY_MIN_EV = 0.05;
-        const FAMILY_MIN_PF = 1.05;
+        const FAMILY_MIN_EV = 0.10;
+        const FAMILY_MIN_PF = 1.15;
 
-        const PATTERN_MIN_EV = 0.05;
-        const PATTERN_MIN_PF = 1.05;
+        const PATTERN_MIN_EV = 0.10;
+        const PATTERN_MIN_PF = 1.15;
 
-        const QUALITY_THRESHOLD = 55;
+        const QUALITY_THRESHOLD = 58;
+
+        const RECENT_TRAINING_FRACTION = 0.25;
+
+        const RECENT_MIN_SAMPLES = 4;
+        const RECENT_MIN_DECISIVE = 3;
+        const RECENT_MIN_EV = 0.05;
+        const RECENT_MIN_PF = 1.05;
+        const RECENT_LOSS_STREAK_BLOCK = 3;
+
+        const CHRONOLOGICAL_SEGMENTS = 3;
 
         const MIN_GLOBAL_DECISIVE = 5;
         const MIN_GLOBAL_EV = 0.10;
@@ -98,7 +87,6 @@ export default async function handler(req, res) {
         // =====================================================
 
         const RISK_R = 1;
-
         const STOP_R = 1;
         const TARGET_R = 2;
         const PREFERRED_TARGET_R = 2.5;
@@ -109,14 +97,10 @@ export default async function handler(req, res) {
         const MAX_LOSS_STREAK = 6;
 
         // =====================================================
-        // ENTRY CONFIRMATION
+        // ENTRY
         // =====================================================
 
         const ENTRY_CONFIRMATION_MIN = 5;
-
-        // =====================================================
-        // COOLDOWNS
-        // =====================================================
 
         const ENTRY_COOLDOWN = 3;
         const SAME_PATTERN_COOLDOWN = 5;
@@ -127,14 +111,10 @@ export default async function handler(req, res) {
         // =====================================================
 
         const VWAP_LOOKBACK = 8;
-
         const VWAP_APPROACH_MAX_ATR = 1.25;
         const VWAP_TOUCH_MAX_ATR = 0.35;
-
         const VWAP_RECOVERY_MIN_ATR = 0.10;
-
         const VWAP_MAX_ENTRY_DISTANCE_ATR = 0.75;
-
         const VWAP_MAX_CANDLES_AFTER_TOUCH = 3;
 
         // =====================================================
@@ -145,40 +125,25 @@ export default async function handler(req, res) {
         const MIN_SLOPE_ATR = 0.05;
 
         // =====================================================
-        // RESPONSE
+        // RESPONSE HELPERS
         // =====================================================
 
         function send(data) {
-
-            return res
-                .status(200)
-                .json(data);
+            return res.status(200).json(data);
         }
 
         function fail(message, extra = {}) {
-
-            return res
-                .status(500)
-                .json({
-
-                    success: false,
-
-                    version: VERSION,
-
-                    status: "ERROR",
-
-                    paperOnly: true,
-
-                    realOrders: false,
-
-                    brokerOrderEnabled: false,
-
-                    brokerOrderSent: false,
-
-                    error: message,
-
-                    ...extra
-                });
+            return res.status(500).json({
+                success: false,
+                version: VERSION,
+                status: "ERROR",
+                paperOnly: true,
+                realOrders: false,
+                brokerOrderEnabled: false,
+                brokerOrderSent: false,
+                error: message,
+                ...extra
+            });
         }
 
         // =====================================================
@@ -186,47 +151,24 @@ export default async function handler(req, res) {
         // =====================================================
 
         function n(value, fallback = null) {
-
             const x = Number(value);
-
-            return Number.isFinite(x)
-                ? x
-                : fallback;
+            return Number.isFinite(x) ? x : fallback;
         }
 
         function round(value, digits = 4) {
+            if (!Number.isFinite(value)) return null;
 
-            if (
-                !Number.isFinite(value)
-            ) {
-                return null;
-            }
+            const factor = Math.pow(10, digits);
 
-            const factor =
-                Math.pow(
-                    10,
-                    digits
-                );
-
-            return (
-                Math.round(
-                    value * factor
-                ) / factor
-            );
+            return Math.round(
+                value * factor
+            ) / factor;
         }
 
-        function clamp(
-            value,
-            min,
-            max
-        ) {
-
+        function clamp(value, min, max) {
             return Math.max(
                 min,
-                Math.min(
-                    max,
-                    value
-                )
+                Math.min(max, value)
             );
         }
 
@@ -236,40 +178,21 @@ export default async function handler(req, res) {
 
         function normalizeCandle(row) {
 
-            if (!row) {
-                return null;
-            }
+            if (!row) return null;
 
-            if (
-                Array.isArray(row)
-            ) {
+            if (Array.isArray(row)) {
 
-                if (
-                    row.length < 5
-                ) {
+                if (row.length < 5) {
                     return null;
                 }
 
-                let ts =
-                    n(row[0]);
+                let ts = n(row[0]);
 
-                const o =
-                    n(row[1]);
-
-                const h =
-                    n(row[2]);
-
-                const l =
-                    n(row[3]);
-
-                const c =
-                    n(row[4]);
-
-                const v =
-                    n(
-                        row[5],
-                        0
-                    );
+                const o = n(row[1]);
+                const h = n(row[2]);
+                const l = n(row[3]);
+                const c = n(row[4]);
+                const v = n(row[5], 0);
 
                 if (
                     ts === null ||
@@ -281,14 +204,8 @@ export default async function handler(req, res) {
                     return null;
                 }
 
-                if (
-                    ts > 100000000000
-                ) {
-
-                    ts =
-                        Math.floor(
-                            ts / 1000
-                        );
+                if (ts > 100000000000) {
+                    ts = Math.floor(ts / 1000);
                 }
 
                 return {
@@ -301,44 +218,38 @@ export default async function handler(req, res) {
                 };
             }
 
-            let ts =
-                n(
-                    row.ts ??
-                    row.timestamp ??
-                    row.time ??
-                    row.t
-                );
+            let ts = n(
+                row.ts ??
+                row.timestamp ??
+                row.time ??
+                row.t
+            );
 
-            const o =
-                n(
-                    row.o ??
-                    row.open
-                );
+            const o = n(
+                row.o ??
+                row.open
+            );
 
-            const h =
-                n(
-                    row.h ??
-                    row.high
-                );
+            const h = n(
+                row.h ??
+                row.high
+            );
 
-            const l =
-                n(
-                    row.l ??
-                    row.low
-                );
+            const l = n(
+                row.l ??
+                row.low
+            );
 
-            const c =
-                n(
-                    row.c ??
-                    row.close
-                );
+            const c = n(
+                row.c ??
+                row.close
+            );
 
-            const v =
-                n(
-                    row.v ??
-                    row.volume,
-                    0
-                );
+            const v = n(
+                row.v ??
+                row.volume,
+                0
+            );
 
             if (
                 ts === null ||
@@ -350,14 +261,8 @@ export default async function handler(req, res) {
                 return null;
             }
 
-            if (
-                ts > 100000000000
-            ) {
-
-                ts =
-                    Math.floor(
-                        ts / 1000
-                    );
+            if (ts > 100000000000) {
+                ts = Math.floor(ts / 1000);
             }
 
             return {
@@ -371,7 +276,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // RECURSIVE EXTRACTION
+        // RECURSIVE DATA EXTRACTION
         // =====================================================
 
         function extractRows(payload) {
@@ -380,64 +285,39 @@ export default async function handler(req, res) {
 
             function walk(value) {
 
-                if (!value) {
-                    return;
-                }
+                if (!value) return;
 
-                if (
-                    Array.isArray(value)
-                ) {
+                if (Array.isArray(value)) {
 
                     if (
                         value.length >= 5 &&
-                        !Array.isArray(
-                            value[0]
-                        ) &&
-                        typeof value[0] !==
-                            "object"
+                        !Array.isArray(value[0]) &&
+                        typeof value[0] !== "object"
                     ) {
 
                         const candle =
-                            normalizeCandle(
-                                value
-                            );
+                            normalizeCandle(value);
 
                         if (candle) {
-
-                            found.push(
-                                candle
-                            );
-
+                            found.push(candle);
                             return;
                         }
                     }
 
-                    for (
-                        const item of value
-                    ) {
-
+                    for (const item of value) {
                         walk(item);
                     }
 
                     return;
                 }
 
-                if (
-                    typeof value ===
-                    "object"
-                ) {
+                if (typeof value === "object") {
 
                     const candle =
-                        normalizeCandle(
-                            value
-                        );
+                        normalizeCandle(value);
 
                     if (candle) {
-
-                        found.push(
-                            candle
-                        );
-
+                        found.push(candle);
                         return;
                     }
 
@@ -445,10 +325,7 @@ export default async function handler(req, res) {
                         const key of
                         Object.keys(value)
                     ) {
-
-                        walk(
-                            value[key]
-                        );
+                        walk(value[key]);
                     }
                 }
             }
@@ -458,22 +335,13 @@ export default async function handler(req, res) {
             return found;
         }
 
-        // =====================================================
-        // PREPARE DATA
-        // =====================================================
-
         function prepareData(rows) {
 
-            const map =
-                new Map();
+            const map = new Map();
 
-            for (
-                const row of rows
-            ) {
+            for (const row of rows) {
 
-                if (!row) {
-                    continue;
-                }
+                if (!row) continue;
 
                 map.set(
                     String(row.ts),
@@ -484,12 +352,8 @@ export default async function handler(req, res) {
             return [
                 ...map.values()
             ].sort(
-                (
-                    a,
-                    b
-                ) =>
-                    a.ts -
-                    b.ts
+                (a, b) =>
+                    a.ts - b.ts
             );
         }
 
@@ -527,27 +391,19 @@ export default async function handler(req, res) {
         function istParts(ts) {
 
             const parts =
-                IST_FORMATTER
-                    .formatToParts(
-                        new Date(
-                            ts * 1000
-                        )
-                    );
+                IST_FORMATTER.formatToParts(
+                    new Date(ts * 1000)
+                );
 
             const result = {};
 
-            for (
-                const p of parts
-            ) {
+            for (const p of parts) {
 
                 if (
-                    p.type !==
-                    "literal"
+                    p.type !== "literal"
                 ) {
-
-                    result[
-                        p.type
-                    ] = p.value;
+                    result[p.type] =
+                        p.value;
                 }
             }
 
@@ -559,9 +415,7 @@ export default async function handler(req, res) {
             const p =
                 istParts(ts);
 
-            return (
-                `${p.year}-${p.month}-${p.day}`
-            );
+            return `${p.year}-${p.month}-${p.day}`;
         }
 
         function istMinutes(ts) {
@@ -570,8 +424,7 @@ export default async function handler(req, res) {
                 istParts(ts);
 
             return (
-                Number(p.hour) *
-                    60 +
+                Number(p.hour) * 60 +
                 Number(p.minute)
             );
         }
@@ -581,24 +434,15 @@ export default async function handler(req, res) {
             const mins =
                 istMinutes(ts);
 
-            if (
-                mins < 600
-            ) {
-
+            if (mins < 600) {
                 return "OPEN";
             }
 
-            if (
-                mins < 720
-            ) {
-
+            if (mins < 720) {
                 return "MORNING";
             }
 
-            if (
-                mins < 840
-            ) {
-
+            if (mins < 840) {
                 return "MIDDAY";
             }
 
@@ -660,24 +504,16 @@ export default async function handler(req, res) {
                     );
 
                 pv +=
-                    typical *
-                    v;
+                    typical * v;
 
                 volume += v;
             }
 
-            if (
-                volume <= 0
-            ) {
-
-                return candles[index]
-                    .c;
+            if (volume <= 0) {
+                return candles[index].c;
             }
 
-            return (
-                pv /
-                volume
-            );
+            return pv / volume;
         }
 
         // =====================================================
@@ -693,7 +529,6 @@ export default async function handler(req, res) {
                 values.length <
                 period
             ) {
-
                 return null;
             }
 
@@ -704,13 +539,11 @@ export default async function handler(req, res) {
                 i < period;
                 i++
             ) {
-
                 value +=
                     values[i];
             }
 
-            value /=
-                period;
+            value /= period;
 
             const multiplier =
                 2 /
@@ -747,7 +580,6 @@ export default async function handler(req, res) {
                 values.length <=
                 period
             ) {
-
                 return null;
             }
 
@@ -764,36 +596,23 @@ export default async function handler(req, res) {
                     values[i] -
                     values[i - 1];
 
-                if (
-                    diff >= 0
-                ) {
-
+                if (diff >= 0) {
                     gains += diff;
-
                 } else {
-
                     losses +=
-                        Math.abs(
-                            diff
-                        );
+                        Math.abs(diff);
                 }
             }
 
             let avgGain =
-                gains /
-                period;
+                gains / period;
 
             let avgLoss =
-                losses /
-                period;
+                losses / period;
 
             for (
-                let i =
-                    period + 1;
-
-                i <
-                    values.length;
-
+                let i = period + 1;
+                i < values.length;
                 i++
             ) {
 
@@ -828,10 +647,7 @@ export default async function handler(req, res) {
                     period;
             }
 
-            if (
-                avgLoss === 0
-            ) {
-
+            if (avgLoss === 0) {
                 return 100;
             }
 
@@ -859,7 +675,6 @@ export default async function handler(req, res) {
                 candles.length <=
                 period
             ) {
-
                 return null;
             }
 
@@ -880,15 +695,11 @@ export default async function handler(req, res) {
                 trs.push(
                     Math.max(
                         c.h - c.l,
-
                         Math.abs(
-                            c.h -
-                            p.c
+                            c.h - p.c
                         ),
-
                         Math.abs(
-                            c.l -
-                            p.c
+                            c.l - p.c
                         )
                     )
                 );
@@ -898,7 +709,6 @@ export default async function handler(req, res) {
                 trs.length <
                 period
             ) {
-
                 return null;
             }
 
@@ -909,13 +719,11 @@ export default async function handler(req, res) {
                 i < period;
                 i++
             ) {
-
                 value +=
                     trs[i];
             }
 
-            value /=
-                period;
+            value /= period;
 
             for (
                 let i = period;
@@ -936,7 +744,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // FEATURE ENGINE
+        // FEATURES
         // =====================================================
 
         function features(
@@ -944,10 +752,7 @@ export default async function handler(req, res) {
             index
         ) {
 
-            if (
-                index < 30
-            ) {
-
+            if (index < 30) {
                 return null;
             }
 
@@ -1010,7 +815,6 @@ export default async function handler(req, res) {
                 vwap === null ||
                 atr14 <= 0
             ) {
-
                 return null;
             }
 
@@ -1018,51 +822,44 @@ export default async function handler(req, res) {
                 candles[index].c;
 
             const spread =
-                ema9 -
-                ema21;
+                ema9 - ema21;
 
             const spreadATR =
-                spread /
-                atr14;
+                spread / atr14;
 
             const slope =
                 ema9 -
                 previousEMA9;
 
             const slopeATR =
-                slope /
-                atr14;
+                slope / atr14;
 
             let trend =
                 "SIDEWAYS";
 
             if (
-                ema9 >
-                    ema21 &&
+                ema9 > ema21 &&
                 spreadATR >=
                     MIN_SPREAD_ATR &&
                 slopeATR >=
                     MIN_SLOPE_ATR
             ) {
-
                 trend =
                     "BULLISH";
             }
 
             if (
-                ema9 <
-                    ema21 &&
+                ema9 < ema21 &&
                 spreadATR <=
                     -MIN_SPREAD_ATR &&
                 slopeATR <=
                     -MIN_SLOPE_ATR
             ) {
-
                 trend =
                     "BEARISH";
             }
 
-            let trendStrength =
+            const trendStrength =
                 Math.abs(
                     spreadATR
                 );
@@ -1099,18 +896,13 @@ export default async function handler(req, res) {
                 "AT";
 
             if (
-                close >
-                vwap
+                close > vwap
             ) {
-
                 vwapDirection =
                     "ABOVE";
-
             } else if (
-                close <
-                vwap
+                close < vwap
             ) {
-
                 vwapDirection =
                     "BELOW";
             }
@@ -1128,26 +920,19 @@ export default async function handler(req, res) {
             if (
                 rsi14 >= 60
             ) {
-
                 rsiBucket =
                     "HIGH";
-
             } else if (
                 rsi14 >= 50
             ) {
-
                 rsiBucket =
                     "NEUTRAL_HIGH";
-
             } else if (
                 rsi14 <= 40
             ) {
-
                 rsiBucket =
                     "LOW";
-
             } else {
-
                 rsiBucket =
                     "NEUTRAL_LOW";
             }
@@ -1158,14 +943,11 @@ export default async function handler(req, res) {
             if (
                 atr14 > 18
             ) {
-
                 volatility =
                     "HIGH";
-
             } else if (
                 atr14 < 8
             ) {
-
                 volatility =
                     "LOW";
             }
@@ -1175,7 +957,6 @@ export default async function handler(req, res) {
                 close,
 
                 ema9,
-
                 ema21,
 
                 emaSpread:
@@ -1210,14 +991,12 @@ export default async function handler(req, res) {
 
                 timeBucket:
                     getTimeBucket(
-                        candles[index]
-                            .ts
+                        candles[index].ts
                     ),
 
                 sessionDate:
                     istDate(
-                        candles[index]
-                            .ts
+                        candles[index].ts
                     )
             };
         }
@@ -1256,8 +1035,7 @@ export default async function handler(req, res) {
                 Infinity;
 
             for (
-                let i =
-                    start;
+                let i = start;
                 i < index;
                 i++
             ) {
@@ -1290,40 +1068,35 @@ export default async function handler(req, res) {
 
                 const distance =
                     Math.abs(
-                        c.c -
-                        v
-                    ) /
-                    a;
+                        c.c - v
+                    ) / a;
 
                 const highDistance =
                     Math.abs(
-                        c.h -
-                        v
-                    ) /
-                    a;
+                        c.h - v
+                    ) / a;
 
                 const lowDistance =
                     Math.abs(
-                        c.l -
-                        v
-                    ) /
-                    a;
+                        c.l - v
+                    ) / a;
 
                 const touched =
                     distance <=
                         VWAP_TOUCH_MAX_ATR ||
+
                     highDistance <=
                         VWAP_TOUCH_MAX_ATR ||
+
                     lowDistance <=
                         VWAP_TOUCH_MAX_ATR ||
+
                     (
                         c.l <= v &&
                         c.h >= v
                     );
 
-                if (
-                    touched
-                ) {
+                if (touched) {
 
                     touchIndex =
                         i;
@@ -1336,7 +1109,6 @@ export default async function handler(req, res) {
             if (
                 touchIndex === null
             ) {
-
                 return null;
             }
 
@@ -1345,12 +1117,10 @@ export default async function handler(req, res) {
                 touchIndex;
 
             if (
-                candlesSinceTouch <
-                    1 ||
+                candlesSinceTouch < 1 ||
                 candlesSinceTouch >
                     VWAP_MAX_CANDLES_AFTER_TOUCH
             ) {
-
                 return null;
             }
 
@@ -1365,21 +1135,15 @@ export default async function handler(req, res) {
                 currentDistance >
                 VWAP_MAX_ENTRY_DISTANCE_ATR
             ) {
-
                 return null;
             }
 
             const recovery =
                 side === "BUY"
-                    ? f.close >
-                      f.vwap
-                    : f.close <
-                      f.vwap;
+                    ? f.close > f.vwap
+                    : f.close < f.vwap;
 
-            if (
-                !recovery
-            ) {
-
+            if (!recovery) {
                 return null;
             }
 
@@ -1390,6 +1154,7 @@ export default async function handler(req, res) {
                         f.vwap
                     ) /
                     f.atr14
+
                     : (
                         f.vwap -
                         f.close
@@ -1400,7 +1165,6 @@ export default async function handler(req, res) {
                 recoveryMove <
                 VWAP_RECOVERY_MIN_ATR
             ) {
-
                 return null;
             }
 
@@ -1437,15 +1201,10 @@ export default async function handler(req, res) {
                 );
 
             if (!f) {
-
                 return [];
             }
 
             const setups = [];
-
-            // -------------------------------------------------
-            // TREND FOLLOW
-            // -------------------------------------------------
 
             if (
                 f.trend ===
@@ -1455,15 +1214,9 @@ export default async function handler(req, res) {
             ) {
 
                 setups.push({
-
-                    side:
-                        "BUY",
-
-                    setup:
-                        "TREND_FOLLOW",
-
-                    interaction:
-                        null
+                    side: "BUY",
+                    setup: "TREND_FOLLOW",
+                    interaction: null
                 });
             }
 
@@ -1475,25 +1228,15 @@ export default async function handler(req, res) {
             ) {
 
                 setups.push({
-
-                    side:
-                        "SELL",
-
-                    setup:
-                        "TREND_FOLLOW",
-
-                    interaction:
-                        null
+                    side: "SELL",
+                    setup: "TREND_FOLLOW",
+                    interaction: null
                 });
             }
 
-            // -------------------------------------------------
-            // VWAP PULLBACK
-            // -------------------------------------------------
-
             if (
                 f.trend ===
-                    "BULLISH"
+                "BULLISH"
             ) {
 
                 const interaction =
@@ -1503,18 +1246,12 @@ export default async function handler(req, res) {
                         "BUY"
                     );
 
-                if (
-                    interaction
-                ) {
+                if (interaction) {
 
                     setups.push({
-
-                        side:
-                            "BUY",
-
+                        side: "BUY",
                         setup:
                             "VWAP_PULLBACK",
-
                         interaction
                     });
                 }
@@ -1522,7 +1259,7 @@ export default async function handler(req, res) {
 
             if (
                 f.trend ===
-                    "BEARISH"
+                "BEARISH"
             ) {
 
                 const interaction =
@@ -1532,18 +1269,12 @@ export default async function handler(req, res) {
                         "SELL"
                     );
 
-                if (
-                    interaction
-                ) {
+                if (interaction) {
 
                     setups.push({
-
-                        side:
-                            "SELL",
-
+                        side: "SELL",
                         setup:
                             "VWAP_PULLBACK",
-
                         interaction
                     });
                 }
@@ -1553,7 +1284,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // ENTRY CONFIRMATION
+        // CONFIRMATION
         // =====================================================
 
         function confirmationScore(
@@ -1571,13 +1302,9 @@ export default async function handler(req, res) {
             if (!f) {
 
                 return {
-
                     score: 0,
-
                     maxScore: 6,
-
                     passed: false,
-
                     reasons: []
                 };
             }
@@ -1589,11 +1316,13 @@ export default async function handler(req, res) {
             if (
                 (
                     side === "BUY" &&
-                    f.trend === "BULLISH"
+                    f.trend ===
+                        "BULLISH"
                 ) ||
                 (
                     side === "SELL" &&
-                    f.trend === "BEARISH"
+                    f.trend ===
+                        "BEARISH"
                 )
             ) {
 
@@ -1607,11 +1336,13 @@ export default async function handler(req, res) {
             if (
                 (
                     side === "BUY" &&
-                    f.vwapDirection === "ABOVE"
+                    f.vwapDirection ===
+                        "ABOVE"
                 ) ||
                 (
                     side === "SELL" &&
-                    f.vwapDirection === "BELOW"
+                    f.vwapDirection ===
+                        "BELOW"
                 )
             ) {
 
@@ -1626,12 +1357,12 @@ export default async function handler(req, res) {
                 (
                     side === "BUY" &&
                     f.ema9 >
-                    f.ema21
+                        f.ema21
                 ) ||
                 (
                     side === "SELL" &&
                     f.ema9 <
-                    f.ema21
+                        f.ema21
                 )
             ) {
 
@@ -1706,7 +1437,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // FAMILY KEY
+        // KEYS
         // =====================================================
 
         function familyKey(
@@ -1722,10 +1453,6 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
-        // =====================================================
-        // DETAILED PATTERN KEY
-        // =====================================================
-
         function patternKey(
             side,
             setup,
@@ -1733,19 +1460,12 @@ export default async function handler(req, res) {
         ) {
 
             return [
-
                 side,
-
                 `S:${setup}`,
-
                 `T:${f.trend}`,
-
                 `V:${f.vwapDirection}`,
-
                 `G:${f.regime}`,
-
                 `H:${f.timeBucket}`
-
             ].join("|");
         }
 
@@ -1772,9 +1492,7 @@ export default async function handler(req, res) {
             for (
                 let i =
                     entryIndex + 1;
-
                 i <= end;
-
                 i++
             ) {
 
@@ -1799,46 +1517,30 @@ export default async function handler(req, res) {
                     ) {
 
                         return {
-
                             exitIndex: i,
-
                             exitType:
                                 "STOP",
-
-                            resultR:
-                                -1
+                            resultR: -1
                         };
                     }
 
-                    if (
-                        hitStop
-                    ) {
+                    if (hitStop) {
 
                         return {
-
                             exitIndex: i,
-
                             exitType:
                                 "STOP",
-
-                            resultR:
-                                -1
+                            resultR: -1
                         };
                     }
 
-                    if (
-                        hitTarget
-                    ) {
+                    if (hitTarget) {
 
                         return {
-
                             exitIndex: i,
-
                             exitType:
                                 "TARGET",
-
-                            resultR:
-                                2
+                            resultR: 2
                         };
                     }
 
@@ -1858,46 +1560,30 @@ export default async function handler(req, res) {
                     ) {
 
                         return {
-
                             exitIndex: i,
-
                             exitType:
                                 "STOP",
-
-                            resultR:
-                                -1
+                            resultR: -1
                         };
                     }
 
-                    if (
-                        hitStop
-                    ) {
+                    if (hitStop) {
 
                         return {
-
                             exitIndex: i,
-
                             exitType:
                                 "STOP",
-
-                            resultR:
-                                -1
+                            resultR: -1
                         };
                     }
 
-                    if (
-                        hitTarget
-                    ) {
+                    if (hitTarget) {
 
                         return {
-
                             exitIndex: i,
-
                             exitType:
                                 "TARGET",
-
-                            resultR:
-                                2
+                            resultR: 2
                         };
                     }
                 }
@@ -1905,19 +1591,17 @@ export default async function handler(req, res) {
 
             return {
 
-                exitIndex:
-                    end,
+                exitIndex: end,
 
                 exitType:
                     "TIMEOUT",
 
-                resultR:
-                    0
+                resultR: 0
             };
         }
 
         // =====================================================
-        // CREATE LEARNING RECORD
+        // LEARNING RECORD
         // =====================================================
 
         function createLearningRecord(
@@ -1947,13 +1631,12 @@ export default async function handler(req, res) {
             if (
                 !confirmation.passed
             ) {
-
                 return null;
             }
 
             const interaction =
                 setup ===
-                "VWAP_PULLBACK"
+                    "VWAP_PULLBACK"
 
                     ? recentVWAPInteraction(
                         candles,
@@ -1968,7 +1651,6 @@ export default async function handler(req, res) {
                     "VWAP_PULLBACK" &&
                 !interaction
             ) {
-
                 return null;
             }
 
@@ -2090,8 +1772,7 @@ export default async function handler(req, res) {
                 ).length;
 
             const decisive =
-                wins +
-                losses;
+                wins + losses;
 
             const totalWinR =
                 records
@@ -2141,13 +1822,14 @@ export default async function handler(req, res) {
             const ev =
                 records.length
                     ? netR /
-                      records.length
+                        records.length
                     : 0;
 
             const pf =
                 totalLossR > 0
                     ? totalWinR /
-                      totalLossR
+                        totalLossR
+
                     : totalWinR > 0
                         ? 999
                         : 0;
@@ -2160,7 +1842,8 @@ export default async function handler(req, res) {
             let maxLossStreak = 0;
 
             for (
-                const record of records
+                const record
+                of records
             ) {
 
                 equity +=
@@ -2193,7 +1876,8 @@ export default async function handler(req, res) {
 
                 } else {
 
-                    currentLossStreak = 0;
+                    currentLossStreak =
+                        0;
                 }
             }
 
@@ -2263,7 +1947,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // LEARN HIERARCHICALLY
+        // HIERARCHICAL LEARNING
         // =====================================================
 
         function learnHierarchy(
@@ -2283,11 +1967,9 @@ export default async function handler(req, res) {
             for (
                 let i =
                     trainingStart + 30;
-
                 i <
                     trainingEnd -
                     MAX_HOLD_CANDLES;
-
                 i++
             ) {
 
@@ -2300,7 +1982,6 @@ export default async function handler(req, res) {
                 if (
                     !setups.length
                 ) {
-
                     continue;
                 }
 
@@ -2325,10 +2006,6 @@ export default async function handler(req, res) {
                         record
                     );
 
-                    // -------------------------------------------------
-                    // FAMILY
-                    // -------------------------------------------------
-
                     if (
                         !familyMap.has(
                             record.family
@@ -2348,10 +2025,6 @@ export default async function handler(req, res) {
                         .push(
                             record
                         );
-
-                    // -------------------------------------------------
-                    // DETAIL
-                    // -------------------------------------------------
 
                     if (
                         !patternMap.has(
@@ -2395,11 +2068,12 @@ export default async function handler(req, res) {
                 const winRate =
                     decisive
                         ? metrics.wins /
-                          decisive
+                            decisive
                         : 0;
 
-                let stableSections =
-                    new Set();
+                // -------------------------------------------------
+                // CHRONOLOGICAL STABILITY
+                // -------------------------------------------------
 
                 const totalWindow =
                     Math.max(
@@ -2408,42 +2082,69 @@ export default async function handler(req, res) {
                         trainingStart
                     );
 
+                const sections =
+                    Array.from(
+                        {
+                            length:
+                                CHRONOLOGICAL_SEGMENTS
+                        },
+                        () => []
+                    );
+
                 for (
                     const record
                     of records
                 ) {
 
-                    const section =
-                        Math.min(
-                            2,
+                    const relative =
+                        (
+                            record.index -
+                            trainingStart
+                        ) /
+                        totalWindow;
+
+                    const sectionIndex =
+                        clamp(
                             Math.floor(
-                                (
-                                    record.index -
-                                    trainingStart
-                                ) /
-                                (
-                                    totalWindow /
-                                    3
-                                )
-                            )
+                                relative *
+                                CHRONOLOGICAL_SEGMENTS
+                            ),
+                            0,
+                            CHRONOLOGICAL_SEGMENTS -
+                                1
                         );
 
-                    stableSections.add(
-                        section
+                    sections[
+                        sectionIndex
+                    ].push(
+                        record
                     );
                 }
 
-                const stableFolds =
-                    stableSections.size;
+                const sectionMetrics =
+                    sections.map(
+                        section =>
+                            calculateMetrics(
+                                section
+                            )
+                    );
+
+                const stableSections =
+                    sectionMetrics.filter(
+                        m =>
+                            m.decisiveTrades >= 2 &&
+                            m.expectedValueR >= 0
+                    ).length;
+
+                // -------------------------------------------------
+                // RECENT WINDOW
+                // -------------------------------------------------
 
                 const recentStart =
-                    trainingStart +
+                    trainingEnd -
                     Math.floor(
-                        (
-                            trainingEnd -
-                            trainingStart
-                        ) *
-                        0.75
+                        totalWindow *
+                        RECENT_TRAINING_FRACTION
                     );
 
                 const recent =
@@ -2453,28 +2154,100 @@ export default async function handler(req, res) {
                             recentStart
                     );
 
+                const recentMetrics =
+                    calculateMetrics(
+                        recent
+                    );
+
+                let recentLossStreak =
+                    0;
+
+                let maxRecentLossStreak =
+                    0;
+
+                const recentDecisive =
+                    recent.filter(
+                        x =>
+                            x.resultR !== 0
+                    );
+
+                for (
+                    const record
+                    of recentDecisive
+                ) {
+
+                    if (
+                        record.resultR < 0
+                    ) {
+
+                        recentLossStreak++;
+
+                        maxRecentLossStreak =
+                            Math.max(
+                                maxRecentLossStreak,
+                                recentLossStreak
+                            );
+
+                    } else {
+
+                        recentLossStreak =
+                            0;
+                    }
+                }
+
                 const recentEV =
-                    recent.length
-                        ? recent.reduce(
-                            (
-                                sum,
-                                x
-                            ) =>
-                                sum +
-                                x.resultR,
-                            0
+                    recentMetrics
+                        .expectedValueR;
+
+                const recentPF =
+                    recentMetrics
+                        .profitFactor;
+
+                const recentHealthy =
+                    recent.length >=
+                        RECENT_MIN_SAMPLES &&
+
+                    recentMetrics
+                        .decisiveTrades >=
+                        RECENT_MIN_DECISIVE &&
+
+                    recentEV >=
+                        RECENT_MIN_EV &&
+
+                    recentPF >=
+                        RECENT_MIN_PF &&
+
+                    maxRecentLossStreak <
+                        RECENT_LOSS_STREAK_BLOCK;
+
+                // -------------------------------------------------
+                // EDGE DECAY
+                // -------------------------------------------------
+
+                const lifetimeEV =
+                    metrics
+                        .expectedValueR;
+
+                const edgeDecay =
+                    lifetimeEV > 0
+                        ? (
+                            lifetimeEV -
+                            recentEV
                         ) /
-                        recent.length
+                        lifetimeEV
                         : 0;
+
+                // -------------------------------------------------
+                // QUALITY
+                // -------------------------------------------------
 
                 let quality = 0;
 
                 quality +=
                     clamp(
-                        winRate *
-                        40,
+                        winRate * 35,
                         0,
-                        40
+                        35
                     );
 
                 quality +=
@@ -2482,36 +2255,44 @@ export default async function handler(req, res) {
                         Math.max(
                             metrics.expectedValueR,
                             0
-                        ) *
-                        30,
+                        ) * 35,
                         0,
-                        30
+                        35
                     );
 
                 quality +=
                     clamp(
                         Math.max(
                             metrics.profitFactor -
-                            1,
+                                1,
                             0
-                        ) *
-                        10,
+                        ) * 10,
                         0,
                         20
                     );
 
                 quality +=
                     Math.min(
-                        stableFolds,
+                        stableSections,
                         3
-                    ) *
-                    5;
+                    ) * 5;
 
                 if (
-                    recentEV < 0
+                    recentHealthy
                 ) {
-
+                    quality += 5;
+                } else {
                     quality -= 15;
+                }
+
+                if (
+                    edgeDecay > 0.50
+                ) {
+                    quality -= 15;
+                } else if (
+                    edgeDecay > 0.30
+                ) {
+                    quality -= 8;
                 }
 
                 quality =
@@ -2521,59 +2302,46 @@ export default async function handler(req, res) {
                         100
                     );
 
-                let qualified;
+                const minSamples =
+                    level === "FAMILY"
+                        ? FAMILY_MIN_SAMPLES
+                        : PATTERN_MIN_SAMPLES;
 
-                if (
-                    level ===
-                    "FAMILY"
-                ) {
+                const minDecisive =
+                    level === "FAMILY"
+                        ? FAMILY_MIN_DECISIVE
+                        : PATTERN_MIN_DECISIVE;
 
-                    qualified =
-                        samples >=
-                            FAMILY_MIN_SAMPLES &&
+                const minEV =
+                    level === "FAMILY"
+                        ? FAMILY_MIN_EV
+                        : PATTERN_MIN_EV;
 
-                        decisive >=
-                            FAMILY_MIN_DECISIVE &&
+                const minPF =
+                    level === "FAMILY"
+                        ? FAMILY_MIN_PF
+                        : PATTERN_MIN_PF;
 
-                        stableFolds >=
-                            MIN_STABLE_FOLDS &&
+                const qualified =
+                    samples >=
+                        minSamples &&
 
-                        metrics.expectedValueR >=
-                            FAMILY_MIN_EV &&
+                    decisive >=
+                        minDecisive &&
 
-                        metrics.profitFactor >=
-                            FAMILY_MIN_PF &&
+                    stableSections >=
+                        MIN_STABLE_FOLDS &&
 
-                        recentEV >=
-                            0 &&
+                    metrics.expectedValueR >=
+                        minEV &&
 
-                        quality >=
-                            QUALITY_THRESHOLD;
+                    metrics.profitFactor >=
+                        minPF &&
 
-                } else {
+                    recentHealthy &&
 
-                    qualified =
-                        samples >=
-                            PATTERN_MIN_SAMPLES &&
-
-                        decisive >=
-                            PATTERN_MIN_DECISIVE &&
-
-                        stableFolds >=
-                            MIN_STABLE_FOLDS &&
-
-                        metrics.expectedValueR >=
-                            PATTERN_MIN_EV &&
-
-                        metrics.profitFactor >=
-                            PATTERN_MIN_PF &&
-
-                        recentEV >=
-                            0 &&
-
-                        quality >=
-                            QUALITY_THRESHOLD;
-                }
+                    quality >=
+                        QUALITY_THRESHOLD;
 
                 return {
 
@@ -2597,8 +2365,7 @@ export default async function handler(req, res) {
 
                     winRate:
                         round(
-                            winRate *
-                            100,
+                            winRate * 100,
                             2
                         ),
 
@@ -2614,13 +2381,44 @@ export default async function handler(req, res) {
                     maxDrawdownR:
                         metrics.maxDrawdownR,
 
-                    stableFolds,
+                    stableFolds:
+                        stableSections,
+
+                    sectionMetrics,
+
+                    recentSamples:
+                        recent.length,
+
+                    recentDecisiveTrades:
+                        recentMetrics
+                            .decisiveTrades,
 
                     recentEV:
                         round(
                             recentEV,
                             4
                         ),
+
+                    recentPF:
+                        round(
+                            recentPF,
+                            4
+                        ),
+
+                    recentWinRate:
+                        recentMetrics
+                            .winRate,
+
+                    recentMaxLossStreak:
+                        maxRecentLossStreak,
+
+                    edgeDecay:
+                        round(
+                            edgeDecay,
+                            4
+                        ),
+
+                    recentHealthy,
 
                     quality:
                         round(
@@ -2673,17 +2471,14 @@ export default async function handler(req, res) {
             }
 
             return {
-
                 families,
-
                 patterns,
-
                 rawRecords
             };
         }
 
         // =====================================================
-        // HIERARCHICAL SELECTION
+        // SELECT LEARNING EDGES
         // =====================================================
 
         function selectPatterns(
@@ -2694,7 +2489,8 @@ export default async function handler(req, res) {
                 learned.families
                     .filter(
                         x =>
-                            x.qualified
+                            x.qualified &&
+                            x.recentHealthy
                     )
                     .sort(
                         (
@@ -2709,7 +2505,8 @@ export default async function handler(req, res) {
                 learned.patterns
                     .filter(
                         x =>
-                            x.qualified
+                            x.qualified &&
+                            x.recentHealthy
                     )
                     .sort(
                         (
@@ -2722,59 +2519,14 @@ export default async function handler(req, res) {
 
             const selected = [];
 
-            const selectedFamilies =
-                new Set();
-
-            /*
-             * First select family-level
-             * edges.
-             */
-
-            for (
-                const family
-                of qualifiedFamilies
-            ) {
-
-                if (
-                    selected.length >= 8
-                ) {
-                    break;
-                }
-
-                selected.push({
-
-                    ...family,
-
-                    inherited:
-                        false,
-
-                    familyEvidence:
-                        family,
-
-                    patternEvidence:
-                        null
-                });
-
-                selectedFamilies.add(
-                    family.key
-                );
-            }
-
-            /*
-             * Add detailed patterns.
-             *
-             * A detailed pattern can qualify
-             * independently OR inherit a
-             * qualified family edge.
-             */
-
+            // Detailed patterns first.
             for (
                 const pattern
                 of qualifiedPatterns
             ) {
 
                 if (
-                    selected.length >= 12
+                    selected.length >= 10
                 ) {
                     break;
                 }
@@ -2782,10 +2534,7 @@ export default async function handler(req, res) {
                 const familyKeyValue =
                     pattern.key
                         .split("|")
-                        .slice(
-                            0,
-                            3
-                        )
+                        .slice(0, 3)
                         .join("|");
 
                 const family =
@@ -2793,18 +2542,7 @@ export default async function handler(req, res) {
                         x =>
                             x.key ===
                             familyKeyValue
-                    );
-
-                if (
-                    selected.some(
-                        x =>
-                            x.key ===
-                            pattern.key
-                    )
-                ) {
-
-                    continue;
-                }
+                    ) || null;
 
                 selected.push({
 
@@ -2814,28 +2552,25 @@ export default async function handler(req, res) {
                         false,
 
                     familyEvidence:
-                        family ||
-                        null,
+                        family,
 
                     patternEvidence:
                         pattern
                 });
             }
 
-            /*
-             * Important V14 change:
-             *
-             * If family qualifies but no detailed
-             * pattern qualifies, permit the family
-             * to trade.
-             *
-             * This is hierarchical inheritance.
-             */
-
+            // Family inheritance only when
+            // no detailed pattern exists.
             for (
                 const family
                 of qualifiedFamilies
             ) {
+
+                if (
+                    selected.length >= 12
+                ) {
+                    break;
+                }
 
                 const hasDetailed =
                     selected.some(
@@ -2850,12 +2585,6 @@ export default async function handler(req, res) {
                     hasDetailed
                 ) {
                     continue;
-                }
-
-                if (
-                    selected.length >= 12
-                ) {
-                    break;
                 }
 
                 selected.push({
@@ -2890,11 +2619,14 @@ export default async function handler(req, res) {
 
                 return {
 
-                    uniquePatterns: 0,
+                    uniquePatterns:
+                        0,
 
-                    maximumShare: 0,
+                    maximumShare:
+                        0,
 
-                    patternCounts: {},
+                    patternCounts:
+                        {},
 
                     concentrationPassed:
                         false
@@ -2951,8 +2683,7 @@ export default async function handler(req, res) {
                 concentrationPassed:
                     Object.keys(
                         counts
-                    ).length >=
-                        2 &&
+                    ).length >= 2 &&
                     maximumShare <=
                         MAX_PATTERN_CONCENTRATION
             };
@@ -2991,12 +2722,8 @@ export default async function handler(req, res) {
                 new Map();
 
             for (
-                let i =
-                    testStart;
-
-                i <
-                    testEnd - 1;
-
+                let i = testStart;
+                i < testEnd - 1;
                 i++
             ) {
 
@@ -3004,7 +2731,6 @@ export default async function handler(req, res) {
                     i <=
                     cooldownUntil
                 ) {
-
                     continue;
                 }
 
@@ -3051,15 +2777,32 @@ export default async function handler(req, res) {
 
                     const match =
                         selected.find(
-                            x =>
-                                x.key ===
-                                    key ||
-                                (
+                            x => {
+
+                                if (
+                                    !x.recentHealthy
+                                ) {
+                                    return false;
+                                }
+
+                                if (
+                                    x.level ===
+                                    "PATTERN"
+                                ) {
+
+                                    return (
+                                        x.key ===
+                                        key
+                                    );
+                                }
+
+                                return (
                                     x.level ===
                                         "FAMILY" &&
                                     x.key ===
                                         family
-                                )
+                                );
+                            }
                         );
 
                     if (!match) {
@@ -3074,7 +2817,6 @@ export default async function handler(req, res) {
                         ) >=
                         MAX_LOSS_STREAK
                     ) {
-
                         continue;
                     }
 
@@ -3085,7 +2827,6 @@ export default async function handler(req, res) {
                             lastPatternIndex <
                             SAME_PATTERN_COOLDOWN
                     ) {
-
                         continue;
                     }
 
@@ -3096,7 +2837,6 @@ export default async function handler(req, res) {
                             lastSideIndex <
                             SAME_SIDE_COOLDOWN
                     ) {
-
                         continue;
                     }
 
@@ -3110,7 +2850,6 @@ export default async function handler(req, res) {
                     if (
                         !confirmation.passed
                     ) {
-
                         continue;
                     }
 
@@ -3213,58 +2952,74 @@ export default async function handler(req, res) {
 
                         familyQuality:
                             match.familyEvidence
-                                ? match
-                                    .familyEvidence
+                                ? match.familyEvidence
                                     .quality
                                 : null,
 
                         patternQuality:
                             match.patternEvidence
-                                ? match
-                                    .patternEvidence
+                                ? match.patternEvidence
                                     .quality
                                 : match.quality,
 
                         familySamples:
                             match.familyEvidence
-                                ? match
-                                    .familyEvidence
+                                ? match.familyEvidence
                                     .samples
                                 : match.samples,
 
                         patternSamples:
                             match.patternEvidence
-                                ? match
-                                    .patternEvidence
+                                ? match.patternEvidence
                                     .samples
                                 : null,
 
                         familyEV:
                             match.familyEvidence
-                                ? match
-                                    .familyEvidence
+                                ? match.familyEvidence
                                     .expectedValueR
                                 : match.expectedValueR,
 
                         patternEV:
                             match.patternEvidence
-                                ? match
-                                    .patternEvidence
+                                ? match.patternEvidence
                                     .expectedValueR
                                 : null,
 
                         familyPF:
                             match.familyEvidence
-                                ? match
-                                    .familyEvidence
+                                ? match.familyEvidence
                                     .profitFactor
                                 : match.profitFactor,
 
                         patternPF:
                             match.patternEvidence
-                                ? match
-                                    .patternEvidence
+                                ? match.patternEvidence
                                     .profitFactor
+                                : null,
+
+                        familyRecentEV:
+                            match.familyEvidence
+                                ? match.familyEvidence
+                                    .recentEV
+                                : null,
+
+                        patternRecentEV:
+                            match.patternEvidence
+                                ? match.patternEvidence
+                                    .recentEV
+                                : null,
+
+                        familyEdgeDecay:
+                            match.familyEvidence
+                                ? match.familyEvidence
+                                    .edgeDecay
+                                : null,
+
+                        patternEdgeDecay:
+                            match.patternEvidence
+                                ? match.patternEvidence
+                                    .edgeDecay
                                 : null,
 
                         regime:
@@ -3375,10 +3130,7 @@ export default async function handler(req, res) {
                     lastSideIndex =
                         i;
 
-                    /*
-                     * Only one position at a time.
-                     */
-
+                    // Only one position at a time.
                     break;
                 }
             }
@@ -3387,7 +3139,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // API
+        // INDSTOCKS API
         // =====================================================
 
         async function fetchHistoricalChunk(
@@ -3408,10 +3160,10 @@ export default async function handler(req, res) {
                 await fetch(
                     url,
                     {
-                        method: "GET",
+                        method:
+                            "GET",
 
                         headers: {
-
                             Authorization:
                                 accessToken,
 
@@ -3436,8 +3188,7 @@ export default async function handler(req, res) {
             } catch {
 
                 payload = {
-                    raw:
-                        text
+                    raw: text
                 };
             }
 
@@ -3454,7 +3205,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // LOAD DATA
+        // LOAD HISTORICAL DATA
         // =====================================================
 
         async function loadHistoricalData() {
@@ -3499,8 +3250,7 @@ export default async function handler(req, res) {
                 startMs;
 
             while (
-                cursor <
-                endMs
+                cursor < endMs
             ) {
 
                 const chunkEnd =
@@ -3512,17 +3262,14 @@ export default async function handler(req, res) {
                     );
 
                 chunks.push({
-
                     start:
                         cursor,
-
                     end:
                         chunkEnd
                 });
 
                 cursor =
-                    chunkEnd +
-                    1000;
+                    chunkEnd + 1000;
             }
 
             const all = [];
@@ -3588,7 +3335,6 @@ export default async function handler(req, res) {
             return fail(
                 "Insufficient candle data from INDstocks.",
                 {
-
                     rawCandles:
                         historicalData.rawCandles,
 
@@ -3617,7 +3363,7 @@ export default async function handler(req, res) {
             );
 
         // =====================================================
-        // WALK FORWARD
+        // TRUE WALK FORWARD
         // =====================================================
 
         const total =
@@ -3731,7 +3477,7 @@ export default async function handler(req, res) {
                 ...trades
             );
 
-            const s =
+            const metrics =
                 calculateMetrics(
                     trades
                 );
@@ -3748,10 +3494,7 @@ export default async function handler(req, res) {
                             x.family ||
                             x.key
                                 .split("|")
-                                .slice(
-                                    0,
-                                    3
-                                )
+                                .slice(0, 3)
                                 .join("|")
                     )
                 );
@@ -3768,11 +3511,13 @@ export default async function handler(req, res) {
                     fold.testRows,
 
                 familiesDiscovered:
-                    learned.families
+                    learned
+                        .families
                         .length,
 
                 qualifiedFamilies:
-                    learned.families
+                    learned
+                        .families
                         .filter(
                             x =>
                                 x.qualified
@@ -3780,11 +3525,13 @@ export default async function handler(req, res) {
                         .length,
 
                 patternsDiscovered:
-                    learned.patterns
+                    learned
+                        .patterns
                         .length,
 
                 qualifiedPatterns:
-                    learned.patterns
+                    learned
+                        .patterns
                         .filter(
                             x =>
                                 x.qualified
@@ -3811,7 +3558,7 @@ export default async function handler(req, res) {
 
                 trades,
 
-                ...s,
+                ...metrics,
 
                 concentration:
                     conc,
@@ -3846,38 +3593,90 @@ export default async function handler(req, res) {
                 )
             ).size;
 
+        const chronologicalFoldStats =
+            foldResults.map(
+                fold =>
+                    calculateMetrics(
+                        fold.trades
+                    )
+            );
+
+        const profitableFolds =
+            chronologicalFoldStats
+                .filter(
+                    x =>
+                        x.decisiveTrades >= 2 &&
+                        x.expectedValueR >= 0
+                )
+                .length;
+
+        const recentOOSTrades =
+            allTrades.slice(
+                Math.max(
+                    0,
+                    allTrades.length - 8
+                )
+            );
+
+        const recentOOSStats =
+            calculateMetrics(
+                recentOOSTrades
+            );
+
+        const recentOOSHealthy =
+            recentOOSTrades.length >= 4
+                ? (
+                    recentOOSStats
+                        .expectedValueR >= 0 &&
+                    recentOOSStats
+                        .maxConsecutiveLosses <
+                        RECENT_LOSS_STREAK_BLOCK
+                )
+                : true;
+
         const profitabilityProof =
-            globalStats.expectedValueR >=
+            globalStats
+                .expectedValueR >=
                 MIN_GLOBAL_EV &&
 
-            globalStats.profitFactor >=
+            globalStats
+                .profitFactor >=
                 MIN_GLOBAL_PF &&
 
-            globalStats.decisiveTrades >=
+            globalStats
+                .decisiveTrades >=
                 MIN_GLOBAL_DECISIVE &&
 
             globalConcentration
                 .concentrationPassed &&
 
             independentFamilies >=
-                MIN_INDEPENDENT_FAMILIES;
+                MIN_INDEPENDENT_FAMILIES &&
+
+            profitableFolds >= 2 &&
+
+            recentOOSHealthy;
 
         const riskControl =
-            globalStats.maxDrawdownR <=
+            globalStats
+                .maxDrawdownR <=
                 MAX_OOS_DRAWDOWN &&
 
-            globalStats.maxConsecutiveLosses <=
+            globalStats
+                .maxConsecutiveLosses <=
                 MAX_LOSS_STREAK;
 
         const sufficientEvidence =
-            globalStats.decisiveTrades >=
-            MIN_GLOBAL_DECISIVE;
+            globalStats
+                .decisiveTrades >=
+                MIN_GLOBAL_DECISIVE;
 
         const patternDiversity =
             independentFamilies >=
                 MIN_INDEPENDENT_FAMILIES &&
 
-            globalConcentration.maximumShare <=
+            globalConcentration
+                .maximumShare <=
                 MAX_PATTERN_CONCENTRATION;
 
         // =====================================================
@@ -3922,13 +3721,15 @@ export default async function handler(req, res) {
             if (!f) {
 
                 return {
-                    available: false
+                    available:
+                        false
                 };
             }
 
             return {
 
-                available: true,
+                available:
+                    true,
 
                 timestamp:
                     rows[index].ts,
@@ -4036,7 +3837,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No qualified V14 setup is currently active.",
+                "No qualified V14.1 setup is currently active.",
 
             nextAction:
                 "WAIT",
@@ -4068,9 +3869,8 @@ export default async function handler(req, res) {
                 setups.length
             ) {
 
-                /*
-                 * Learn ONLY from historical candles.
-                 */
+                // IMPORTANT:
+                // Current candle excluded from learning.
 
                 const finalLearning =
                     learnHierarchy(
@@ -4103,21 +3903,37 @@ export default async function handler(req, res) {
                         familyKey(
                             setup.side,
                             setup.setup,
-                            currentFeatures
-                                .trend
+                            currentFeatures.trend
                         );
 
                     const match =
                         selected.find(
-                            x =>
-                                x.key ===
-                                    key ||
-                                (
+                            x => {
+
+                                if (
+                                    !x.recentHealthy
+                                ) {
+                                    return false;
+                                }
+
+                                if (
+                                    x.level ===
+                                    "PATTERN"
+                                ) {
+
+                                    return (
+                                        x.key ===
+                                        key
+                                    );
+                                }
+
+                                return (
                                     x.level ===
                                         "FAMILY" &&
                                     x.key ===
                                         family
-                                )
+                                );
+                            }
                         );
 
                     const confirmation =
@@ -4161,11 +3977,23 @@ export default async function handler(req, res) {
                             samples:
                                 match.samples,
 
+                            recentSamples:
+                                match.recentSamples,
+
                             expectedValueR:
                                 match.expectedValueR,
 
                             profitFactor:
                                 match.profitFactor,
+
+                            recentEV:
+                                match.recentEV,
+
+                            recentPF:
+                                match.recentPF,
+
+                            edgeDecay:
+                                match.edgeDecay,
 
                             stableFolds:
                                 match.stableFolds,
@@ -4186,9 +4014,9 @@ export default async function handler(req, res) {
                                 match.level ===
                                     "FAMILY"
 
-                                    ? "Qualified setup-family edge with independent entry confirmation."
+                                    ? "Qualified family edge passed recent-health validation and independent entry confirmation."
 
-                                    : "Qualified detailed pattern with independent entry confirmation.",
+                                    : "Qualified detailed pattern passed recent-health validation and independent entry confirmation.",
 
                             nextAction:
                                 "PAPER_REVIEW_ONLY"
@@ -4212,14 +4040,16 @@ export default async function handler(req, res) {
             );
 
         const qualifiedFamilies =
-            latestLearning.families
+            latestLearning
+                .families
                 .filter(
                     x =>
                         x.qualified
                 );
 
         const qualifiedPatterns =
-            latestLearning.patterns
+            latestLearning
+                .patterns
                 .filter(
                     x =>
                         x.qualified
@@ -4236,59 +4066,64 @@ export default async function handler(req, res) {
 
         const familyRejections = {
 
-            insufficientSamples: 0,
+            insufficientSamples:
+                0,
 
-            insufficientDecisive: 0,
+            insufficientDecisive:
+                0,
 
-            insufficientStability: 0,
+            insufficientStability:
+                0,
 
-            edgeBelowThreshold: 0,
+            edgeBelowThreshold:
+                0,
 
-            recentNegative: 0
+            recentNegative:
+                0,
+
+            recentUnhealthy:
+                0,
+
+            edgeDecay:
+                0
         };
 
         for (
             const f
-            of latestLearning.families
+            of latestLearning
+                .families
         ) {
 
             if (
                 f.samples <
                 FAMILY_MIN_SAMPLES
             ) {
-
                 familyRejections
                     .insufficientSamples++;
-
             }
 
             if (
                 f.decisiveTrades <
                 FAMILY_MIN_DECISIVE
             ) {
-
                 familyRejections
                     .insufficientDecisive++;
-
             }
 
             if (
                 f.stableFolds <
                 MIN_STABLE_FOLDS
             ) {
-
                 familyRejections
                     .insufficientStability++;
-
             }
 
             if (
                 f.expectedValueR <
-                FAMILY_MIN_EV ||
+                    FAMILY_MIN_EV ||
                 f.profitFactor <
-                FAMILY_MIN_PF
+                    FAMILY_MIN_PF
             ) {
-
                 familyRejections
                     .edgeBelowThreshold++;
             }
@@ -4296,9 +4131,23 @@ export default async function handler(req, res) {
             if (
                 f.recentEV < 0
             ) {
-
                 familyRejections
                     .recentNegative++;
+            }
+
+            if (
+                !f.recentHealthy
+            ) {
+                familyRejections
+                    .recentUnhealthy++;
+            }
+
+            if (
+                f.edgeDecay >
+                0.30
+            ) {
+                familyRejections
+                    .edgeDecay++;
             }
         }
 
@@ -4318,7 +4167,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_0_HIERARCHICAL_SETUP_LEARNING_TRUE_WALK_FORWARD",
+                "V14_1_HIERARCHICAL_SETUP_LEARNING_RECENT_EDGE_VALIDATION_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -4415,6 +4264,15 @@ export default async function handler(req, res) {
                 familyEvidenceInheritance:
                     true,
 
+                recentEdgeValidation:
+                    true,
+
+                chronologicalStabilityValidation:
+                    true,
+
+                recentOOSValidation:
+                    true,
+
                 recentVWAPPullback:
                     true,
 
@@ -4500,7 +4358,7 @@ export default async function handler(req, res) {
             hierarchicalLearning: {
 
                 description:
-                    "V14 evaluates setup-family evidence separately from detailed pattern evidence. Detailed patterns can qualify independently, while qualified setup families can provide inherited evidence when detailed patterns lack sufficient samples.",
+                    "V14.1 validates setup families and detailed patterns chronologically, then requires recent edge health before selection. Detailed patterns have priority; family evidence is a strict fallback.",
 
                 familyMinimumSamples:
                     FAMILY_MIN_SAMPLES,
@@ -4526,14 +4384,34 @@ export default async function handler(req, res) {
                 patternMinimumPF:
                     PATTERN_MIN_PF,
 
+                recentTrainingFraction:
+                    RECENT_TRAINING_FRACTION,
+
+                recentMinimumSamples:
+                    RECENT_MIN_SAMPLES,
+
+                recentMinimumDecisive:
+                    RECENT_MIN_DECISIVE,
+
+                recentMinimumEV:
+                    RECENT_MIN_EV,
+
+                recentMinimumPF:
+                    RECENT_MIN_PF,
+
+                recentLossStreakBlock:
+                    RECENT_LOSS_STREAK_BLOCK,
+
+                chronologicalSegments:
+                    CHRONOLOGICAL_SEGMENTS,
+
                 familiesDiscovered:
                     latestLearning
                         .families
                         .length,
 
                 qualifiedFamilies:
-                    qualifiedFamilies
-                        .length,
+                    qualifiedFamilies.length,
 
                 patternsDiscovered:
                     latestLearning
@@ -4541,37 +4419,30 @@ export default async function handler(req, res) {
                         .length,
 
                 qualifiedPatterns:
-                    qualifiedPatterns
-                        .length,
+                    qualifiedPatterns.length,
 
                 selectedLearningEdges:
                     latestSelected.length,
 
                 selectedFamilies:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.level ===
-                                "FAMILY"
-                        )
-                        .length,
+                    latestSelected.filter(
+                        x =>
+                            x.level ===
+                            "FAMILY"
+                    ).length,
 
                 selectedDetailedPatterns:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.level ===
-                                "PATTERN"
-                        )
-                        .length,
+                    latestSelected.filter(
+                        x =>
+                            x.level ===
+                            "PATTERN"
+                    ).length,
 
                 inheritedFamilyEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.inherited
-                        )
-                        .length
+                    latestSelected.filter(
+                        x =>
+                            x.inherited
+                    ).length
             },
 
             setupDiscovery: {
@@ -4635,6 +4506,15 @@ export default async function handler(req, res) {
                 familyInheritance:
                     true,
 
+                recentEdgeValidation:
+                    true,
+
+                chronologicalStability:
+                    true,
+
+                profitableFolds:
+                    profitableFolds,
+
                 folds:
                     foldResults.map(
                         x => ({
@@ -4684,7 +4564,7 @@ export default async function handler(req, res) {
             trueOOSPaperExecution: {
 
                 description:
-                    "Each fold learns exclusively from preceding candles. Family-level and detailed-pattern evidence are calculated without access to future test candles.",
+                    "Each fold learns exclusively from preceding candles. V14.1 additionally requires chronological stability and recent edge health before an edge can be selected.",
 
                 stats:
                     globalStats,
@@ -4714,6 +4594,29 @@ export default async function handler(req, res) {
 
                 patternConcentration:
                     globalConcentration,
+
+                chronologicalValidation: {
+
+                    profitableFolds,
+
+                    totalFolds:
+                        foldResults.length,
+
+                    requiredProfitableFolds:
+                        2
+                },
+
+                recentOOSValidation: {
+
+                    trades:
+                        recentOOSTrades.length,
+
+                    stats:
+                        recentOOSStats,
+
+                    healthy:
+                        recentOOSHealthy
+                },
 
                 setupPerformance:
                     setupStats
@@ -4783,10 +4686,9 @@ export default async function handler(req, res) {
                     latestSelected
                         .filter(
                             x =>
-                                x.key
-                                    .startsWith(
-                                        "BUY|"
-                                    )
+                                x.key.startsWith(
+                                    "BUY|"
+                                )
                         )
                         .length,
 
@@ -4794,10 +4696,9 @@ export default async function handler(req, res) {
                     latestSelected
                         .filter(
                             x =>
-                                x.key
-                                    .startsWith(
-                                        "SELL|"
-                                    )
+                                x.key.startsWith(
+                                    "SELL|"
+                                )
                         )
                         .length,
 
@@ -4807,11 +4708,8 @@ export default async function handler(req, res) {
                         latestSelected
                             .filter(
                                 x =>
-                                    (
-                                        x.key
-                                            .includes(
-                                                "TREND_FOLLOW"
-                                            )
+                                    x.key.includes(
+                                        "TREND_FOLLOW"
                                     )
                             )
                             .length,
@@ -4820,11 +4718,8 @@ export default async function handler(req, res) {
                         latestSelected
                             .filter(
                                 x =>
-                                    (
-                                        x.key
-                                            .includes(
-                                                "VWAP_PULLBACK"
-                                            )
+                                    x.key.includes(
+                                        "VWAP_PULLBACK"
                                     )
                             )
                             .length
@@ -4892,7 +4787,52 @@ export default async function handler(req, res) {
                         true,
 
                     purpose:
-                        "Reduce excessive pattern fragmentation while preserving detailed pattern validation."
+                        "Reduce excessive pattern fragmentation while requiring recent edge health."
+                },
+
+                v141EdgeValidation: {
+
+                    enabled:
+                        true,
+
+                    chronologicalStability:
+                        true,
+
+                    chronologicalSegments:
+                        CHRONOLOGICAL_SEGMENTS,
+
+                    recentTrainingFraction:
+                        RECENT_TRAINING_FRACTION,
+
+                    recentMinimumSamples:
+                        RECENT_MIN_SAMPLES,
+
+                    recentMinimumDecisive:
+                        RECENT_MIN_DECISIVE,
+
+                    recentMinimumEV:
+                        RECENT_MIN_EV,
+
+                    recentMinimumPF:
+                        RECENT_MIN_PF,
+
+                    recentLossStreakBlock:
+                        RECENT_LOSS_STREAK_BLOCK,
+
+                    edgeDecayProtection:
+                        true,
+
+                    preferredEdgeDecayLimit:
+                        0.30,
+
+                    hardEdgeDecayLimit:
+                        0.50,
+
+                    detailedPatternPriority:
+                        true,
+
+                    familyInheritanceRequiresRecentHealth:
+                        true
                 },
 
                 trendStrength: {
@@ -5001,20 +4941,24 @@ export default async function handler(req, res) {
             paperAction:
                 currentSignal.status ===
                     "SIGNAL"
+
                     ? "PAPER_REVIEW_ONLY"
+
                     : "NO_TRADE",
 
             nextAction:
                 currentSignal.status ===
                     "SIGNAL"
+
                     ? "WAIT_FOR_NEXT_CONFIRMED_CANDLE"
+
                     : "WAIT"
         });
 
     } catch (error) {
 
         console.error(
-            "TradeMind Pro V14 ERROR:",
+            "TradeMind Pro V14.1 ERROR:",
             error
         );
 
@@ -5022,10 +4966,11 @@ export default async function handler(req, res) {
             .status(500)
             .json({
 
-                success: false,
+                success:
+                    false,
 
                 version:
-                    "V14.0",
+                    "V14.1",
 
                 status:
                     "ERROR",
