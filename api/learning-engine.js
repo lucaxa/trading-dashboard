@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.4";
+    const VERSION = "V15.5";
 
     try {
 
@@ -3584,6 +3584,130 @@ export default async function handler(req, res) {
         // PROMOTION / CANDIDATE FLOW
         // =====================================================
 
+        // =====================================================
+        // V15.5 PROMOTION PATH AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. V15.5 does NOT loosen any gate and does
+        // NOT change validation/OOS behavior. It explains why a
+        // discovered/qualified context candidate does or does not
+        // enter the actual validationCandidates array.
+        // =====================================================
+        function buildV155PromotionPathAudit(discovery, discoveryEnd) {
+
+            const target = `${V153_TARGET_SIDE}|${V153_TARGET_SETUP}|${V153_TARGET_TREND}`;
+
+            const all = [
+                ...safeArray(discovery?.qualifiedContextPatterns),
+                ...safeArray(discovery?.adaptiveContextPatterns)
+            ];
+
+            const unique = [];
+            const seen = new Set();
+
+            for (const candidate of all) {
+                const key = String(candidate?.key || "");
+                if (!key || seen.has(key)) continue;
+                seen.add(key);
+                unique.push(candidate);
+            }
+
+            const audit = unique.map(candidate => {
+                const key = String(candidate.key || "");
+                const reasons = [];
+
+                const targetSideMatch = key.startsWith(`${V153_TARGET_SIDE}|`);
+                const targetSetupMatch = key.includes(`|S:${V153_TARGET_SETUP}|`);
+                const targetTrendMatch = key.includes(`|T:${V153_TARGET_TREND}|`);
+                const targetMatch = targetSideMatch && targetSetupMatch && targetTrendMatch;
+
+                if (!targetSideMatch) reasons.push("TARGET_SIDE_MISMATCH");
+                if (!targetSetupMatch) reasons.push("TARGET_SETUP_MISMATCH");
+                if (!targetTrendMatch) reasons.push("TARGET_TREND_MISMATCH");
+
+                const familyKey = resolveFamilyKey(candidate);
+                const family = safeArray(discovery?.families).find(x => x.key === familyKey) || null;
+
+                if (!family) {
+                    reasons.push("FAMILY_RESOLUTION_FAILED");
+                } else {
+                    if (candidate.level === "CONTEXT" || candidate.level === "ADAPTIVE_CONTEXT") {
+                        if (family.expectedValueR < CONTEXT_MIN_FAMILY_EV) reasons.push("CONTEXT_FAMILY_EV_TOO_WEAK");
+                        if (family.profitFactor < CONTEXT_MIN_FAMILY_PF) reasons.push("CONTEXT_FAMILY_PF_TOO_WEAK");
+                    }
+                }
+
+                const adaptiveGate = candidate.level === "ADAPTIVE_CONTEXT"
+                    ? adaptiveContextGate(candidate, discoveryEnd)
+                    : { passed: true, reasons: [], eligibleRecords: null, recentRecords: null, metrics: null };
+
+                if (candidate.level === "ADAPTIVE_CONTEXT" && !adaptiveGate.passed) {
+                    for (const r of safeArray(adaptiveGate.reasons)) reasons.push(`ADAPTIVE_GATE:${r}`);
+                }
+
+                const inQualifiedContext = safeArray(discovery?.qualifiedContextPatterns).some(x => x.key === candidate.key);
+                const inAdaptiveContext = safeArray(discovery?.adaptiveContextPatterns).some(x => x.key === candidate.key);
+
+                if (!inQualifiedContext && !inAdaptiveContext) reasons.push("NOT_IN_CURRENT_QUALIFIED_POOL");
+                if (!targetMatch) reasons.push("EXCLUDED_BY_V15_3_TARGET_FILTER");
+
+                const wouldEnterActualPromotionPool =
+                    targetMatch &&
+                    (inQualifiedContext || inAdaptiveContext) &&
+                    adaptiveGate.passed &&
+                    !reasons.some(r => r === "FAMILY_RESOLUTION_FAILED" || r === "CONTEXT_FAMILY_EV_TOO_WEAK" || r === "CONTEXT_FAMILY_PF_TOO_WEAK");
+
+                return {
+                    key,
+                    level: candidate.level,
+                    target,
+                    targetMatch,
+                    targetComponents: {
+                        side: targetSideMatch,
+                        setup: targetSetupMatch,
+                        trend: targetTrendMatch
+                    },
+                    poolMembership: {
+                        qualifiedContext: inQualifiedContext,
+                        adaptiveContext: inAdaptiveContext
+                    },
+                    adaptiveGate: {
+                        passed: adaptiveGate.passed,
+                        reasons: adaptiveGate.reasons,
+                        eligibleRecords: adaptiveGate.eligibleRecords,
+                        recentRecords: adaptiveGate.recentRecords,
+                        metrics: adaptiveGate.metrics
+                    },
+                    family: family ? {
+                        key: family.key,
+                        qualified: !!family.qualified,
+                        EV: family.expectedValueR,
+                        PF: family.profitFactor,
+                        stableSections: family.stableSections
+                    } : null,
+                    wouldEnterActualPromotionPool,
+                    blockingReasons: [...new Set(reasons)]
+                };
+            });
+
+            const counts = {};
+            for (const item of audit) {
+                for (const reason of item.blockingReasons) counts[reason] = (counts[reason] || 0) + 1;
+            }
+
+            return {
+                purpose: "Trace every qualified/adaptive context candidate through the exact V15.4 promotion path without changing any gate.",
+                target,
+                discoveredContextCandidates: safeArray(discovery?.contextPatterns).length,
+                qualifiedContextCandidates: safeArray(discovery?.qualifiedContextPatterns).length,
+                adaptiveContextCandidates: safeArray(discovery?.adaptiveContextPatterns).length,
+                auditedCandidates: audit.length,
+                candidatesThatWouldEnterActualPromotionPool: audit.filter(x => x.wouldEnterActualPromotionPool).length,
+                blockingReasonCounts: counts,
+                candidates: audit,
+                guard: "Diagnostic only. No threshold, validation rule, adaptive gate, or OOS rule is changed by V15.5."
+            };
+        }
+
         function promoteCandidates(
             candles,
             discovery,
@@ -3656,6 +3780,12 @@ export default async function handler(req, res) {
 
             const v154QualificationDiagnostics =
                 buildV154QualificationDiagnostics(
+                    discovery,
+                    discoveryEnd
+                );
+
+            const v155PromotionPathAudit =
+                buildV155PromotionPathAudit(
                     discovery,
                     discoveryEnd
                 );
@@ -4143,7 +4273,8 @@ export default async function handler(req, res) {
                         ).length
 ,
 
-                    v154QualificationDiagnostics
+                    v154QualificationDiagnostics,
+                    v155PromotionPathAudit
                 }
             };
         }
@@ -7367,7 +7498,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V15_4_QUALIFICATION_DIAGNOSTIC_TRUE_WALK_FORWARD",
+                "V15_5_PROMOTION_PATH_AUDIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -7486,7 +7617,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; exit mechanics are compared diagnostically on a fixed entry set.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; exit mechanics are compared diagnostically on a fixed entry set.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -7654,6 +7785,8 @@ export default async function handler(req, res) {
             regimeFingerprintDiagnostics,
 
             strategyMechanicsDiagnostics,
+
+            v155PromotionPathAudit: finalPromoted?.candidateFlow?.v155PromotionPathAudit || null,
 
             v153FocusedTest: {
                 side: V153_TARGET_SIDE,
