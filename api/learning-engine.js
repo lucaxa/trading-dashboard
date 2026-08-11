@@ -1,48 +1,37 @@
 /*
 ===========================================================
  TradeMind Pro
- V13.1 FIXED — DIRECT INDSTOCKS DATA + TRUE WALK-FORWARD
+ V13.1 — REGIME ADAPTIVE EDGE VALIDATION
+        + DIVERSITY CONTROL
+        + TRUE WALK-FORWARD PAPER ENGINE
+        + DIRECT INDSTOCKS HISTORICAL DATA
 
  Instrument : NIFTY 50
  Interval   : 5 minute
  Mode       : PAPER ONLY
  Orders     : NONE
 
- IMPORTANT:
- - Does NOT call /api/learning-dataset
- - Fetches INDstocks historical candles directly
- - Uses maximum 7-day chunks for 5-minute data
- - Latest candle excluded from learning
- - Strict chronological walk-forward
- - Signal-conditioned learning
- - Entry confirmation
- - Regime validation
- - Decay validation
- - Pattern circuit breaker
- - Pattern diversity
- - No forced trades
- - No real orders
+ IMPORTANT
+ ----------------------------------------------------------
+ This version DOES NOT use:
+   LEARNING_DATA_URL
+   DATA_URL
+   LEARNING_DATASET
 
- Required Vercel environment variable:
+ It fetches historical candles directly from INDstocks.
 
- INDSTOCKS_TOKEN
+ INDstocks 5-minute historical API:
+   Maximum request range = 7 days
 
- Supported fallback token names:
- INDSTOCKS_API_TOKEN
- INDMONEY_API_TOKEN
- API_TOKEN
+ Therefore this engine automatically downloads
+ the requested period in 6-day chunks.
 
- Optional:
- INDSTOCKS_BASE_URL
+ INDstocks candle format:
+   [timestamp_ms, open, high, low, close, volume]
 
- Default:
- https://api.indstocks.com
-
- NIFTY 50:
- NIDX_40000001
-
-===========================================================
+ ===========================================================
 */
+
 
 export default async function handler(req, res) {
 
@@ -55,16 +44,15 @@ export default async function handler(req, res) {
         const VERSION = "V13.1";
 
         const INSTRUMENT = "NIFTY 50";
-        const SCRIP_CODE = "NIDX_40000001";
         const INTERVAL = "5minute";
 
-        const REQUESTED_DAYS = Math.max(
-            7,
-            Number(
-                req.body?.days ||
-                req.query?.days ||
-                30
-            )
+        // Your confirmed INDstocks NIFTY 50 index scrip code
+        const SCRIP_CODE = "NIDX_40000001";
+
+        const REQUESTED_DAYS = Number(
+            req.body?.days ||
+            req.query?.days ||
+            30
         );
 
         const QUALITY_THRESHOLD = 60;
@@ -96,23 +84,19 @@ export default async function handler(req, res) {
         const MAX_OOS_DRAWDOWN = 12;
 
         const BASE_URL =
-            process.env.INDSTOCKS_BASE_URL ||
             "https://api.indstocks.com";
 
-        const TOKEN =
-            process.env.INDSTOCKS_TOKEN ||
-            process.env.INDSTOCKS_API_TOKEN ||
-            process.env.INDMONEY_API_TOKEN ||
-            process.env.API_TOKEN ||
-            "";
 
         // =====================================================
         // RESPONSE HELPERS
         // =====================================================
 
         function send(data) {
+
             return res.status(200).json(data);
+
         }
+
 
         function fail(message, extra = {}) {
 
@@ -135,44 +119,55 @@ export default async function handler(req, res) {
                 error: message,
 
                 ...extra
+
             });
+
         }
+
 
         // =====================================================
         // NUMBER HELPERS
         // =====================================================
 
-        function n(x, fallback = null) {
+        function n(value, fallback = null) {
 
-            const v = Number(x);
+            const number = Number(value);
 
-            return Number.isFinite(v)
-                ? v
+            return Number.isFinite(number)
+                ? number
                 : fallback;
+
         }
 
-        function round(x, digits = 4) {
 
-            if (!Number.isFinite(x)) {
+        function round(value, digits = 4) {
+
+            if (!Number.isFinite(value)) {
                 return null;
             }
 
-            const p =
+            const factor =
                 Math.pow(10, digits);
 
-            return Math.round(x * p) / p;
+            return Math.round(
+                value * factor
+            ) / factor;
+
         }
 
-        function clamp(x, min, max) {
+
+        function clamp(value, min, max) {
 
             return Math.max(
                 min,
-                Math.min(max, x)
+                Math.min(max, value)
             );
+
         }
 
+
         // =====================================================
-        // NORMALIZE CANDLE
+        // INDSTOCKS CANDLE NORMALIZATION
         // =====================================================
 
         function normalizeCandle(row) {
@@ -181,144 +176,306 @@ export default async function handler(req, res) {
                 return null;
             }
 
-            // INDstocks normally returns:
-            // [timestamp, open, high, low, close, volume]
+
+            /*
+             * INDstocks returns:
+             *
+             * [
+             *   timestamp_ms,
+             *   open,
+             *   high,
+             *   low,
+             *   close,
+             *   volume
+             * ]
+             */
 
             if (Array.isArray(row)) {
 
-                let ts = n(row[0]);
+                const rawTs =
+                    Number(row[0]);
 
-                if (ts === null) {
-                    return null;
-                }
+                const o =
+                    Number(row[1]);
 
-                // API timestamps are milliseconds.
-                // Internally we use seconds.
+                const h =
+                    Number(row[2]);
 
-                if (ts > 100000000000) {
-                    ts = Math.floor(ts / 1000);
-                }
+                const l =
+                    Number(row[3]);
 
-                const o = n(row[1]);
-                const h = n(row[2]);
-                const l = n(row[3]);
-                const c = n(row[4]);
-                const v = n(row[5], 0);
+                const c =
+                    Number(row[4]);
+
+                const v =
+                    Number(row[5] ?? 0);
+
 
                 if (
-                    o === null ||
-                    h === null ||
-                    l === null ||
-                    c === null
+                    !Number.isFinite(rawTs) ||
+                    !Number.isFinite(o) ||
+                    !Number.isFinite(h) ||
+                    !Number.isFinite(l) ||
+                    !Number.isFinite(c)
                 ) {
+
                     return null;
+
                 }
 
+
+                /*
+                 * Convert milliseconds to seconds.
+                 *
+                 * Internal TradeMind timestamps use seconds.
+                 */
+
+                const ts =
+                    rawTs > 100000000000
+                        ? Math.floor(rawTs / 1000)
+                        : rawTs;
+
+
                 return {
+
                     ts,
+
                     o,
+
                     h,
+
                     l,
+
                     c,
-                    v
+
+                    v:
+                        Number.isFinite(v)
+                            ? v
+                            : 0
+
                 };
+
             }
 
-            let ts = n(
-                row.ts ??
-                row.timestamp ??
-                row.time ??
-                row.t
-            );
 
-            if (ts === null) {
-                return null;
-            }
+            /*
+             * Also support object-form candles.
+             * This makes the engine more robust if INDstocks
+             * changes/returns a different wrapper.
+             */
 
-            if (ts > 100000000000) {
-                ts = Math.floor(ts / 1000);
-            }
+            const rawTs =
+                Number(
+                    row.ts ??
+                    row.timestamp ??
+                    row.time ??
+                    row.t
+                );
+
 
             const o =
-                n(row.o ?? row.open);
+                Number(
+                    row.o ??
+                    row.open
+                );
+
 
             const h =
-                n(row.h ?? row.high);
+                Number(
+                    row.h ??
+                    row.high
+                );
+
 
             const l =
-                n(row.l ?? row.low);
+                Number(
+                    row.l ??
+                    row.low
+                );
+
 
             const c =
-                n(row.c ?? row.close);
+                Number(
+                    row.c ??
+                    row.close
+                );
+
 
             const v =
-                n(row.v ?? row.volume, 0);
+                Number(
+                    row.v ??
+                    row.volume ??
+                    0
+                );
+
 
             if (
-                o === null ||
-                h === null ||
-                l === null ||
-                c === null
+                !Number.isFinite(rawTs) ||
+                !Number.isFinite(o) ||
+                !Number.isFinite(h) ||
+                !Number.isFinite(l) ||
+                !Number.isFinite(c)
             ) {
+
                 return null;
+
             }
 
+
+            const ts =
+                rawTs > 100000000000
+                    ? Math.floor(rawTs / 1000)
+                    : rawTs;
+
+
             return {
+
                 ts,
+
                 o,
+
                 h,
+
                 l,
+
                 c,
-                v
+
+                v:
+                    Number.isFinite(v)
+                        ? v
+                        : 0
+
             };
+
         }
 
+
         // =====================================================
-        // EXTRACT CANDLES FROM API RESPONSE
+        // EXTRACT INDSTOCKS CANDLES
         // =====================================================
 
-        function extractCandles(payload) {
+        function extractRows(payload) {
 
             if (!payload) {
                 return [];
             }
 
-            if (Array.isArray(payload)) {
-                return payload;
+
+            /*
+             * Expected:
+             *
+             * {
+             *   status: "success",
+             *   data: {
+             *      candles: [...]
+             *   }
+             * }
+             */
+
+            if (
+                payload.data &&
+                Array.isArray(
+                    payload.data.candles
+                )
+            ) {
+
+                return payload.data.candles;
+
             }
 
-            const candidates = [
 
-                payload?.data?.candles,
+            if (
+                Array.isArray(
+                    payload.candles
+                )
+            ) {
 
-                payload?.data,
+                return payload.candles;
 
-                payload?.candles,
-
-                payload?.result?.candles,
-
-                payload?.result?.data,
-
-                payload?.rows,
-
-                payload?.results
-            ];
-
-            for (const candidate of candidates) {
-
-                if (Array.isArray(candidate)) {
-                    return candidate;
-                }
             }
+
+
+            if (
+                Array.isArray(payload.data)
+            ) {
+
+                return payload.data;
+
+            }
+
+
+            if (
+                Array.isArray(payload.rows)
+            ) {
+
+                return payload.rows;
+
+            }
+
+
+            if (
+                Array.isArray(payload.results)
+            ) {
+
+                return payload.results;
+
+            }
+
+
+            if (
+                payload.result &&
+                Array.isArray(
+                    payload.result.candles
+                )
+            ) {
+
+                return payload.result.candles;
+
+            }
+
 
             return [];
+
         }
 
+
         // =====================================================
-        // DIRECT INDSTOCKS HISTORICAL FETCH
+        // GET INDSTOCKS ACCESS TOKEN
         // =====================================================
 
-        async function fetchHistoricalChunk(
+        function getAccessToken() {
+
+            /*
+             * Support multiple names so you don't have
+             * to rename an existing Vercel variable.
+             */
+
+            const token =
+                process.env.INDSTOCKS_ACCESS_TOKEN ||
+                process.env.INDSTOCKS_TOKEN ||
+                process.env.INDSTOCKS_API_TOKEN;
+
+
+            if (!token) {
+
+                throw new Error(
+                    "INDstocks access token not configured. Set INDSTOCKS_ACCESS_TOKEN in Vercel Environment Variables."
+                );
+
+            }
+
+
+            return String(token).trim();
+
+        }
+
+
+        // =====================================================
+        // FETCH ONE INDSTOCKS CHUNK
+        // =====================================================
+
+        async function fetchINDstocksChunk(
+            accessToken,
             startMs,
             endMs
         ) {
@@ -326,30 +483,41 @@ export default async function handler(req, res) {
             const url =
                 `${BASE_URL}/market/historical/${INTERVAL}` +
                 `?scrip-codes=${encodeURIComponent(SCRIP_CODE)}` +
-                `&start_time=${startMs}` +
-                `&end_time=${endMs}`;
+                `&start_time=${Math.floor(startMs)}` +
+                `&end_time=${Math.floor(endMs)}`;
+
 
             const response =
                 await fetch(
                     url,
                     {
                         method: "GET",
+
                         headers: {
-                            "Authorization": TOKEN,
-                            "Accept": "application/json"
+
+                            "Authorization":
+                                accessToken,
+
+                            "Accept":
+                                "application/json"
+
                         }
                     }
                 );
 
+
             const text =
                 await response.text();
+
 
             if (!response.ok) {
 
                 throw new Error(
-                    `INDstocks historical API failed: HTTP ${response.status} ${text.slice(0, 300)}`
+                    `INDstocks historical API failed: HTTP ${response.status} ${text.slice(0, 500)}`
                 );
+
             }
+
 
             let payload;
 
@@ -358,114 +526,196 @@ export default async function handler(req, res) {
                 payload =
                     JSON.parse(text);
 
-            } catch (e) {
+            } catch (error) {
 
                 throw new Error(
-                    "INDstocks returned invalid JSON."
+                    "INDstocks returned invalid JSON: " +
+                    text.slice(0, 500)
                 );
+
             }
 
-            const raw =
-                extractCandles(payload);
 
-            return raw
-                .map(normalizeCandle)
-                .filter(Boolean);
+            const rows =
+                extractRows(payload);
+
+
+            return rows;
+
         }
 
+
         // =====================================================
-        // LOAD DIRECT INDSTOCKS DATA
+        // FETCH COMPLETE HISTORICAL DATASET
         // =====================================================
 
-        async function loadDataset() {
-
-            if (!TOKEN) {
-
-                throw new Error(
-                    "INDstocks API token missing. Set INDSTOCKS_TOKEN in Vercel Environment Variables."
-                );
-            }
+        async function fetchHistoricalData(
+            accessToken,
+            days
+        ) {
 
             /*
-             * INDstocks allows maximum 7 days for 5-minute
-             * historical data.
+             * INDstocks allows maximum 7 days for
+             * 5-minute historical data.
              *
-             * We therefore fetch in 6-day chunks to keep a
-             * safety margin.
+             * We intentionally use 6-day chunks.
              */
+
+            const CHUNK_DAYS = 6;
+
+            const MS_PER_DAY =
+                24 *
+                60 *
+                60 *
+                1000;
+
 
             const now =
                 Date.now();
 
+
             const requestedMs =
-                REQUESTED_DAYS *
-                24 *
-                60 *
-                60 *
-                1000;
+                Math.max(
+                    1,
+                    Number(days)
+                ) *
+                MS_PER_DAY;
 
-            const start =
-                now - requestedMs;
 
-            const CHUNK_MS =
-                6 *
-                24 *
-                60 *
-                60 *
-                1000;
+            const requestedStart =
+                now -
+                requestedMs;
 
-            const all = [];
+
+            const allRows = [];
+
 
             let cursor =
-                start;
+                requestedStart;
+
 
             let chunkNumber = 0;
 
-            while (cursor < now) {
+
+            while (
+                cursor < now
+            ) {
 
                 chunkNumber++;
 
+
                 const chunkEnd =
                     Math.min(
-                        cursor + CHUNK_MS,
+                        cursor +
+                        CHUNK_DAYS *
+                        MS_PER_DAY,
                         now
                     );
 
-                const candles =
-                    await fetchHistoricalChunk(
+
+                const rows =
+                    await fetchINDstocksChunk(
+                        accessToken,
                         cursor,
                         chunkEnd
                     );
 
-                all.push(
-                    ...candles
+
+                console.log(
+                    `TradeMind V13.1 INDstocks chunk ${chunkNumber}:`,
+                    new Date(cursor).toISOString(),
+                    "->",
+                    new Date(chunkEnd).toISOString(),
+                    "raw candles:",
+                    rows.length
                 );
+
+
+                allRows.push(
+                    ...rows
+                );
+
+
+                if (
+                    chunkEnd <= cursor
+                ) {
+
+                    break;
+
+                }
+
 
                 cursor =
                     chunkEnd;
 
-                /*
-                 * Small pause prevents hammering the API
-                 * when several chunks are required.
-                 */
-
-                if (cursor < now) {
-
-                    await new Promise(
-                        resolve =>
-                            setTimeout(
-                                resolve,
-                                120
-                            )
-                    );
-                }
             }
 
-            return all;
+
+            /*
+             * Normalize
+             */
+
+            const normalized =
+                allRows
+                    .map(normalizeCandle)
+                    .filter(Boolean);
+
+
+            /*
+             * Deduplicate by timestamp.
+             */
+
+            const map =
+                new Map();
+
+
+            for (
+                const candle of normalized
+            ) {
+
+                map.set(
+                    String(candle.ts),
+                    candle
+                );
+
+            }
+
+
+            const result =
+                [...map.values()]
+                    .sort(
+                        (a, b) =>
+                            a.ts - b.ts
+                    );
+
+
+            console.log(
+                "TradeMind V13.1 total raw candles:",
+                allRows.length
+            );
+
+
+            console.log(
+                "TradeMind V13.1 normalized candles:",
+                result.length
+            );
+
+
+            return {
+
+                rawRows:
+                    allRows,
+
+                normalized:
+                    result
+
+            };
+
         }
 
+
         // =====================================================
-        // SORT + DEDUPLICATE
+        // PREPARE DATA
         // =====================================================
 
         function prepareData(rows) {
@@ -473,24 +723,34 @@ export default async function handler(req, res) {
             const map =
                 new Map();
 
-            for (const row of rows) {
+
+            for (
+                const row of rows
+            ) {
 
                 if (!row) {
                     continue;
                 }
 
+
                 map.set(
                     String(row.ts),
                     row
                 );
+
             }
 
-            return [...map.values()]
+
+            return [
+                ...map.values()
+            ]
                 .sort(
                     (a, b) =>
                         a.ts - b.ts
                 );
+
         }
+
 
         // =====================================================
         // EMA
@@ -502,23 +762,35 @@ export default async function handler(req, res) {
                 values.length <
                 period
             ) {
+
                 return null;
+
             }
 
+
             let value = 0;
+
 
             for (
                 let i = 0;
                 i < period;
                 i++
             ) {
-                value += values[i];
+
+                value +=
+                    values[i];
+
             }
 
-            value /= period;
+
+            value /=
+                period;
+
 
             const multiplier =
-                2 / (period + 1);
+                2 /
+                (period + 1);
+
 
             for (
                 let i = period;
@@ -527,13 +799,20 @@ export default async function handler(req, res) {
             ) {
 
                 value =
-                    (values[i] - value) *
+                    (
+                        values[i] -
+                        value
+                    ) *
                     multiplier +
                     value;
+
             }
 
+
             return value;
+
         }
+
 
         // =====================================================
         // RSI
@@ -545,13 +824,18 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                values.length <= period
+                values.length <=
+                period
             ) {
+
                 return null;
+
             }
+
 
             let gains = 0;
             let losses = 0;
+
 
             for (
                 let i = 1;
@@ -563,19 +847,30 @@ export default async function handler(req, res) {
                     values[i] -
                     values[i - 1];
 
-                if (diff >= 0) {
+
+                if (
+                    diff >= 0
+                ) {
+
                     gains += diff;
+
                 } else {
+
                     losses +=
                         Math.abs(diff);
+
                 }
+
             }
+
 
             let avgGain =
                 gains / period;
 
+
             let avgLoss =
                 losses / period;
+
 
             for (
                 let i = period + 1;
@@ -587,42 +882,63 @@ export default async function handler(req, res) {
                     values[i] -
                     values[i - 1];
 
+
                 const gain =
                     diff > 0
                         ? diff
                         : 0;
+
 
                 const loss =
                     diff < 0
                         ? Math.abs(diff)
                         : 0;
 
+
                 avgGain =
                     (
                         avgGain *
                         (period - 1) +
                         gain
-                    ) / period;
+                    ) /
+                    period;
+
 
                 avgLoss =
                     (
                         avgLoss *
                         (period - 1) +
                         loss
-                    ) / period;
+                    ) /
+                    period;
+
             }
 
-            if (avgLoss === 0) {
+
+            if (
+                avgLoss === 0
+            ) {
+
                 return 100;
+
             }
+
 
             const rs =
-                avgGain / avgLoss;
+                avgGain /
+                avgLoss;
 
-            return 100 -
-                100 /
-                (1 + rs);
+
+            return (
+                100 -
+                (
+                    100 /
+                    (1 + rs)
+                )
+            );
+
         }
+
 
         // =====================================================
         // ATR
@@ -634,12 +950,17 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                candles.length <= period
+                candles.length <=
+                period
             ) {
+
                 return null;
+
             }
 
+
             const trs = [];
+
 
             for (
                 let i = 1;
@@ -650,8 +971,10 @@ export default async function handler(req, res) {
                 const current =
                     candles[i];
 
+
                 const previous =
                     candles[i - 1];
+
 
                 const tr =
                     Math.max(
@@ -668,29 +991,43 @@ export default async function handler(req, res) {
                             current.l -
                             previous.c
                         )
+
                     );
 
+
                 trs.push(tr);
+
             }
+
 
             if (
                 trs.length <
                 period
             ) {
+
                 return null;
+
             }
 
+
             let value = 0;
+
 
             for (
                 let i = 0;
                 i < period;
                 i++
             ) {
-                value += trs[i];
+
+                value +=
+                    trs[i];
+
             }
 
-            value /= period;
+
+            value /=
+                period;
+
 
             for (
                 let i = period;
@@ -703,11 +1040,16 @@ export default async function handler(req, res) {
                         value *
                         (period - 1) +
                         trs[i]
-                    ) / period;
+                    ) /
+                    period;
+
             }
 
+
             return value;
+
         }
+
 
         // =====================================================
         // VWAP
@@ -717,12 +1059,18 @@ export default async function handler(req, res) {
             candles
         ) {
 
-            if (!candles.length) {
+            if (
+                !candles.length
+            ) {
+
                 return null;
+
             }
+
 
             let pv = 0;
             let volume = 0;
+
 
             for (
                 const candle of candles
@@ -735,27 +1083,40 @@ export default async function handler(req, res) {
                         candle.c
                     ) / 3;
 
+
                 const vol =
                     Math.max(
                         0,
                         candle.v || 0
                     );
 
-                pv +=
-                    typical * vol;
 
-                volume += vol;
+                pv +=
+                    typical *
+                    vol;
+
+
+                volume +=
+                    vol;
+
             }
 
-            if (volume === 0) {
+
+            if (
+                volume === 0
+            ) {
 
                 return candles[
                     candles.length - 1
                 ].c;
+
             }
 
+
             return pv / volume;
+
         }
+
 
         // =====================================================
         // TIME BUCKET
@@ -765,39 +1126,63 @@ export default async function handler(req, res) {
 
             /*
              * INDstocks timestamps are IST.
-             * Convert using +05:30 explicitly.
+             * Convert using +5:30 explicitly.
              */
 
-            const d =
+            const date =
                 new Date(
                     ts * 1000 +
-                    5.5 * 60 * 60 * 1000
+                    5.5 *
+                    60 *
+                    60 *
+                    1000
                 );
 
+
             const hour =
-                d.getUTCHours();
+                date.getUTCHours();
+
 
             const minute =
-                d.getUTCMinutes();
+                date.getUTCMinutes();
+
 
             const mins =
                 hour * 60 +
                 minute;
 
-            if (mins < 10 * 60) {
+
+            if (
+                mins < 10 * 60
+            ) {
+
                 return "OPEN";
+
             }
 
-            if (mins < 12 * 60) {
+
+            if (
+                mins < 12 * 60
+            ) {
+
                 return "MORNING";
+
             }
 
-            if (mins < 14 * 60) {
+
+            if (
+                mins < 14 * 60
+            ) {
+
                 return "MIDDAY";
+
             }
+
 
             return "CLOSE";
+
         }
+
 
         // =====================================================
         // FEATURE ENGINE
@@ -808,9 +1193,14 @@ export default async function handler(req, res) {
             index
         ) {
 
-            if (index < 30) {
+            if (
+                index < 30
+            ) {
+
                 return null;
+
             }
+
 
             const slice =
                 candles.slice(
@@ -818,10 +1208,12 @@ export default async function handler(req, res) {
                     index + 1
                 );
 
+
             const closes =
                 slice.map(
                     x => x.c
                 );
+
 
             const ema9 =
                 ema(
@@ -829,11 +1221,13 @@ export default async function handler(req, res) {
                     9
                 );
 
+
             const ema21 =
                 ema(
                     closes,
                     21
                 );
+
 
             const previousCloses =
                 closes.slice(
@@ -841,11 +1235,13 @@ export default async function handler(req, res) {
                     -1
                 );
 
+
             const previousEMA9 =
                 ema(
                     previousCloses,
                     9
                 );
+
 
             const rsi14 =
                 rsi(
@@ -853,16 +1249,19 @@ export default async function handler(req, res) {
                     14
                 );
 
+
             const atr14 =
                 atr(
                     slice,
                     14
                 );
 
+
             const vwap =
                 calculateVWAP(
                     slice
                 );
+
 
             if (
                 ema9 === null ||
@@ -871,14 +1270,20 @@ export default async function handler(req, res) {
                 atr14 === null ||
                 vwap === null
             ) {
+
                 return null;
+
             }
+
 
             const close =
                 candles[index].c;
 
+
             const emaSpread =
-                ema9 - ema21;
+                ema9 -
+                ema21;
+
 
             const emaSpreadATR =
                 atr14 !== 0
@@ -886,11 +1291,13 @@ export default async function handler(req, res) {
                       atr14
                     : 0;
 
+
             const ema9Slope =
                 previousEMA9 === null
                     ? 0
                     : ema9 -
                       previousEMA9;
+
 
             const ema9SlopeATR =
                 atr14 !== 0
@@ -898,78 +1305,127 @@ export default async function handler(req, res) {
                       atr14
                     : 0;
 
+
             let trend =
                 "SIDEWAYS";
 
-            if (
-                ema9 > ema21 &&
-                ema9SlopeATR > 0
-            ) {
-                trend = "BULLISH";
-            }
 
             if (
-                ema9 < ema21 &&
-                ema9SlopeATR < 0
+                ema9 >
+                ema21 &&
+                ema9SlopeATR >
+                0
             ) {
-                trend = "BEARISH";
+
+                trend =
+                    "BULLISH";
+
             }
+
+
+            if (
+                ema9 <
+                ema21 &&
+                ema9SlopeATR <
+                0
+            ) {
+
+                trend =
+                    "BEARISH";
+
+            }
+
 
             let rsiBucket =
                 "NEUTRAL";
 
-            if (rsi14 >= 60) {
-                rsiBucket = "HIGH";
+
+            if (
+                rsi14 >= 60
+            ) {
+
+                rsiBucket =
+                    "HIGH";
+
             } else if (
                 rsi14 >= 50
             ) {
+
                 rsiBucket =
                     "NEUTRAL_HIGH";
+
             } else if (
                 rsi14 <= 40
             ) {
-                rsiBucket = "LOW";
-            } else {
+
+                rsiBucket =
+                    "LOW";
+
+            } else if (
+                rsi14 < 50
+            ) {
+
                 rsiBucket =
                     "NEUTRAL_LOW";
+
             }
+
 
             let vwapDirection =
                 "AT";
 
-            if (close > vwap) {
+
+            if (
+                close > vwap
+            ) {
+
                 vwapDirection =
                     "ABOVE";
+
             } else if (
                 close < vwap
             ) {
+
                 vwapDirection =
                     "BELOW";
+
             }
+
 
             const vwapDistanceATR =
                 atr14 !== 0
                     ? (
                         close -
                         vwap
-                    ) / atr14
+                    ) /
+                    atr14
                     : 0;
+
 
             let volatility =
                 "NORMAL";
 
-            if (atr14 > 18) {
+
+            if (
+                atr14 > 18
+            ) {
+
                 volatility =
                     "HIGH";
+
             } else if (
                 atr14 < 8
             ) {
+
                 volatility =
                     "LOW";
+
             }
 
+
             let regime =
-                "UNKNOWN";
+                "TRANSITION";
+
 
             if (
                 Math.abs(
@@ -995,21 +1451,23 @@ export default async function handler(req, res) {
                 regime =
                     "RANGING";
 
-            } else {
-
-                regime =
-                    "TRANSITION";
             }
+
 
             let patternType =
                 "RANGE";
 
+
             if (
-                trend !== "SIDEWAYS"
+                trend !==
+                "SIDEWAYS"
             ) {
+
                 patternType =
                     "TREND_FOLLOW";
+
             }
+
 
             return {
 
@@ -1025,7 +1483,8 @@ export default async function handler(req, res) {
 
                 ema9SlopeATR,
 
-                rsi: rsi14,
+                rsi:
+                    rsi14,
 
                 rsiBucket,
 
@@ -1049,8 +1508,11 @@ export default async function handler(req, res) {
                     getTimeBucket(
                         candles[index].ts
                     )
+
             };
+
         }
+
 
         // =====================================================
         // BASE SIGNAL
@@ -1062,24 +1524,35 @@ export default async function handler(req, res) {
                 return null;
             }
 
-            if (
-                f.trend === "BULLISH" &&
-                f.vwapDirection ===
-                    "ABOVE"
-            ) {
-                return "BUY";
-            }
 
             if (
-                f.trend === "BEARISH" &&
+                f.trend ===
+                "BULLISH" &&
                 f.vwapDirection ===
-                    "BELOW"
+                "ABOVE"
             ) {
-                return "SELL";
+
+                return "BUY";
+
             }
+
+
+            if (
+                f.trend ===
+                "BEARISH" &&
+                f.vwapDirection ===
+                "BELOW"
+            ) {
+
+                return "SELL";
+
+            }
+
 
             return null;
+
         }
+
 
         // =====================================================
         // SLOPE BUCKET
@@ -1089,24 +1562,46 @@ export default async function handler(req, res) {
             slope
         ) {
 
-            if (slope > 0.08) {
+            if (
+                slope > 0.08
+            ) {
+
                 return "STRONG";
+
             }
 
-            if (slope > 0.02) {
+
+            if (
+                slope > 0.02
+            ) {
+
                 return "WEAK";
+
             }
 
-            if (slope < -0.08) {
+
+            if (
+                slope < -0.08
+            ) {
+
                 return "STRONG";
+
             }
 
-            if (slope < -0.02) {
+
+            if (
+                slope < -0.02
+            ) {
+
                 return "WEAK";
+
             }
+
 
             return "FLAT";
+
         }
+
 
         // =====================================================
         // PATTERN KEY
@@ -1138,7 +1633,9 @@ export default async function handler(req, res) {
                 `H:${f.timeBucket}`
 
             ].join("|");
+
         }
+
 
         // =====================================================
         // FAMILY KEY
@@ -1158,137 +1655,9 @@ export default async function handler(req, res) {
                 `P:${f.patternType}`
 
             ].join("|");
+
         }
 
-        // =====================================================
-        // TRADE OUTCOME
-        // =====================================================
-
-        function evaluateTrade(
-            candles,
-            entryIndex,
-            side,
-            stop,
-            target
-        ) {
-
-            const end =
-                Math.min(
-
-                    candles.length - 1,
-
-                    entryIndex +
-                    MAX_HOLD_CANDLES
-                );
-
-            for (
-                let i =
-                    entryIndex + 1;
-                i <= end;
-                i++
-            ) {
-
-                const candle =
-                    candles[i];
-
-                if (
-                    side === "BUY"
-                ) {
-
-                    const hitStop =
-                        candle.l <= stop;
-
-                    const hitTarget =
-                        candle.h >= target;
-
-                    /*
-                     * Conservative:
-                     * STOP wins if both occur
-                     * inside the same candle.
-                     */
-
-                    if (
-                        hitStop &&
-                        hitTarget
-                    ) {
-
-                        return {
-                            exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
-                        };
-                    }
-
-                    if (hitStop) {
-
-                        return {
-                            exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
-                        };
-                    }
-
-                    if (hitTarget) {
-
-                        return {
-                            exitIndex: i,
-                            exitType: "TARGET",
-                            resultR: 2
-                        };
-                    }
-                }
-
-                if (
-                    side === "SELL"
-                ) {
-
-                    const hitStop =
-                        candle.h >= stop;
-
-                    const hitTarget =
-                        candle.l <= target;
-
-                    if (
-                        hitStop &&
-                        hitTarget
-                    ) {
-
-                        return {
-                            exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
-                        };
-                    }
-
-                    if (hitStop) {
-
-                        return {
-                            exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
-                        };
-                    }
-
-                    if (hitTarget) {
-
-                        return {
-                            exitIndex: i,
-                            exitType: "TARGET",
-                            resultR: 2
-                        };
-                    }
-                }
-            }
-
-            return {
-
-                exitIndex: end,
-
-                exitType: "TIMEOUT",
-
-                resultR: 0
-            };
-        }
 
         // =====================================================
         // ENTRY CONFIRMATION
@@ -1306,53 +1675,60 @@ export default async function handler(req, res) {
                     index
                 );
 
+
             if (!f) {
 
                 return {
+
                     score: 0,
+
                     maxScore: 6,
+
                     passed: false
+
                 };
+
             }
+
 
             let score = 0;
 
-            // 1. Trend
 
+            // Trend
             if (
                 (
                     side === "BUY" &&
-                    f.trend ===
-                        "BULLISH"
+                    f.trend === "BULLISH"
                 ) ||
                 (
                     side === "SELL" &&
-                    f.trend ===
-                        "BEARISH"
+                    f.trend === "BEARISH"
                 )
             ) {
+
                 score++;
+
             }
 
-            // 2. VWAP
 
+            // VWAP
             if (
                 (
                     side === "BUY" &&
-                    f.vwapDirection ===
-                        "ABOVE"
+                    f.vwapDirection === "ABOVE"
                 ) ||
                 (
                     side === "SELL" &&
-                    f.vwapDirection ===
-                        "BELOW"
+                    f.vwapDirection === "BELOW"
                 )
             ) {
+
                 score++;
+
             }
 
-            // 3. EMA alignment
 
+            // EMA alignment
             if (
                 (
                     side === "BUY" &&
@@ -1363,21 +1739,25 @@ export default async function handler(req, res) {
                     f.ema9 < f.ema21
                 )
             ) {
+
                 score++;
+
             }
 
-            // 4. EMA spread
 
+            // EMA spread
             if (
                 Math.abs(
                     f.emaSpreadATR
                 ) >= 0.05
             ) {
+
                 score++;
+
             }
 
-            // 5. Slope
 
+            // Slope
             if (
                 (
                     side === "BUY" &&
@@ -1388,11 +1768,13 @@ export default async function handler(req, res) {
                     f.ema9SlopeATR < 0
                 )
             ) {
+
                 score++;
+
             }
 
-            // 6. RSI direction
 
+            // RSI direction
             if (
                 (
                     side === "BUY" &&
@@ -1403,8 +1785,11 @@ export default async function handler(req, res) {
                     f.rsi < 50
                 )
             ) {
+
                 score++;
+
             }
+
 
             return {
 
@@ -1415,8 +1800,207 @@ export default async function handler(req, res) {
                 passed:
                     score >=
                     ENTRY_CONFIRMATION_MIN
+
             };
+
         }
+
+
+        // =====================================================
+        // TRADE OUTCOME
+        // =====================================================
+
+        function evaluateTrade(
+            candles,
+            entryIndex,
+            side,
+            entry,
+            stop,
+            target
+        ) {
+
+            const end =
+                Math.min(
+                    candles.length - 1,
+                    entryIndex +
+                    MAX_HOLD_CANDLES
+                );
+
+
+            for (
+                let i =
+                    entryIndex + 1;
+                i <= end;
+                i++
+            ) {
+
+                const candle =
+                    candles[i];
+
+
+                if (
+                    side === "BUY"
+                ) {
+
+                    const hitStop =
+                        candle.l <=
+                        stop;
+
+
+                    const hitTarget =
+                        candle.h >=
+                        target;
+
+
+                    /*
+                     * Conservative same-candle
+                     * assumption:
+                     * STOP FIRST.
+                     */
+
+                    if (
+                        hitStop &&
+                        hitTarget
+                    ) {
+
+                        return {
+
+                            exitIndex: i,
+
+                            exitType:
+                                "STOP",
+
+                            resultR: -1
+
+                        };
+
+                    }
+
+
+                    if (
+                        hitStop
+                    ) {
+
+                        return {
+
+                            exitIndex: i,
+
+                            exitType:
+                                "STOP",
+
+                            resultR: -1
+
+                        };
+
+                    }
+
+
+                    if (
+                        hitTarget
+                    ) {
+
+                        return {
+
+                            exitIndex: i,
+
+                            exitType:
+                                "TARGET",
+
+                            resultR: 2
+
+                        };
+
+                    }
+
+                }
+
+
+                if (
+                    side === "SELL"
+                ) {
+
+                    const hitStop =
+                        candle.h >=
+                        stop;
+
+
+                    const hitTarget =
+                        candle.l <=
+                        target;
+
+
+                    if (
+                        hitStop &&
+                        hitTarget
+                    ) {
+
+                        return {
+
+                            exitIndex: i,
+
+                            exitType:
+                                "STOP",
+
+                            resultR: -1
+
+                        };
+
+                    }
+
+
+                    if (
+                        hitStop
+                    ) {
+
+                        return {
+
+                            exitIndex: i,
+
+                            exitType:
+                                "STOP",
+
+                            resultR: -1
+
+                        };
+
+                    }
+
+
+                    if (
+                        hitTarget
+                    ) {
+
+                        return {
+
+                            exitIndex: i,
+
+                            exitType:
+                                "TARGET",
+
+                            resultR: 2
+
+                        };
+
+                    }
+
+                }
+
+            }
+
+
+            return {
+
+                exitIndex: end,
+
+                exitType:
+                    "TIMEOUT",
+
+                resultR: 0
+
+            };
+
+        }
+
 
         // =====================================================
         // LEARN PATTERNS
@@ -1430,6 +2014,7 @@ export default async function handler(req, res) {
 
             const patterns =
                 new Map();
+
 
             for (
                 let i =
@@ -1448,16 +2033,20 @@ export default async function handler(req, res) {
                         i
                     );
 
+
                 if (!f) {
                     continue;
                 }
 
+
                 const side =
                     baseSignal(f);
+
 
                 if (!side) {
                     continue;
                 }
+
 
                 const confirmation =
                     confirmationScore(
@@ -1466,11 +2055,15 @@ export default async function handler(req, res) {
                         side
                     );
 
+
                 if (
                     !confirmation.passed
                 ) {
+
                     continue;
+
                 }
+
 
                 const key =
                     patternKey(
@@ -1478,27 +2071,35 @@ export default async function handler(req, res) {
                         f
                     );
 
+
                 const family =
                     familyKey(
                         side,
                         f
                     );
 
+
                 const entry =
                     candles[i].c;
 
+
                 const atrValue =
                     f.atr14;
+
 
                 if (
                     !atrValue ||
                     atrValue <= 0
                 ) {
+
                     continue;
+
                 }
+
 
                 let stop;
                 let target;
+
 
                 if (
                     side === "BUY"
@@ -1507,6 +2108,7 @@ export default async function handler(req, res) {
                     stop =
                         entry -
                         atrValue;
+
 
                     target =
                         entry +
@@ -1519,20 +2121,25 @@ export default async function handler(req, res) {
                         entry +
                         atrValue;
 
+
                     target =
                         entry -
                         2 *
                         atrValue;
+
                 }
 
-                const result =
+
+                const outcome =
                     evaluateTrade(
                         candles,
                         i,
                         side,
+                        entry,
                         stop,
                         target
                     );
+
 
                 if (
                     !patterns.has(key)
@@ -1570,30 +2177,37 @@ export default async function handler(req, res) {
                                 new Set(),
 
                             recentResults: []
+
                         }
                     );
+
                 }
+
 
                 const p =
                     patterns.get(key);
 
+
                 p.samples++;
 
+
                 p.totalR +=
-                    result.resultR;
+                    outcome.resultR;
+
 
                 p.results.push(
-                    result.resultR
+                    outcome.resultR
                 );
 
+
                 if (
-                    result.resultR > 0
+                    outcome.resultR > 0
                 ) {
 
                     p.wins++;
 
                 } else if (
-                    result.resultR < 0
+                    outcome.resultR < 0
                 ) {
 
                     p.losses++;
@@ -1601,9 +2215,11 @@ export default async function handler(req, res) {
                 } else {
 
                     p.timeouts++;
+
                 }
 
-                const bucket =
+
+                const foldBucket =
                     Math.floor(
 
                         (
@@ -1619,12 +2235,16 @@ export default async function handler(req, res) {
                                 trainingEnd -
                                 trainingStart
                             ) / 3
+
                         )
+
                     );
 
+
                 p.foldSet.add(
-                    bucket
+                    foldBucket
                 );
+
 
                 const recentStart =
                     trainingStart +
@@ -1635,19 +2255,25 @@ export default async function handler(req, res) {
                             trainingStart
                         ) *
                         0.75
+
                     );
+
 
                 if (
                     i >= recentStart
                 ) {
 
                     p.recentResults.push(
-                        result.resultR
+                        outcome.resultR
                     );
+
                 }
+
             }
 
+
             const result = [];
+
 
             for (
                 const p of
@@ -1657,12 +2283,16 @@ export default async function handler(req, res) {
                 if (
                     p.samples < 3
                 ) {
+
                     continue;
+
                 }
+
 
                 const decisive =
                     p.wins +
                     p.losses;
+
 
                 const winRate =
                     decisive > 0
@@ -1670,15 +2300,19 @@ export default async function handler(req, res) {
                           decisive
                         : 0;
 
+
                 const ev =
                     p.totalR /
                     p.samples;
 
+
                 const grossWin =
                     p.wins * 2;
 
+
                 const grossLoss =
                     p.losses;
+
 
                 const pf =
                     grossLoss > 0
@@ -1688,8 +2322,10 @@ export default async function handler(req, res) {
                             ? 999
                             : 0;
 
+
                 const stableFolds =
                     p.foldSet.size;
+
 
                 const recentEV =
                     p.recentResults.length
@@ -1701,6 +2337,7 @@ export default async function handler(req, res) {
                         p.recentResults.length
                         : 0;
 
+
                 const decay =
                     ev === 0
                         ? 0
@@ -1710,28 +2347,36 @@ export default async function handler(req, res) {
                         ) /
                         Math.abs(ev);
 
+
                 let quality = 0;
 
-                quality += clamp(
-                    winRate * 45,
-                    0,
-                    45
-                );
 
-                quality += clamp(
-                    Math.max(ev, 0) * 20,
-                    0,
-                    20
-                );
+                quality +=
+                    clamp(
+                        winRate * 45,
+                        0,
+                        45
+                    );
 
-                quality += clamp(
-                    Math.max(
-                        pf - 1,
-                        0
-                    ) * 10,
-                    0,
-                    20
-                );
+
+                quality +=
+                    clamp(
+                        Math.max(ev, 0) * 20,
+                        0,
+                        20
+                    );
+
+
+                quality +=
+                    clamp(
+                        Math.max(
+                            pf - 1,
+                            0
+                        ) * 10,
+                        0,
+                        20
+                    );
+
 
                 quality +=
                     Math.min(
@@ -1739,11 +2384,15 @@ export default async function handler(req, res) {
                         3
                     ) * 5;
 
+
                 if (
                     recentEV < 0
                 ) {
+
                     quality -= 15;
+
                 }
+
 
                 quality =
                     clamp(
@@ -1752,58 +2401,33 @@ export default async function handler(req, res) {
                         100
                     );
 
+
                 const qualified =
 
                     p.samples >=
-                        MIN_OOS_SAMPLES &&
+                    MIN_OOS_SAMPLES &&
 
                     stableFolds >=
-                        MIN_STABLE_FOLDS &&
+                    MIN_STABLE_FOLDS &&
 
                     quality >=
-                        QUALITY_THRESHOLD &&
+                    QUALITY_THRESHOLD &&
 
                     ev >=
-                        MIN_EXPECTED_VALUE &&
+                    MIN_EXPECTED_VALUE &&
 
                     pf >=
-                        MIN_PROFIT_FACTOR &&
+                    MIN_PROFIT_FACTOR &&
 
-                    decay >= -0.75 &&
+                    decay >=
+                    -0.75 &&
 
                     decisive >= 3;
 
+
                 result.push({
 
-                    key: p.key,
-
-                    family: p.family,
-
-                    side: p.side,
-
-                    patternType:
-                        p.patternType,
-
-                    regime:
-                        p.regime,
-
-                    samples:
-                        p.samples,
-
-                    wins:
-                        p.wins,
-
-                    losses:
-                        p.losses,
-
-                    timeouts:
-                        p.timeouts,
-
-                    totalR:
-                        round(
-                            p.totalR,
-                            4
-                        ),
+                    ...p,
 
                     winRate:
                         round(
@@ -1853,14 +2477,19 @@ export default async function handler(req, res) {
                         ),
 
                     qualified
+
                 });
+
             }
 
+
             return result;
+
         }
 
+
         // =====================================================
-        // SELECT PATTERNS
+        // DIVERSITY SELECTION
         // =====================================================
 
         function selectPatterns(
@@ -1879,20 +2508,24 @@ export default async function handler(req, res) {
                             a.quality
                     );
 
+
             if (
                 !qualified.length
             ) {
+
                 return [];
+
             }
+
 
             const selected = [];
 
             const families =
                 new Set();
 
+
             /*
-             * Select one pattern per
-             * independent family first.
+             * Select independent families first.
              */
 
             for (
@@ -1902,8 +2535,11 @@ export default async function handler(req, res) {
                 if (
                     selected.length >= 6
                 ) {
+
                     break;
+
                 }
+
 
                 if (
                     !families.has(
@@ -1916,17 +2552,24 @@ export default async function handler(req, res) {
                     families.add(
                         p.family
                     );
+
                 }
+
             }
 
+
             /*
-             * Do NOT manufacture diversity.
-             * If only one independent family
-             * survives, keep only that family.
+             * We intentionally do NOT manufacture
+             * diversity.
+             *
+             * If only one independent family exists,
+             * the model is allowed to return no trade.
              */
 
             return selected;
+
         }
+
 
         // =====================================================
         // CONCENTRATION
@@ -1936,7 +2579,9 @@ export default async function handler(req, res) {
             trades
         ) {
 
-            if (!trades.length) {
+            if (
+                !trades.length
+            ) {
 
                 return {
 
@@ -1950,10 +2595,14 @@ export default async function handler(req, res) {
                         false,
 
                     details: []
+
                 };
+
             }
 
+
             const counts = {};
+
 
             for (
                 const trade of trades
@@ -1967,12 +2616,15 @@ export default async function handler(req, res) {
                             trade.pattern
                         ] || 0
                     ) + 1;
+
             }
+
 
             const uniquePatterns =
                 Object.keys(
                     counts
                 ).length;
+
 
             const maximum =
                 Math.max(
@@ -1981,9 +2633,11 @@ export default async function handler(req, res) {
                     )
                 );
 
+
             const maximumShare =
                 maximum /
                 trades.length;
+
 
             const details =
                 Object.entries(
@@ -2002,8 +2656,10 @@ export default async function handler(req, res) {
                                 trades.length,
                                 4
                             )
+
                     })
                 );
+
 
             return {
 
@@ -2021,14 +2677,17 @@ export default async function handler(req, res) {
                 concentrationPassed:
 
                     uniquePatterns >=
-                        MIN_INDEPENDENT_PATTERNS &&
+                    MIN_INDEPENDENT_PATTERNS &&
 
                     maximumShare <=
-                        MAX_PATTERN_CONCENTRATION,
+                    MAX_PATTERN_CONCENTRATION,
 
                 details
+
             };
+
         }
+
 
         // =====================================================
         // EXECUTE OOS FOLD
@@ -2044,27 +2703,46 @@ export default async function handler(req, res) {
 
             const trades = [];
 
-            let cooldownUntil = -1;
 
-            let lastPattern = null;
+            let cooldownUntil =
+                -1;
+
+
+            let lastPattern =
+                null;
+
+
             let lastPatternIndex =
                 -9999;
 
-            let lastSide = null;
+
+            let lastSide =
+                null;
+
+
             let lastSideIndex =
                 -9999;
 
+
             for (
-                let i = testStart;
-                i < testEnd - 1;
+                let i =
+                    testStart;
+
+                i <
+                    testEnd - 1;
+
                 i++
             ) {
 
                 if (
-                    i <= cooldownUntil
+                    i <=
+                    cooldownUntil
                 ) {
+
                     continue;
+
                 }
+
 
                 const f =
                     features(
@@ -2072,16 +2750,20 @@ export default async function handler(req, res) {
                         i
                     );
 
+
                 if (!f) {
                     continue;
                 }
 
+
                 const side =
                     baseSignal(f);
+
 
                 if (!side) {
                     continue;
                 }
+
 
                 const key =
                     patternKey(
@@ -2089,33 +2771,47 @@ export default async function handler(req, res) {
                         f
                     );
 
+
                 const selected =
                     selectedPatterns.find(
                         p =>
-                            p.key === key
+                            p.key ===
+                            key
                     );
+
 
                 if (!selected) {
                     continue;
                 }
 
-                if (
-                    key === lastPattern &&
-                    i -
-                        lastPatternIndex <
-                        SAME_PATTERN_COOLDOWN
-                ) {
-                    continue;
-                }
 
                 if (
-                    side === lastSide &&
+                    key ===
+                    lastPattern &&
+
                     i -
-                        lastSideIndex <
-                        SAME_SIDE_COOLDOWN
+                    lastPatternIndex <
+                    SAME_PATTERN_COOLDOWN
                 ) {
+
                     continue;
+
                 }
+
+
+                if (
+                    side ===
+                    lastSide &&
+
+                    i -
+                    lastSideIndex <
+                    SAME_SIDE_COOLDOWN
+                ) {
+
+                    continue;
+
+                }
+
 
                 const confirmation =
                     confirmationScore(
@@ -2124,17 +2820,23 @@ export default async function handler(req, res) {
                         side
                     );
 
+
                 if (
                     !confirmation.passed
                 ) {
+
                     continue;
+
                 }
+
 
                 const entry =
                     candles[i].c;
 
+
                 const atrValue =
                     f.atr14;
+
 
                 if (
                     !Number.isFinite(
@@ -2142,12 +2844,16 @@ export default async function handler(req, res) {
                     ) ||
                     atrValue <= 0
                 ) {
+
                     continue;
+
                 }
+
 
                 let stop;
                 let target;
                 let preferredTarget;
+
 
                 if (
                     side === "BUY"
@@ -2157,10 +2863,12 @@ export default async function handler(req, res) {
                         entry -
                         atrValue;
 
+
                     target =
                         entry +
                         2 *
                         atrValue;
+
 
                     preferredTarget =
                         entry +
@@ -2173,25 +2881,31 @@ export default async function handler(req, res) {
                         entry +
                         atrValue;
 
+
                     target =
                         entry -
                         2 *
                         atrValue;
 
+
                     preferredTarget =
                         entry -
                         PREFERRED_TARGET_R *
                         atrValue;
+
                 }
+
 
                 const outcome =
                     evaluateTrade(
                         candles,
                         i,
                         side,
+                        entry,
                         stop,
                         target
                     );
+
 
                 const trade = {
 
@@ -2205,7 +2919,8 @@ export default async function handler(req, res) {
                         i,
 
                     testLocalIndex:
-                        i - testStart,
+                        i -
+                        testStart,
 
                     timestamp:
                         candles[i].ts,
@@ -2283,31 +2998,42 @@ export default async function handler(req, res) {
 
                     resultR:
                         outcome.resultR
+
                 };
+
 
                 trades.push(
                     trade
                 );
 
+
                 cooldownUntil =
                     outcome.exitIndex +
                     ENTRY_COOLDOWN;
 
+
                 lastPattern =
                     key;
+
 
                 lastPatternIndex =
                     i;
 
+
                 lastSide =
                     side;
 
+
                 lastSideIndex =
                     i;
+
             }
 
+
             return trades;
+
         }
+
 
         // =====================================================
         // STATS
@@ -2323,11 +3049,13 @@ export default async function handler(req, res) {
                         t.resultR > 0
                 ).length;
 
+
             const losses =
                 trades.filter(
                     t =>
                         t.resultR < 0
                 ).length;
+
 
             const timeouts =
                 trades.filter(
@@ -2335,8 +3063,11 @@ export default async function handler(req, res) {
                         t.resultR === 0
                 ).length;
 
+
             const decisive =
-                wins + losses;
+                wins +
+                losses;
+
 
             const totalWinR =
                 trades
@@ -2350,6 +3081,7 @@ export default async function handler(req, res) {
                             t.resultR,
                         0
                     );
+
 
             const totalLossR =
                 Math.abs(
@@ -2366,6 +3098,7 @@ export default async function handler(req, res) {
                         )
                 );
 
+
             const netR =
                 trades.reduce(
                     (s, t) =>
@@ -2374,11 +3107,13 @@ export default async function handler(req, res) {
                     0
                 );
 
+
             const ev =
                 trades.length
                     ? netR /
                       trades.length
                     : 0;
+
 
             const pf =
                 totalLossR > 0
@@ -2388,12 +3123,17 @@ export default async function handler(req, res) {
                         ? 999
                         : 0;
 
+
             let equity = 0;
+
             let peak = 0;
+
             let maxDD = 0;
 
             let lossStreak = 0;
+
             let maxLossStreak = 0;
+
 
             for (
                 const trade of trades
@@ -2402,23 +3142,28 @@ export default async function handler(req, res) {
                 equity +=
                     trade.resultR;
 
+
                 peak =
                     Math.max(
                         peak,
                         equity
                     );
 
+
                 maxDD =
                     Math.max(
                         maxDD,
-                        peak - equity
+                        peak -
+                        equity
                     );
+
 
                 if (
                     trade.resultR < 0
                 ) {
 
                     lossStreak++;
+
 
                     maxLossStreak =
                         Math.max(
@@ -2429,8 +3174,11 @@ export default async function handler(req, res) {
                 } else {
 
                     lossStreak = 0;
+
                 }
+
             }
+
 
             return {
 
@@ -2492,10 +3240,12 @@ export default async function handler(req, res) {
                         4
                     ),
 
-                maxConsecutiveLosses:
-                    maxLossStreak
+                maxLossStreak
+
             };
+
         }
+
 
         // =====================================================
         // CURRENT MARKET
@@ -2508,33 +3258,61 @@ export default async function handler(req, res) {
             const index =
                 candles.length - 1;
 
+
             const f =
                 features(
                     candles,
                     index
                 );
 
+
             if (!f) {
 
                 return {
-                    available: false
+
+                    available:
+                        false
+
                 };
+
             }
+
+
+            const timestamp =
+                candles[index].ts;
+
+
+            /*
+             * Convert timestamp to IST.
+             */
+
+            const dateIST =
+                new Date(
+                    timestamp * 1000 +
+                    5.5 *
+                    60 *
+                    60 *
+                    1000
+                );
+
+
+            const date =
+                dateIST
+                    .toISOString()
+                    .slice(
+                        0,
+                        10
+                    );
+
 
             return {
 
-                available: true,
+                available:
+                    true,
 
-                timestamp:
-                    candles[index].ts,
+                timestamp,
 
-                date:
-                    new Date(
-                        candles[index].ts *
-                        1000
-                    )
-                    .toISOString()
-                    .slice(0, 10),
+                date,
 
                 close:
                     round(
@@ -2607,21 +3385,47 @@ export default async function handler(req, res) {
 
                 time:
                     f.timeBucket
+
             };
+
         }
+
 
         // =====================================================
         // MAIN DATA LOAD
         // =====================================================
 
-        let rows =
-            await loadDataset();
+        const accessToken =
+            getAccessToken();
+
+
+        console.log(
+            "TradeMind V13.1: fetching INDstocks historical data..."
+        );
+
+
+        const fetched =
+            await fetchHistoricalData(
+                accessToken,
+                REQUESTED_DAYS
+            );
+
 
         const rawLearningRows =
-            rows.length;
+            fetched.rawRows.length;
 
-        rows =
-            prepareData(rows);
+
+        let rows =
+            prepareData(
+                fetched.normalized
+            );
+
+
+        console.log(
+            "TradeMind V13.1 prepared candles:",
+            rows.length
+        );
+
 
         if (
             rows.length < 300
@@ -2650,17 +3454,22 @@ export default async function handler(req, res) {
 
                     interval:
                         INTERVAL
+
                 }
             );
+
         }
 
-        /*
-         * IMPORTANT:
-         *
-         * The latest candle is excluded from all learning.
-         *
-         * It is used ONLY for current-market analysis.
-         */
+
+        // =====================================================
+        // CURRENT CANDLE EXCLUSION
+        // =====================================================
+
+        const current =
+            rows[
+                rows.length - 1
+            ];
+
 
         const historical =
             rows.slice(
@@ -2668,13 +3477,10 @@ export default async function handler(req, res) {
                 -1
             );
 
-        const current =
-            rows[
-                rows.length - 1
-            ];
 
         const candles =
             historical;
+
 
         // =====================================================
         // WALK-FORWARD FOLDS
@@ -2683,15 +3489,14 @@ export default async function handler(req, res) {
         const total =
             candles.length;
 
-        const foldCount = 4;
+
+        const foldCount =
+            4;
+
 
         const initialTraining =
-            Math.min(
-                200,
-                Math.floor(
-                    total * 0.25
-                )
-            );
+            200;
+
 
         const testSize =
             Math.floor(
@@ -2702,10 +3507,13 @@ export default async function handler(req, res) {
                 foldCount
             );
 
+
         const folds = [];
+
 
         let trainingEnd =
             initialTraining;
+
 
         for (
             let fold = 1;
@@ -2715,6 +3523,7 @@ export default async function handler(req, res) {
 
             const testStart =
                 trainingEnd;
+
 
             const testEnd =
                 fold === foldCount
@@ -2727,18 +3536,23 @@ export default async function handler(req, res) {
                         testSize
                     );
 
+
             if (
                 testStart >=
                 testEnd
             ) {
+
                 break;
+
             }
+
 
             folds.push({
 
                 fold,
 
-                trainingStart: 0,
+                trainingStart:
+                    0,
 
                 trainingEnd,
 
@@ -2752,11 +3566,15 @@ export default async function handler(req, res) {
                 testRows:
                     testEnd -
                     testStart
+
             });
+
 
             trainingEnd =
                 testEnd;
+
         }
+
 
         // =====================================================
         // OUTER WALK-FORWARD
@@ -2765,6 +3583,7 @@ export default async function handler(req, res) {
         const foldResults = [];
 
         const allTrades = [];
+
 
         for (
             const fold of folds
@@ -2777,16 +3596,19 @@ export default async function handler(req, res) {
                     fold.trainingEnd
                 );
 
+
             const robustPatterns =
                 learned.filter(
                     p =>
                         p.qualified
                 );
 
+
             const selectedPatterns =
                 selectPatterns(
                     learned
                 );
+
 
             const selectedFamilies =
                 new Set(
@@ -2795,6 +3617,7 @@ export default async function handler(req, res) {
                             p.family
                     )
                 );
+
 
             const trades =
                 selectedPatterns.length
@@ -2809,19 +3632,23 @@ export default async function handler(req, res) {
 
                     : [];
 
+
             allTrades.push(
                 ...trades
             );
+
 
             const s =
                 stats(
                     trades
                 );
 
+
             const conc =
                 concentration(
                     trades
                 );
+
 
             foldResults.push({
 
@@ -2864,11 +3691,14 @@ export default async function handler(req, res) {
                         t =>
                             t.resultR
                     )
+
             });
+
         }
 
+
         // =====================================================
-        // GLOBAL OOS
+        // GLOBAL OOS STATS
         // =====================================================
 
         const globalStats =
@@ -2876,10 +3706,12 @@ export default async function handler(req, res) {
                 allTrades
             );
 
+
         const globalConcentration =
             concentration(
                 allTrades
             );
+
 
         const independentFamilies =
             new Set(
@@ -2889,39 +3721,48 @@ export default async function handler(req, res) {
                 )
             ).size;
 
+
         const profitabilityProof =
 
             globalStats.expectedValueR >=
-                MIN_EXPECTED_VALUE &&
+            MIN_EXPECTED_VALUE &&
 
             globalStats.profitFactor >=
-                MIN_PROFIT_FACTOR &&
+            MIN_PROFIT_FACTOR &&
 
             globalStats.decisiveTrades >=
-                5 &&
+            5 &&
 
             globalConcentration
                 .concentrationPassed;
 
+
+        // =====================================================
+        // RISK CONTROL
+        // =====================================================
+
         const riskControl =
 
             globalStats.maxDrawdownR <=
-                MAX_OOS_DRAWDOWN &&
+            MAX_OOS_DRAWDOWN &&
 
-            globalStats.maxConsecutiveLosses <=
-                MAX_PATTERN_LOSS_STREAK;
+            globalStats.maxLossStreak <=
+            MAX_PATTERN_LOSS_STREAK;
+
 
         const sufficientEvidence =
-            globalStats.decisiveTrades >= 5;
+            globalStats.decisiveTrades >=
+            5;
+
 
         const patternDiversity =
 
             independentFamilies >=
-                MIN_INDEPENDENT_PATTERNS &&
+            MIN_INDEPENDENT_PATTERNS &&
 
-            globalConcentration
-                .maximumShare <=
-                MAX_PATTERN_CONCENTRATION;
+            globalConcentration.maximumShare <=
+            MAX_PATTERN_CONCENTRATION;
+
 
         // =====================================================
         // CURRENT MARKET
@@ -2932,12 +3773,14 @@ export default async function handler(req, res) {
                 rows
             );
 
+
         let currentSignal = {
 
             status:
                 "NO_TRADE",
 
-            side: null,
+            side:
+                null,
 
             market:
                 currentMarketData,
@@ -2947,7 +3790,9 @@ export default async function handler(req, res) {
 
             nextAction:
                 "WAIT"
+
         };
+
 
         const currentF =
             features(
@@ -2955,14 +3800,20 @@ export default async function handler(req, res) {
                 rows.length - 1
             );
 
-        if (currentF) {
+
+        if (
+            currentF
+        ) {
 
             const currentSide =
                 baseSignal(
                     currentF
                 );
 
-            if (currentSide) {
+
+            if (
+                currentSide
+            ) {
 
                 const currentKey =
                     patternKey(
@@ -2970,24 +3821,24 @@ export default async function handler(req, res) {
                         currentF
                     );
 
+
                 /*
-                 * IMPORTANT:
-                 *
-                 * Only historical candles
-                 * are passed to learning.
+                 * Learn ONLY from historical candles.
                  */
 
                 const finalPatterns =
                     learnPatterns(
-                        historical,
+                        rows.slice(0, -1),
                         0,
-                        historical.length
+                        rows.length - 1
                     );
+
 
                 const finalSelected =
                     selectPatterns(
                         finalPatterns
                     );
+
 
                 const matching =
                     finalSelected.find(
@@ -2996,12 +3847,14 @@ export default async function handler(req, res) {
                             currentKey
                     );
 
+
                 const confirmation =
                     confirmationScore(
                         rows,
                         rows.length - 1,
                         currentSide
                     );
+
 
                 if (
                     matching &&
@@ -3054,6 +3907,7 @@ export default async function handler(req, res) {
 
                         nextAction:
                             "PAPER_REVIEW_ONLY"
+
                     };
 
                 } else {
@@ -3063,7 +3917,8 @@ export default async function handler(req, res) {
                         status:
                             "NO_TRADE",
 
-                        side: null,
+                        side:
+                            null,
 
                         market:
                             currentMarketData,
@@ -3073,17 +3928,20 @@ export default async function handler(req, res) {
 
                         reason:
                             matching
-
                                 ? "Pattern exists but entry confirmation failed."
-
                                 : "No qualified current-market pattern survives V13.1 validation.",
 
                         nextAction:
                             "WAIT"
+
                     };
+
                 }
+
             }
+
         }
+
 
         // =====================================================
         // LATEST LEARNING
@@ -3096,25 +3954,36 @@ export default async function handler(req, res) {
                 candles.length
             );
 
+
         const latestQualified =
             latestLearning.filter(
                 p =>
                     p.qualified
             );
 
+
         const latestBuy =
             latestQualified.filter(
                 p =>
-                    p.side ===
-                    "BUY"
+                    p.side === "BUY"
             );
+
 
         const latestSell =
             latestQualified.filter(
                 p =>
-                    p.side ===
-                    "SELL"
+                    p.side === "SELL"
             );
+
+
+        const latestFamilies =
+            new Set(
+                latestQualified.map(
+                    p =>
+                        p.family
+                )
+            ).size;
+
 
         // =====================================================
         // FINAL RESPONSE
@@ -3122,22 +3991,29 @@ export default async function handler(req, res) {
 
         return send({
 
-            success: true,
+            success:
+                true,
 
-            version: VERSION,
+            version:
+                VERSION,
 
-            status: "COMPLETED",
+            status:
+                "COMPLETED",
 
             mode:
                 "V13_1_DIRECT_INDSTOCKS_TRUE_WALK_FORWARD",
 
-            paperOnly: true,
+            paperOnly:
+                true,
 
-            realOrders: false,
+            realOrders:
+                false,
 
-            brokerOrderEnabled: false,
+            brokerOrderEnabled:
+                false,
 
-            brokerOrderSent: false,
+            brokerOrderSent:
+                false,
 
             instrument:
                 INSTRUMENT,
@@ -3152,23 +4028,30 @@ export default async function handler(req, res) {
                 REQUESTED_DAYS,
 
             source:
-                "DIRECT_INDSTOCKS_HISTORICAL_API",
+                "INDSTOCKS_DIRECT_HISTORICAL_API",
 
             antiLeakage: {
 
-                enabled: true,
+                enabled:
+                    true,
 
-                chronological: true,
+                chronological:
+                    true,
 
-                shuffled: false,
+                shuffled:
+                    false,
 
-                currentCandleExcluded: true,
+                currentCandleExcluded:
+                    true,
 
-                currentCandleOutcomeUsed: false,
+                currentCandleOutcomeUsed:
+                    false,
 
-                currentCandleUsedForLearning: false,
+                currentCandleUsedForLearning:
+                    false,
 
-                testDataUsedForTraining: false,
+                testDataUsedForTraining:
+                    false,
 
                 futureDataUsedForPatternDiscovery:
                     false,
@@ -3202,7 +4085,9 @@ export default async function handler(req, res) {
 
                 sameCandleStopTargetBias:
                     "STOP_FIRST"
+
             },
+
 
             objective: {
 
@@ -3243,7 +4128,9 @@ export default async function handler(req, res) {
                     MAX_PATTERN_CONCENTRATION,
 
                 profitabilityProof
+
             },
+
 
             sourceStatistics: {
 
@@ -3264,27 +4151,41 @@ export default async function handler(req, res) {
                 tradingDays:
                     new Set(
                         candles.map(
-                            c =>
-                                new Date(
-                                    c.ts * 1000
-                                )
-                                .toISOString()
-                                .slice(
-                                    0,
-                                    10
-                                )
+                            c => {
+
+                                const d =
+                                    new Date(
+                                        c.ts *
+                                        1000 +
+                                        5.5 *
+                                        60 *
+                                        60 *
+                                        1000
+                                    );
+
+                                return d
+                                    .toISOString()
+                                    .slice(
+                                        0,
+                                        10
+                                    );
+
+                            }
                         )
                     ).size,
 
                 invalidRows:
-                    0,
+                    rawLearningRows -
+                    fetched.normalized.length,
 
                 latestTimestamp:
                     current.ts,
 
                 latestPrice:
                     current.c
+
             },
+
 
             walkForward: {
 
@@ -3313,12 +4214,14 @@ export default async function handler(req, res) {
                     true,
 
                 folds
+
             },
+
 
             trueOOSPaperExecution: {
 
                 description:
-                    "Each outer fold learns signal-conditioned patterns exclusively from preceding data and executes only on future unseen data after independent entry confirmation.",
+                    "Each outer fold learns signal-conditioned, regime-validated patterns exclusively from prior data and executes only on future unseen data after independent entry confirmation.",
 
                 stats:
                     globalStats,
@@ -3348,14 +4251,19 @@ export default async function handler(req, res) {
 
                 independentPatternFamilies:
                     independentFamilies
+
             },
 
+
             foldResults,
+
 
             currentMarket:
                 currentMarketData,
 
+
             currentSignal,
+
 
             latestLearning: {
 
@@ -3378,12 +4286,7 @@ export default async function handler(req, res) {
                     latestSell.length,
 
                 independentFamilies:
-                    new Set(
-                        latestQualified.map(
-                            p =>
-                                p.family
-                        )
-                    ).size,
+                    latestFamilies,
 
                 signalConditioned:
                     true,
@@ -3412,8 +4315,11 @@ export default async function handler(req, res) {
                                 p.patternType ===
                                 "RANGE"
                         ).length
+
                 }
+
             },
+
 
             validationRules: {
 
@@ -3436,7 +4342,9 @@ export default async function handler(req, res) {
 
                     maximumNegativeRegimeShare:
                         0.5
+
                 },
+
 
                 decayDetection: {
 
@@ -3451,7 +4359,9 @@ export default async function handler(req, res) {
 
                     maximumDecay:
                         -0.75
+
                 },
+
 
                 diversity: {
 
@@ -3460,7 +4370,9 @@ export default async function handler(req, res) {
 
                     maximumPatternConcentration:
                         MAX_PATTERN_CONCENTRATION
+
                 },
+
 
                 circuitBreaker: {
 
@@ -3475,8 +4387,11 @@ export default async function handler(req, res) {
 
                     sameSideCooldownCandles:
                         SAME_SIDE_COOLDOWN
+
                 }
+
             },
+
 
             riskPlan: {
 
@@ -3518,27 +4433,35 @@ export default async function handler(req, res) {
 
                 sameSideCooldownCandles:
                     SAME_SIDE_COOLDOWN
+
             },
+
 
             trueOOSTradeLog:
                 allTrades,
 
+
             paperAction:
+
                 currentSignal.status ===
-                    "SIGNAL"
+                "SIGNAL"
 
                     ? "PAPER_REVIEW_ONLY"
 
                     : "NO_TRADE",
 
+
             nextAction:
+
                 currentSignal.status ===
-                    "SIGNAL"
+                "SIGNAL"
 
                     ? "WAIT_FOR_NEXT_CONFIRMED_CANDLE"
 
                     : "WAIT"
+
         });
+
 
     } catch (error) {
 
@@ -3547,9 +4470,11 @@ export default async function handler(req, res) {
             error
         );
 
+
         return res.status(500).json({
 
-            success: false,
+            success:
+                false,
 
             version:
                 "V13.1",
@@ -3572,6 +4497,9 @@ export default async function handler(req, res) {
             error:
                 error?.message ||
                 String(error)
+
         });
+
     }
+
 }
