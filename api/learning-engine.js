@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V15.4 — SELL REGIME EDGE + FAST EXIT QUALIFICATION DIAGNOSTIC ENGINE
+ V15.6 — CANDIDATE-NATIVE PROMOTION + VALIDATION ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.5";
+    const VERSION = "V15.6";
 
     try {
 
@@ -3142,12 +3142,28 @@ export default async function handler(req, res) {
 
                 for (const setup of setups) {
 
-                    if (setup.side !== V153_TARGET_SIDE) {
+                    // V15.6: candidate-native validation.
+                    // The candidate itself determines side + setup.
+                    // No global V15.3 target filter is applied here.
+                    const candidateKey = String(candidate?.key || "");
+                    const candidateSide = candidateKey.split("|")[0] || null;
+                    const setupToken = candidateKey.match(/\|S:([^|]+)/);
+                    const trendToken = candidateKey.match(/\|T:([^|]+)/);
+                    const candidateSetup = setupToken ? setupToken[1] : null;
+                    const candidateTrend = trendToken ? trendToken[1] : null;
+
+                    if (candidateSide && setup.side !== candidateSide) {
                         continue;
                     }
 
-                    if (setup.setup !== V153_TARGET_SETUP) {
+                    if (candidateSetup && setup.setup !== candidateSetup) {
                         continue;
+                    }
+
+                    if (candidate.level === "CONTEXT" || candidate.level === "ADAPTIVE_CONTEXT") {
+                        if (candidateTrend && f.trend !== candidateTrend) {
+                            continue;
+                        }
                     }
 
                     const key =
@@ -3585,16 +3601,14 @@ export default async function handler(req, res) {
         // =====================================================
 
         // =====================================================
-        // V15.5 PROMOTION PATH AUDIT
+        // V15.6 CANDIDATE-NATIVE PROMOTION AUDIT
         // -----------------------------------------------------
         // Diagnostic only. V15.5 does NOT loosen any gate and does
         // NOT change validation/OOS behavior. It explains why a
         // discovered/qualified context candidate does or does not
         // enter the actual validationCandidates array.
         // =====================================================
-        function buildV155PromotionPathAudit(discovery, discoveryEnd) {
-
-            const target = `${V153_TARGET_SIDE}|${V153_TARGET_SETUP}|${V153_TARGET_TREND}`;
+        function buildV156CandidateNativePromotionAudit(discovery, discoveryEnd) {
 
             const all = [
                 ...safeArray(discovery?.qualifiedContextPatterns),
@@ -3614,33 +3628,33 @@ export default async function handler(req, res) {
             const audit = unique.map(candidate => {
                 const key = String(candidate.key || "");
                 const reasons = [];
+                const candidateSide = key.split("|")[0] || null;
+                const setupToken = key.match(/\|S:([^|]+)/);
+                const trendToken = key.match(/\|T:([^|]+)/);
+                const candidateSetup = setupToken ? setupToken[1] : null;
+                const candidateTrend = trendToken ? trendToken[1] : null;
 
-                const targetSideMatch = key.startsWith(`${V153_TARGET_SIDE}|`);
-                const targetSetupMatch = key.includes(`|S:${V153_TARGET_SETUP}|`);
-                const targetTrendMatch = key.includes(`|T:${V153_TARGET_TREND}|`);
-                const targetMatch = targetSideMatch && targetSetupMatch && targetTrendMatch;
-
-                if (!targetSideMatch) reasons.push("TARGET_SIDE_MISMATCH");
-                if (!targetSetupMatch) reasons.push("TARGET_SETUP_MISMATCH");
-                if (!targetTrendMatch) reasons.push("TARGET_TREND_MISMATCH");
+                if (!candidateSide || !candidateSetup || !candidateTrend) {
+                    reasons.push("CANDIDATE_IDENTITY_UNRESOLVED");
+                }
 
                 const familyKey = resolveFamilyKey(candidate);
                 const family = safeArray(discovery?.families).find(x => x.key === familyKey) || null;
 
                 if (!family) {
                     reasons.push("FAMILY_RESOLUTION_FAILED");
-                } else {
-                    if (candidate.level === "CONTEXT" || candidate.level === "ADAPTIVE_CONTEXT") {
-                        if (family.expectedValueR < CONTEXT_MIN_FAMILY_EV) reasons.push("CONTEXT_FAMILY_EV_TOO_WEAK");
-                        if (family.profitFactor < CONTEXT_MIN_FAMILY_PF) reasons.push("CONTEXT_FAMILY_PF_TOO_WEAK");
-                    }
+                } else if (
+                    (candidate.level === "CONTEXT" || candidate.level === "ADAPTIVE_CONTEXT") &&
+                    (family.expectedValueR < CONTEXT_MIN_FAMILY_EV || family.profitFactor < CONTEXT_MIN_FAMILY_PF)
+                ) {
+                    reasons.push("CONTEXT_FAMILY_EDGE_TOO_WEAK");
                 }
 
                 const adaptiveGate = candidate.level === "ADAPTIVE_CONTEXT"
                     ? adaptiveContextGate(candidate, discoveryEnd)
                     : { passed: true, reasons: [], eligibleRecords: null, recentRecords: null, metrics: null };
 
-                if (candidate.level === "ADAPTIVE_CONTEXT" && !adaptiveGate.passed) {
+                if (!adaptiveGate.passed) {
                     for (const r of safeArray(adaptiveGate.reasons)) reasons.push(`ADAPTIVE_GATE:${r}`);
                 }
 
@@ -3648,23 +3662,34 @@ export default async function handler(req, res) {
                 const inAdaptiveContext = safeArray(discovery?.adaptiveContextPatterns).some(x => x.key === candidate.key);
 
                 if (!inQualifiedContext && !inAdaptiveContext) reasons.push("NOT_IN_CURRENT_QUALIFIED_POOL");
-                if (!targetMatch) reasons.push("EXCLUDED_BY_V15_3_TARGET_FILTER");
+
+                const targetSideMatch = candidateSide === V153_TARGET_SIDE;
+                const targetSetupMatch = candidateSetup === V153_TARGET_SETUP;
+                const targetTrendMatch = candidateTrend === V153_TARGET_TREND;
 
                 const wouldEnterActualPromotionPool =
-                    targetMatch &&
-                    (inQualifiedContext || inAdaptiveContext) &&
-                    adaptiveGate.passed &&
-                    !reasons.some(r => r === "FAMILY_RESOLUTION_FAILED" || r === "CONTEXT_FAMILY_EV_TOO_WEAK" || r === "CONTEXT_FAMILY_PF_TOO_WEAK");
+                    !reasons.some(r =>
+                        r === "CANDIDATE_IDENTITY_UNRESOLVED" ||
+                        r === "FAMILY_RESOLUTION_FAILED" ||
+                        r === "CONTEXT_FAMILY_EDGE_TOO_WEAK" ||
+                        r.startsWith("ADAPTIVE_GATE:")
+                    ) &&
+                    (inQualifiedContext || inAdaptiveContext);
 
                 return {
                     key,
                     level: candidate.level,
-                    target,
-                    targetMatch,
-                    targetComponents: {
-                        side: targetSideMatch,
-                        setup: targetSetupMatch,
-                        trend: targetTrendMatch
+                    candidateIdentity: {
+                        side: candidateSide,
+                        setup: candidateSetup,
+                        trend: candidateTrend
+                    },
+                    previousV153Target: {
+                        target: `${V153_TARGET_SIDE}|${V153_TARGET_SETUP}|${V153_TARGET_TREND}`,
+                        sideMatch: targetSideMatch,
+                        setupMatch: targetSetupMatch,
+                        trendMatch: targetTrendMatch,
+                        wouldHaveBeenExcludedByOldFilter: !(targetSideMatch && targetSetupMatch && targetTrendMatch)
                     },
                     poolMembership: {
                         qualifiedContext: inQualifiedContext,
@@ -3695,16 +3720,17 @@ export default async function handler(req, res) {
             }
 
             return {
-                purpose: "Trace every qualified/adaptive context candidate through the exact V15.4 promotion path without changing any gate.",
-                target,
+                purpose: "Trace every qualified/adaptive context candidate using candidate-native promotion. The previous V15.3 target filter is retained only as a diagnostic comparison.",
+                previousTarget: `${V153_TARGET_SIDE}|${V153_TARGET_SETUP}|${V153_TARGET_TREND}`,
                 discoveredContextCandidates: safeArray(discovery?.contextPatterns).length,
                 qualifiedContextCandidates: safeArray(discovery?.qualifiedContextPatterns).length,
                 adaptiveContextCandidates: safeArray(discovery?.adaptiveContextPatterns).length,
                 auditedCandidates: audit.length,
                 candidatesThatWouldEnterActualPromotionPool: audit.filter(x => x.wouldEnterActualPromotionPool).length,
+                candidatesPreviouslyBlockedOnlyByTargetFilter: audit.filter(x => x.previousV153Target.wouldHaveBeenExcludedByOldFilter && x.blockingReasons.length === 0).length,
                 blockingReasonCounts: counts,
                 candidates: audit,
-                guard: "Diagnostic only. No threshold, validation rule, adaptive gate, or OOS rule is changed by V15.5."
+                guard: "Diagnostic only. V15.6 does not lower discovery, adaptive, validation, profitability, or OOS thresholds. It only removes the obsolete global target filter from candidate promotion and validation matching."
             };
         }
 
@@ -3784,45 +3810,42 @@ export default async function handler(req, res) {
                     discoveryEnd
                 );
 
-            const v155PromotionPathAudit =
-                buildV155PromotionPathAudit(
+            const v156CandidateNativePromotionAudit =
+                buildV156CandidateNativePromotionAudit(
                     discovery,
                     discoveryEnd
                 );
 
-            // V15.1 regime qualification: only SELL regime-context
-            // candidates are allowed into validation. Family/core/plain
-            // pattern candidates remain diagnostic evidence but cannot
-            // become trading candidates in this experiment.
+            // V15.6 CANDIDATE-NATIVE PROMOTION
+            // -----------------------------------
+            // Qualified/adaptive context candidates are promoted
+            // according to their OWN side/setup/trend identity.
+            // The old V15.3 target filter is diagnostic-only now and
+            // cannot silently discard a valid candidate before
+            // untouched validation.
             const qualified =
                 [
                     ...qualifiedContext,
                     ...adaptiveContext
                 ].filter(
-                    x => {
-                        if (!x || !x.key) return false;
-
-                        const key = String(x.key);
-
-                        return (
-                            key.startsWith(`${V153_TARGET_SIDE}|`) &&
-                            key.includes(`|S:${V153_TARGET_SETUP}|`) &&
-                            key.includes(`|T:${V153_TARGET_TREND}|`)
-                        );
-                    }
+                    x => !!x && !!x.key
                 );
 
             for (const candidate of qualified) {
 
-                if (
-                    !String(candidate.key).includes(`|S:${V153_TARGET_SETUP}|`) ||
-                    !String(candidate.key).includes(`|T:${V153_TARGET_TREND}|`)
-                ) {
+                const candidateKey = String(candidate.key || "");
+                const candidateSide = candidateKey.split("|")[0] || null;
+                const setupToken = candidateKey.match(/\|S:([^|]+)/);
+                const trendToken = candidateKey.match(/\|T:([^|]+)/);
+                const candidateSetup = setupToken ? setupToken[1] : null;
+                const candidateTrend = trendToken ? trendToken[1] : null;
+
+                if (!candidateSide || !candidateSetup || !candidateTrend) {
                     candidatesRejectedBeforeValidation.push({
                         key: candidate.key,
                         level: candidate.level,
                         stage: "PRE_VALIDATION",
-                        reason: "V15_3_TARGET_SETUP_FILTER"
+                        reason: "CANDIDATE_IDENTITY_UNRESOLVED"
                     });
                     continue;
                 }
@@ -4274,7 +4297,7 @@ export default async function handler(req, res) {
 ,
 
                     v154QualificationDiagnostics,
-                    v155PromotionPathAudit
+                    v156CandidateNativePromotionAudit
                 }
             };
         }
@@ -7498,7 +7521,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V15_5_PROMOTION_PATH_AUDIT_TRUE_WALK_FORWARD",
+                "V15_6_CANDIDATE_NATIVE_PROMOTION_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -7786,7 +7809,15 @@ export default async function handler(req, res) {
 
             strategyMechanicsDiagnostics,
 
-            v155PromotionPathAudit: finalPromoted?.candidateFlow?.v155PromotionPathAudit || null,
+            v156CandidateNativePromotionAudit: finalPromoted?.candidateFlow?.v156CandidateNativePromotionAudit || null,
+
+            v156CandidateNativePromotion: {
+                enabled: true,
+                previousTargetFilter: `${V153_TARGET_SIDE}|${V153_TARGET_SETUP}|${V153_TARGET_TREND}`,
+                promotionMode: "CANDIDATE_NATIVE",
+                validationMode: "CANDIDATE_NATIVE",
+                purpose: "Each qualified/adaptive context candidate is promoted and validated against its own side/setup/trend identity; the previous V15.3 target is diagnostic-only."
+            },
 
             v153FocusedTest: {
                 side: V153_TARGET_SIDE,
