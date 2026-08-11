@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.5 — ANTI-OVERFITTING / EDGE SURVIVAL ENGINE
+ V14.6 — EDGE SURVIVAL DIAGNOSTIC ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,57 +12,55 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.5 PURPOSE
+ V14.6 PURPOSE
  ----------------------------------------------------------
- V14.4 discovered that historically strong patterns were
- failing in true OOS execution.
+ V14.5 proved that apparently strong discovery patterns were
+ not surviving untouched validation.
 
- V14.5 therefore changes the learning architecture:
+ V14.6 DOES NOT loosen the profitability thresholds.
 
-     DISCOVERY
-         ↓
-     UNTOUCHED INTERNAL VALIDATION
-         ↓
-     EDGE SURVIVAL
-         ↓
-     TRUE OOS
-         ↓
-     EDGE PROMOTION
+ Instead it makes the failure visible:
 
- IMPORTANT V14.5 LEAKAGE FIXES
- ----------------------------------------------------------
+   DISCOVERY
+      ↓
+   INTERNAL VALIDATION
+      ↓
+   EXACT REJECTION REASON
+      ↓
+   TRUE OOS
+      ↓
+   EDGE PROMOTION
 
- 1. Discovery NEVER sees validation candles.
- 2. Discovery outcomes cannot enter validation.
- 3. Validation outcomes cannot enter OOS.
- 4. Validation is a completely separate chronological block.
- 5. OOS begins only after training + validation.
- 6. No future candles are used to determine training outcomes.
- 7. Current candle is excluded from learning.
- 8. Pattern must survive internal validation.
- 9. Pattern cannot override a losing family.
-10. Multiple profitable OOS folds are required.
-11. No overlapping trades.
-12. No forced trades.
-13. Paper only.
+ Main corrections:
+ 1. Exact validation diagnostics per candidate
+ 2. Exact rejection reason per candidate
+ 3. Correct pattern → family mapping
+ 4. Strict discovery boundary
+ 5. Strict validation boundary
+ 6. Validation outcomes cannot enter OOS
+ 7. No future-data leakage
+ 8. Current candle excluded
+ 9. No forced trades
+10. No overlapping paper trades
+11. Anti-chasing protection
+12. True expanding walk-forward
+13. Paper only
 
- V14.5 intentionally prefers:
-
-             NO_TRADE
-
- over weak or over-fitted evidence.
+ IMPORTANT:
+ V14.6 intentionally keeps V14.5 thresholds unchanged.
+ It is a diagnostic version, not a threshold-tuning version.
 ===========================================================
 */
 
 export default async function handler(req, res) {
+
+    const VERSION = "V14.6";
 
     try {
 
         // =====================================================
         // CONFIG
         // =====================================================
-
-        const VERSION = "V14.5";
 
         const INSTRUMENT = "NIFTY 50";
         const SCRIP_CODE = "NIDX_40000001";
@@ -85,7 +83,7 @@ export default async function handler(req, res) {
         );
 
         // =====================================================
-        // DISCOVERY
+        // DISCOVERY — SAME THRESHOLDS AS V14.5
         // =====================================================
 
         const FAMILY_MIN_SAMPLES = 12;
@@ -103,7 +101,7 @@ export default async function handler(req, res) {
         const PATTERN_MIN_PF = 1.15;
 
         // =====================================================
-        // INTERNAL VALIDATION
+        // INTERNAL VALIDATION — SAME AS V14.5
         // =====================================================
 
         const VALIDATION_FRACTION = 0.25;
@@ -117,21 +115,19 @@ export default async function handler(req, res) {
         const MAX_VALIDATION_LOSS_STREAK = 3;
 
         // =====================================================
-        // EDGE SURVIVAL
+        // OOS SURVIVAL — SAME AS V14.5
         // =====================================================
 
         const MIN_OOS_PROFITABLE_FOLDS = 3;
-
         const MIN_OOS_DECISIVE = 8;
         const MIN_OOS_EV = 0.05;
         const MIN_OOS_PF = 1.05;
 
         const MIN_INDEPENDENT_FAMILIES = 2;
-
         const MAX_PATTERN_CONCENTRATION = 0.70;
 
         // =====================================================
-        // FAMILY VS PATTERN PROTECTION
+        // FAMILY VS PATTERN
         // =====================================================
 
         const MAX_PATTERN_FAMILY_EV_GAP = 0.90;
@@ -140,7 +136,7 @@ export default async function handler(req, res) {
             false;
 
         // =====================================================
-        // ANTI CHASING
+        // ANTI-CHASING
         // =====================================================
 
         const MAX_TREND_VWAP_DISTANCE_ATR = 1.75;
@@ -157,7 +153,7 @@ export default async function handler(req, res) {
         const MIN_SLOPE_ATR = 0.06;
 
         // =====================================================
-        // ENTRY CONFIRMATION
+        // CONFIRMATION
         // =====================================================
 
         const ENTRY_CONFIRMATION_MIN = 5;
@@ -181,24 +177,29 @@ export default async function handler(req, res) {
         // =====================================================
 
         const STOP_R = 1;
+
         const TARGET_R = 2;
+
         const PREFERRED_TARGET_R = 2.5;
 
         const MAX_HOLD_CANDLES = 12;
 
         const MAX_OOS_DRAWDOWN = 12;
+
         const MAX_LOSS_STREAK = 6;
 
         // =====================================================
-        // COOLDOWN
+        // COOLDOWNS
         // =====================================================
 
         const ENTRY_COOLDOWN = 3;
+
         const SAME_PATTERN_COOLDOWN = 5;
+
         const SAME_SIDE_COOLDOWN = 2;
 
         // =====================================================
-        // RESPONSE
+        // RESPONSE HELPERS
         // =====================================================
 
         function send(data) {
@@ -208,7 +209,10 @@ export default async function handler(req, res) {
                 .json(data);
         }
 
-        function fail(message, extra = {}) {
+        function fail(
+            message,
+            extra = {}
+        ) {
 
             return res
                 .status(500)
@@ -216,38 +220,52 @@ export default async function handler(req, res) {
 
                     success: false,
 
-                    version: VERSION,
+                    version:
+                        VERSION,
 
-                    status: "ERROR",
+                    status:
+                        "ERROR",
 
-                    paperOnly: true,
+                    paperOnly:
+                        true,
 
-                    realOrders: false,
+                    realOrders:
+                        false,
 
-                    brokerOrderEnabled: false,
+                    brokerOrderEnabled:
+                        false,
 
-                    brokerOrderSent: false,
+                    brokerOrderSent:
+                        false,
 
-                    error: message,
+                    error:
+                        message,
 
                     ...extra
                 });
         }
 
         // =====================================================
-        // HELPERS
+        // GENERIC HELPERS
         // =====================================================
 
-        function n(value, fallback = null) {
+        function n(
+            value,
+            fallback = null
+        ) {
 
-            const x = Number(value);
+            const x =
+                Number(value);
 
             return Number.isFinite(x)
                 ? x
                 : fallback;
         }
 
-        function round(value, digits = 4) {
+        function round(
+            value,
+            digits = 4
+        ) {
 
             if (
                 !Number.isFinite(value)
@@ -257,14 +275,13 @@ export default async function handler(req, res) {
             }
 
             const factor =
-                Math.pow(
-                    10,
-                    digits
-                );
+                10 ** digits;
 
-            return Math.round(
-                value * factor
-            ) / factor;
+            return (
+                Math.round(
+                    value * factor
+                ) / factor
+            );
         }
 
         function clamp(
@@ -282,7 +299,9 @@ export default async function handler(req, res) {
             );
         }
 
-        function safeArray(value) {
+        function safeArray(
+            value
+        ) {
 
             return Array.isArray(value)
                 ? value
@@ -293,9 +312,12 @@ export default async function handler(req, res) {
         // CANDLE NORMALIZATION
         // =====================================================
 
-        function normalizeCandle(row) {
+        function normalizeCandle(
+            row
+        ) {
 
             if (!row) {
+
                 return null;
             }
 
@@ -306,16 +328,30 @@ export default async function handler(req, res) {
                 if (
                     row.length < 5
                 ) {
+
                     return null;
                 }
 
-                let ts = n(row[0]);
+                let ts =
+                    n(row[0]);
 
-                const o = n(row[1]);
-                const h = n(row[2]);
-                const l = n(row[3]);
-                const c = n(row[4]);
-                const v = n(row[5], 0);
+                const o =
+                    n(row[1]);
+
+                const h =
+                    n(row[2]);
+
+                const l =
+                    n(row[3]);
+
+                const c =
+                    n(row[4]);
+
+                const v =
+                    n(
+                        row[5],
+                        0
+                    );
 
                 if (
                     ts === null ||
@@ -329,7 +365,8 @@ export default async function handler(req, res) {
                 }
 
                 if (
-                    ts > 100000000000
+                    ts >
+                    100000000000
                 ) {
 
                     ts =
@@ -339,6 +376,7 @@ export default async function handler(req, res) {
                 }
 
                 return {
+
                     ts,
                     o,
                     h,
@@ -399,7 +437,8 @@ export default async function handler(req, res) {
             }
 
             if (
-                ts > 100000000000
+                ts >
+                100000000000
             ) {
 
                 ts =
@@ -409,6 +448,7 @@ export default async function handler(req, res) {
             }
 
             return {
+
                 ts,
                 o,
                 h,
@@ -422,13 +462,18 @@ export default async function handler(req, res) {
         // RECURSIVE EXTRACTION
         // =====================================================
 
-        function extractRows(payload) {
+        function extractRows(
+            payload
+        ) {
 
             const found = [];
 
-            function walk(value) {
+            function walk(
+                value
+            ) {
 
                 if (!value) {
+
                     return;
                 }
 
@@ -438,8 +483,11 @@ export default async function handler(req, res) {
 
                     if (
                         value.length >= 5 &&
-                        !Array.isArray(value[0]) &&
-                        typeof value[0] !== "object"
+                        !Array.isArray(
+                            value[0]
+                        ) &&
+                        typeof value[0] !==
+                            "object"
                     ) {
 
                         const candle =
@@ -458,7 +506,8 @@ export default async function handler(req, res) {
                     }
 
                     for (
-                        const item of value
+                        const item
+                        of value
                     ) {
 
                         walk(item);
@@ -487,8 +536,10 @@ export default async function handler(req, res) {
                     }
 
                     for (
-                        const key of
-                        Object.keys(value)
+                        const key
+                        of Object.keys(
+                            value
+                        )
                     ) {
 
                         walk(
@@ -503,15 +554,20 @@ export default async function handler(req, res) {
             return found;
         }
 
-        function prepareData(rows) {
+        function prepareData(
+            rows
+        ) {
 
-            const map = new Map();
+            const map =
+                new Map();
 
             for (
-                const row of rows
+                const row
+                of rows
             ) {
 
                 if (!row) {
+
                     continue;
                 }
 
@@ -524,19 +580,23 @@ export default async function handler(req, res) {
             return [
                 ...map.values()
             ].sort(
-                (a, b) =>
+                (
+                    a,
+                    b
+                ) =>
                     a.ts - b.ts
             );
         }
 
         // =====================================================
-        // IST
+        // IST HELPERS
         // =====================================================
 
         const IST_FORMATTER =
             new Intl.DateTimeFormat(
                 "en-CA",
                 {
+
                     timeZone:
                         "Asia/Kolkata",
 
@@ -560,24 +620,33 @@ export default async function handler(req, res) {
                 }
             );
 
-        function istParts(ts) {
+        function istParts(
+            ts
+        ) {
 
             const parts =
-                IST_FORMATTER.formatToParts(
-                    new Date(ts * 1000)
-                );
+                IST_FORMATTER
+                    .formatToParts(
+                        new Date(
+                            ts * 1000
+                        )
+                    );
 
             const result = {};
 
             for (
-                const p of parts
+                const p
+                of parts
             ) {
 
                 if (
-                    p.type !== "literal"
+                    p.type !==
+                    "literal"
                 ) {
 
-                    result[p.type] =
+                    result[
+                        p.type
+                    ] =
                         p.value;
                 }
             }
@@ -585,7 +654,9 @@ export default async function handler(req, res) {
             return result;
         }
 
-        function istDate(ts) {
+        function istDate(
+            ts
+        ) {
 
             const p =
                 istParts(ts);
@@ -595,7 +666,9 @@ export default async function handler(req, res) {
             );
         }
 
-        function istMinutes(ts) {
+        function istMinutes(
+            ts
+        ) {
 
             const p =
                 istParts(ts);
@@ -606,20 +679,31 @@ export default async function handler(req, res) {
             );
         }
 
-        function getTimeBucket(ts) {
+        function getTimeBucket(
+            ts
+        ) {
 
             const mins =
                 istMinutes(ts);
 
-            if (mins < 600) {
+            if (
+                mins < 600
+            ) {
+
                 return "OPEN";
             }
 
-            if (mins < 720) {
+            if (
+                mins < 720
+            ) {
+
                 return "MORNING";
             }
 
-            if (mins < 840) {
+            if (
+                mins < 840
+            ) {
+
                 return "MIDDAY";
             }
 
@@ -627,7 +711,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // VWAP
+        // SESSION VWAP
         // =====================================================
 
         function sessionVWAP(
@@ -649,6 +733,7 @@ export default async function handler(req, res) {
                 );
 
             let pv = 0;
+
             let volume = 0;
 
             for (
@@ -679,7 +764,10 @@ export default async function handler(req, res) {
                 const v =
                     Math.max(
                         0,
-                        n(c.v, 0)
+                        n(
+                            c.v,
+                            0
+                        )
                     );
 
                 pv +=
@@ -695,7 +783,9 @@ export default async function handler(req, res) {
                 return candles[index].c;
             }
 
-            return pv / volume;
+            return (
+                pv / volume
+            );
         }
 
         // =====================================================
@@ -708,8 +798,11 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                !Array.isArray(values) ||
-                values.length < period
+                !Array.isArray(
+                    values
+                ) ||
+                values.length <
+                    period
             ) {
 
                 return null;
@@ -723,10 +816,12 @@ export default async function handler(req, res) {
                 i++
             ) {
 
-                value += values[i];
+                value +=
+                    values[i];
             }
 
-            value /= period;
+            value /=
+                period;
 
             const multiplier =
                 2 /
@@ -760,14 +855,18 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                !Array.isArray(values) ||
-                values.length <= period
+                !Array.isArray(
+                    values
+                ) ||
+                values.length <=
+                    period
             ) {
 
                 return null;
             }
 
             let gains = 0;
+
             let losses = 0;
 
             for (
@@ -780,11 +879,19 @@ export default async function handler(req, res) {
                     values[i] -
                     values[i - 1];
 
-                if (diff >= 0) {
-                    gains += diff;
+                if (
+                    diff >= 0
+                ) {
+
+                    gains +=
+                        diff;
+
                 } else {
+
                     losses +=
-                        Math.abs(diff);
+                        Math.abs(
+                            diff
+                        );
                 }
             }
 
@@ -795,7 +902,8 @@ export default async function handler(req, res) {
                 losses / period;
 
             for (
-                let i = period + 1;
+                let i =
+                    period + 1;
                 i < values.length;
                 i++
             ) {
@@ -837,11 +945,13 @@ export default async function handler(req, res) {
             }
 
             const rs =
-                avgGain / avgLoss;
+                avgGain /
+                avgLoss;
 
             return (
                 100 -
-                100 / (1 + rs)
+                100 /
+                    (1 + rs)
             );
         }
 
@@ -855,8 +965,11 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                !Array.isArray(candles) ||
-                candles.length <= period
+                !Array.isArray(
+                    candles
+                ) ||
+                candles.length <=
+                    period
             ) {
 
                 return null;
@@ -879,14 +992,19 @@ export default async function handler(req, res) {
                 trs.push(
                     Math.max(
                         c.h - c.l,
-                        Math.abs(c.h - p.c),
-                        Math.abs(c.l - p.c)
+                        Math.abs(
+                            c.h - p.c
+                        ),
+                        Math.abs(
+                            c.l - p.c
+                        )
                     )
                 );
             }
 
             if (
-                trs.length < period
+                trs.length <
+                period
             ) {
 
                 return null;
@@ -900,10 +1018,12 @@ export default async function handler(req, res) {
                 i++
             ) {
 
-                value += trs[i];
+                value +=
+                    trs[i];
             }
 
-            value /= period;
+            value /=
+                period;
 
             for (
                 let i = period;
@@ -950,10 +1070,16 @@ export default async function handler(req, res) {
                 );
 
             const ema9 =
-                ema(closes, 9);
+                ema(
+                    closes,
+                    9
+                );
 
             const ema21 =
-                ema(closes, 21);
+                ema(
+                    closes,
+                    21
+                );
 
             const previousEMA9 =
                 ema(
@@ -1002,22 +1128,26 @@ export default async function handler(req, res) {
                 ema9 - ema21;
 
             const spreadATR =
-                spread / atr14;
+                spread /
+                atr14;
 
             const slope =
                 ema9 -
                 previousEMA9;
 
             const slopeATR =
-                slope / atr14;
+                slope /
+                atr14;
 
             let trend =
                 "SIDEWAYS";
 
             if (
                 ema9 > ema21 &&
-                spreadATR >= MIN_SPREAD_ATR &&
-                slopeATR >= MIN_SLOPE_ATR
+                spreadATR >=
+                    MIN_SPREAD_ATR &&
+                slopeATR >=
+                    MIN_SLOPE_ATR
             ) {
 
                 trend =
@@ -1026,8 +1156,10 @@ export default async function handler(req, res) {
 
             if (
                 ema9 < ema21 &&
-                spreadATR <= -MIN_SPREAD_ATR &&
-                slopeATR <= -MIN_SLOPE_ATR
+                spreadATR <=
+                    -MIN_SPREAD_ATR &&
+                slopeATR <=
+                    -MIN_SLOPE_ATR
             ) {
 
                 trend =
@@ -1043,16 +1175,24 @@ export default async function handler(req, res) {
                 "TRANSITION";
 
             if (
-                Math.abs(spreadATR) >= 0.35 &&
-                Math.abs(slopeATR) >= 0.08
+                Math.abs(
+                    spreadATR
+                ) >= 0.35 &&
+                Math.abs(
+                    slopeATR
+                ) >= 0.08
             ) {
 
                 regime =
                     "TRENDING";
 
             } else if (
-                Math.abs(spreadATR) < 0.15 &&
-                Math.abs(slopeATR) < 0.05
+                Math.abs(
+                    spreadATR
+                ) < 0.15 &&
+                Math.abs(
+                    slopeATR
+                ) < 0.05
             ) {
 
                 regime =
@@ -1062,12 +1202,16 @@ export default async function handler(req, res) {
             let vwapDirection =
                 "AT";
 
-            if (close > vwap) {
+            if (
+                close > vwap
+            ) {
 
                 vwapDirection =
                     "ABOVE";
 
-            } else if (close < vwap) {
+            } else if (
+                close < vwap
+            ) {
 
                 vwapDirection =
                     "BELOW";
@@ -1075,23 +1219,30 @@ export default async function handler(req, res) {
 
             const vwapDistanceATR =
                 (
-                    close - vwap
+                    close -
+                    vwap
                 ) / atr14;
 
             let rsiBucket =
                 "NEUTRAL";
 
-            if (rsi14 >= 60) {
+            if (
+                rsi14 >= 60
+            ) {
 
                 rsiBucket =
                     "HIGH";
 
-            } else if (rsi14 >= 50) {
+            } else if (
+                rsi14 >= 50
+            ) {
 
                 rsiBucket =
                     "NEUTRAL_HIGH";
 
-            } else if (rsi14 <= 40) {
+            } else if (
+                rsi14 <= 40
+            ) {
 
                 rsiBucket =
                     "LOW";
@@ -1105,12 +1256,16 @@ export default async function handler(req, res) {
             let volatility =
                 "NORMAL";
 
-            if (atr14 > 18) {
+            if (
+                atr14 > 18
+            ) {
 
                 volatility =
                     "HIGH";
 
-            } else if (atr14 < 8) {
+            } else if (
+                atr14 < 8
+            ) {
 
                 volatility =
                     "LOW";
@@ -1183,6 +1338,7 @@ export default async function handler(req, res) {
                 );
 
             if (!f) {
+
                 return null;
             }
 
@@ -1193,7 +1349,8 @@ export default async function handler(req, res) {
                     VWAP_LOOKBACK
                 );
 
-            let touchIndex = null;
+            let touchIndex =
+                null;
 
             let bestDistance =
                 Infinity;
@@ -1207,7 +1364,7 @@ export default async function handler(req, res) {
                 const c =
                     candles[i];
 
-                const v =
+                const vwapValue =
                     sessionVWAP(
                         candles,
                         i
@@ -1223,7 +1380,7 @@ export default async function handler(req, res) {
                     );
 
                 if (
-                    v === null ||
+                    vwapValue === null ||
                     !a ||
                     a <= 0
                 ) {
@@ -1231,41 +1388,49 @@ export default async function handler(req, res) {
                     continue;
                 }
 
-                const distance =
+                const closeDistance =
                     Math.abs(
-                        c.c - v
+                        c.c -
+                        vwapValue
                     ) / a;
 
                 const highDistance =
                     Math.abs(
-                        c.h - v
+                        c.h -
+                        vwapValue
                     ) / a;
 
                 const lowDistance =
                     Math.abs(
-                        c.l - v
+                        c.l -
+                        vwapValue
                     ) / a;
 
                 const touched =
-                    distance <=
+                    closeDistance <=
                         VWAP_TOUCH_MAX_ATR ||
                     highDistance <=
                         VWAP_TOUCH_MAX_ATR ||
                     lowDistance <=
                         VWAP_TOUCH_MAX_ATR ||
                     (
-                        c.l <= v &&
-                        c.h >= v
+                        c.l <=
+                            vwapValue &&
+                        c.h >=
+                            vwapValue
                     );
 
-                if (touched) {
+                if (
+                    touched
+                ) {
 
-                    touchIndex = i;
+                    touchIndex =
+                        i;
 
                     bestDistance =
                         Math.min(
                             bestDistance,
-                            distance
+                            closeDistance
                         );
                 }
             }
@@ -1310,6 +1475,7 @@ export default async function handler(req, res) {
                     : f.close < f.vwap;
 
             if (!recovery) {
+
                 return null;
             }
 
@@ -1451,6 +1617,7 @@ export default async function handler(req, res) {
                 );
 
             if (!f) {
+
                 return [];
             }
 
@@ -1461,8 +1628,10 @@ export default async function handler(req, res) {
             // -------------------------------------------------
 
             if (
-                f.trend === "BULLISH" &&
-                f.vwapDirection === "ABOVE"
+                f.trend ===
+                    "BULLISH" &&
+                f.vwapDirection ===
+                    "ABOVE"
             ) {
 
                 const chase =
@@ -1477,7 +1646,8 @@ export default async function handler(req, res) {
 
                     setups.push({
 
-                        side: "BUY",
+                        side:
+                            "BUY",
 
                         setup:
                             "TREND_FOLLOW",
@@ -1489,8 +1659,10 @@ export default async function handler(req, res) {
             }
 
             if (
-                f.trend === "BEARISH" &&
-                f.vwapDirection === "BELOW"
+                f.trend ===
+                    "BEARISH" &&
+                f.vwapDirection ===
+                    "BELOW"
             ) {
 
                 const chase =
@@ -1505,7 +1677,8 @@ export default async function handler(req, res) {
 
                     setups.push({
 
-                        side: "SELL",
+                        side:
+                            "SELL",
 
                         setup:
                             "TREND_FOLLOW",
@@ -1521,7 +1694,8 @@ export default async function handler(req, res) {
             // -------------------------------------------------
 
             if (
-                f.trend === "BULLISH"
+                f.trend ===
+                    "BULLISH"
             ) {
 
                 const interaction =
@@ -1537,7 +1711,8 @@ export default async function handler(req, res) {
 
                     setups.push({
 
-                        side: "BUY",
+                        side:
+                            "BUY",
 
                         setup:
                             "VWAP_PULLBACK",
@@ -1548,7 +1723,8 @@ export default async function handler(req, res) {
             }
 
             if (
-                f.trend === "BEARISH"
+                f.trend ===
+                    "BEARISH"
             ) {
 
                 const interaction =
@@ -1564,7 +1740,8 @@ export default async function handler(req, res) {
 
                     setups.push({
 
-                        side: "SELL",
+                        side:
+                            "SELL",
 
                         setup:
                             "VWAP_PULLBACK",
@@ -1578,7 +1755,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // CONFIRMATION
+        // CONFIRMATION SCORE
         // =====================================================
 
         function confirmationScore(
@@ -1614,11 +1791,13 @@ export default async function handler(req, res) {
             if (
                 (
                     side === "BUY" &&
-                    f.trend === "BULLISH"
+                    f.trend ===
+                        "BULLISH"
                 ) ||
                 (
                     side === "SELL" &&
-                    f.trend === "BEARISH"
+                    f.trend ===
+                        "BEARISH"
                 )
             ) {
 
@@ -1632,11 +1811,13 @@ export default async function handler(req, res) {
             if (
                 (
                     side === "BUY" &&
-                    f.vwapDirection === "ABOVE"
+                    f.vwapDirection ===
+                        "ABOVE"
                 ) ||
                 (
                     side === "SELL" &&
-                    f.vwapDirection === "BELOW"
+                    f.vwapDirection ===
+                        "BELOW"
                 )
             ) {
 
@@ -1729,7 +1910,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // KEYS
+        // EDGE KEYS
         // =====================================================
 
         function familyKey(
@@ -1764,10 +1945,6 @@ export default async function handler(req, res) {
 
         // =====================================================
         // TRADE EVALUATION
-        //
-        // IMPORTANT:
-        // maxEvaluationIndex prevents a trade outcome from
-        // crossing the boundary of discovery/validation/OOS.
         // =====================================================
 
         function evaluateTrade(
@@ -1777,7 +1954,7 @@ export default async function handler(req, res) {
             entry,
             stop,
             target,
-            maxEvaluationIndex = null
+            boundaryEnd = null
         ) {
 
             const naturalEnd =
@@ -1788,21 +1965,22 @@ export default async function handler(req, res) {
                 );
 
             const end =
-                maxEvaluationIndex === null
+                boundaryEnd === null
                     ? naturalEnd
                     : Math.min(
                         naturalEnd,
-                        maxEvaluationIndex
+                        boundaryEnd
                     );
 
             /*
-             * If there are no candles after the entry
-             * inside the permitted evaluation window,
-             * return timeout.
+             * If there is not even one future candle
+             * available inside this boundary, the trade
+             * cannot be evaluated.
              */
 
             if (
-                end <= entryIndex
+                entryIndex + 1 >
+                end
             ) {
 
                 return {
@@ -1811,9 +1989,13 @@ export default async function handler(req, res) {
                         entryIndex,
 
                     exitType:
-                        "TIMEOUT",
+                        "BOUNDARY",
 
-                    resultR: 0
+                    resultR:
+                        null,
+
+                    boundaryCapped:
+                        true
                 };
             }
 
@@ -1832,10 +2014,12 @@ export default async function handler(req, res) {
                 ) {
 
                     const hitStop =
-                        candle.l <= stop;
+                        candle.l <=
+                        stop;
 
                     const hitTarget =
-                        candle.h >= target;
+                        candle.h >=
+                        target;
 
                     /*
                      * Conservative same-candle rule:
@@ -1848,13 +2032,17 @@ export default async function handler(req, res) {
 
                         return {
 
-                            exitIndex: i,
+                            exitIndex:
+                                i,
 
                             exitType:
                                 "STOP",
 
                             resultR:
-                                -STOP_R
+                                -1,
+
+                            boundaryCapped:
+                                false
                         };
                     }
 
@@ -1864,23 +2052,29 @@ export default async function handler(req, res) {
 
                         return {
 
-                            exitIndex: i,
+                            exitIndex:
+                                i,
 
                             exitType:
                                 "TARGET",
 
                             resultR:
-                                TARGET_R
+                                2,
+
+                            boundaryCapped:
+                                false
                         };
                     }
 
                 } else {
 
                     const hitStop =
-                        candle.h >= stop;
+                        candle.h >=
+                        stop;
 
                     const hitTarget =
-                        candle.l <= target;
+                        candle.l <=
+                        target;
 
                     if (
                         hitStop
@@ -1888,13 +2082,17 @@ export default async function handler(req, res) {
 
                         return {
 
-                            exitIndex: i,
+                            exitIndex:
+                                i,
 
                             exitType:
                                 "STOP",
 
                             resultR:
-                                -STOP_R
+                                -1,
+
+                            boundaryCapped:
+                                false
                         };
                     }
 
@@ -1904,17 +2102,34 @@ export default async function handler(req, res) {
 
                         return {
 
-                            exitIndex: i,
+                            exitIndex:
+                                i,
 
                             exitType:
                                 "TARGET",
 
                             resultR:
-                                TARGET_R
+                                2,
+
+                            boundaryCapped:
+                                false
                         };
                     }
                 }
             }
+
+            /*
+             * Reaching this point means the trade did not
+             * hit stop or target before its permitted end.
+             *
+             * If the permitted end is the dataset/boundary
+             * rather than the normal max-hold point, mark it
+             * explicitly so diagnostics can see it.
+             */
+
+            const boundaryCapped =
+                boundaryEnd !== null &&
+                end < naturalEnd;
 
             return {
 
@@ -1922,18 +2137,18 @@ export default async function handler(req, res) {
                     end,
 
                 exitType:
-                    "TIMEOUT",
+                    boundaryCapped
+                        ? "BOUNDARY_TIMEOUT"
+                        : "TIMEOUT",
 
-                resultR: 0
+                resultR:
+                    0,
+
+                boundaryCapped
             };
         }
-
-        // =====================================================
-        // CREATE RECORD
-        //
-        // evaluationEnd is mandatory for historical learning.
-        // This prevents discovery outcomes from entering the
-        // validation segment.
+             // =====================================================
+        // CREATE LEARNING RECORD
         // =====================================================
 
         function createLearningRecord(
@@ -1941,7 +2156,7 @@ export default async function handler(req, res) {
             index,
             side,
             setup,
-            evaluationEnd
+            boundaryEnd = null
         ) {
 
             const f =
@@ -1951,6 +2166,7 @@ export default async function handler(req, res) {
                 );
 
             if (!f) {
+
                 return null;
             }
 
@@ -1987,7 +2203,8 @@ export default async function handler(req, res) {
                 }
             }
 
-            let interaction = null;
+            let interaction =
+                null;
 
             if (
                 setup ===
@@ -2001,7 +2218,10 @@ export default async function handler(req, res) {
                         side
                     );
 
-                if (!interaction) {
+                if (
+                    !interaction
+                ) {
+
                     return null;
                 }
             }
@@ -2040,6 +2260,16 @@ export default async function handler(req, res) {
                     atrValue;
             }
 
+            /*
+             * CRITICAL V14.6:
+             *
+             * Trade evaluation is explicitly capped at
+             * the discovery/validation boundary.
+             *
+             * This prevents a trade opened near a boundary
+             * from looking into the next dataset section.
+             */
+
             const outcome =
                 evaluateTrade(
                     candles,
@@ -2048,8 +2278,23 @@ export default async function handler(req, res) {
                     entry,
                     stop,
                     target,
-                    evaluationEnd
+                    boundaryEnd
                 );
+
+            /*
+             * Boundary-only outcomes are NOT learning
+             * outcomes.
+             *
+             * The trade is discarded rather than allowing
+             * a synthetic timeout to affect EV/PF.
+             */
+
+            if (
+                outcome.resultR === null
+            ) {
+
+                return null;
+            }
 
             return {
 
@@ -2094,8 +2339,14 @@ export default async function handler(req, res) {
                 exitType:
                     outcome.exitType,
 
+                boundaryCapped:
+                    outcome.boundaryCapped,
+
                 confirmationScore:
                     confirmation.score,
+
+                confirmationReasons:
+                    confirmation.reasons,
 
                 interaction
             };
@@ -2110,7 +2361,14 @@ export default async function handler(req, res) {
         ) {
 
             const records =
-                safeArray(input);
+                safeArray(input)
+                    .filter(
+                        x =>
+                            x &&
+                            Number.isFinite(
+                                x.resultR
+                            )
+                    );
 
             const wins =
                 records.filter(
@@ -2131,7 +2389,8 @@ export default async function handler(req, res) {
                 ).length;
 
             const decisive =
-                wins + losses;
+                wins +
+                losses;
 
             const totalWinR =
                 records
@@ -2178,6 +2437,13 @@ export default async function handler(req, res) {
                     0
                 );
 
+            /*
+             * EV is deliberately calculated per completed
+             * trade, including timeouts as 0R.
+             *
+             * This is the same convention used in V14.5.
+             */
+
             const ev =
                 records.length
                     ? netR /
@@ -2193,10 +2459,13 @@ export default async function handler(req, res) {
                         : 0;
 
             let equity = 0;
+
             let peak = 0;
+
             let maxDD = 0;
 
             let currentLossStreak = 0;
+
             let maxLossStreak = 0;
 
             for (
@@ -2255,9 +2524,10 @@ export default async function handler(req, res) {
                 winRate:
                     decisive
                         ? round(
-                            wins /
-                            decisive *
-                            100,
+                            (
+                                wins /
+                                decisive
+                            ) * 100,
                             2
                         )
                         : 0,
@@ -2334,33 +2604,51 @@ export default async function handler(req, res) {
                 of safeArray(records)
             ) {
 
+                if (
+                    !Number.isFinite(
+                        record.index
+                    )
+                ) {
+
+                    continue;
+                }
+
+                const relative =
+                    record.index -
+                    start;
+
                 const section =
                     Math.min(
                         3,
-                        Math.floor(
-                            (
-                                record.index -
-                                start
-                            ) /
-                            width
+                        Math.max(
+                            0,
+                            Math.floor(
+                                relative /
+                                width
+                            )
                         )
                     );
 
-                sections[section]
-                    .push(record);
+                sections[
+                    section
+                ].push(
+                    record
+                );
             }
 
             const sectionMetrics =
                 sections.map(
-                    x =>
-                        calculateMetrics(x)
+                    section =>
+                        calculateMetrics(
+                            section
+                        )
                 );
 
             const profitableSections =
                 sectionMetrics.filter(
-                    x =>
-                        x.decisiveTrades > 0 &&
-                        x.expectedValueR > 0
+                    metric =>
+                        metric.decisiveTrades > 0 &&
+                        metric.expectedValueR > 0
                 ).length;
 
             return {
@@ -2373,14 +2661,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // DISCOVER CANDIDATES
-        //
-        // CRITICAL:
-        //
-        // [start, end) is the ONLY data discovery can see.
-        //
-        // Trade outcomes are additionally capped at
-        // end - 1 so they cannot spill into validation.
+        // DISCOVERY CANDIDATES
         // =====================================================
 
         function discoverCandidates(
@@ -2398,12 +2679,14 @@ export default async function handler(req, res) {
             const rawRecords = [];
 
             /*
-             * We need enough candles AFTER the entry to
-             * determine a complete trade outcome.
+             * IMPORTANT V14.6:
              *
-             * Therefore the final MAX_HOLD_CANDLES candles
-             * of the discovery segment cannot be used as
-             * training entries.
+             * A learning trade is only allowed to use
+             * candles strictly inside the discovery
+             * section.
+             *
+             * Therefore the latest entry index is reduced
+             * by MAX_HOLD_CANDLES.
              */
 
             const stop =
@@ -2441,6 +2724,19 @@ export default async function handler(req, res) {
                         );
 
                     if (!record) {
+
+                        continue;
+                    }
+
+                    /*
+                     * A boundary-capped trade is not permitted
+                     * to contaminate discovery statistics.
+                     */
+
+                    if (
+                        record.boundaryCapped
+                    ) {
+
                         continue;
                     }
 
@@ -2464,7 +2760,9 @@ export default async function handler(req, res) {
                         .get(
                             record.family
                         )
-                        .push(record);
+                        .push(
+                            record
+                        );
 
                     if (
                         !patternMap.has(
@@ -2482,9 +2780,15 @@ export default async function handler(req, res) {
                         .get(
                             record.pattern
                         )
-                        .push(record);
+                        .push(
+                            record
+                        );
                 }
             }
+
+            // =================================================
+            // CANDIDATE SUMMARY
+            // =================================================
 
             function summarize(
                 key,
@@ -2510,7 +2814,8 @@ export default async function handler(req, res) {
                         (
                             end -
                             start
-                        ) * 0.75
+                        ) *
+                        0.75
                     );
 
                 const recent =
@@ -2548,7 +2853,8 @@ export default async function handler(req, res) {
                 quality +=
                     clamp(
                         Math.max(
-                            metrics.profitFactor - 1,
+                            metrics.profitFactor -
+                            1,
                             0
                         ) * 10,
                         0,
@@ -2562,7 +2868,8 @@ export default async function handler(req, res) {
                     ) * 5;
 
                 if (
-                    recentMetrics.expectedValueR < 0
+                    recentMetrics
+                        .expectedValueR < 0
                 ) {
 
                     quality -= 20;
@@ -2650,20 +2957,30 @@ export default async function handler(req, res) {
                     maxDrawdownR:
                         metrics.maxDrawdownR,
 
+                    maxConsecutiveLosses:
+                        metrics.maxConsecutiveLosses,
+
                     stableSections:
-                        stability.profitableSections,
+                        stability
+                            .profitableSections,
+
+                    sectionMetrics:
+                        stability.sections,
 
                     recentSamples:
                         recent.length,
 
                     recentDecisive:
-                        recentMetrics.decisiveTrades,
+                        recentMetrics
+                            .decisiveTrades,
 
                     recentEV:
-                        recentMetrics.expectedValueR,
+                        recentMetrics
+                            .expectedValueR,
 
                     recentPF:
-                        recentMetrics.profitFactor,
+                        recentMetrics
+                            .profitFactor,
 
                     quality:
                         round(
@@ -2726,17 +3043,80 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // VALIDATION FAILURE DIAGNOSTICS
+        // =====================================================
+
+        function validationFailureReasons(
+            candidate,
+            metrics
+        ) {
+
+            const reasons = [];
+
+            if (
+                metrics.trades <
+                VALIDATION_MIN_SAMPLES
+            ) {
+
+                reasons.push(
+                    "INSUFFICIENT_VALIDATION_SAMPLES"
+                );
+            }
+
+            if (
+                metrics.decisiveTrades <
+                VALIDATION_MIN_DECISIVE
+            ) {
+
+                reasons.push(
+                    "INSUFFICIENT_VALIDATION_DECISIVE"
+                );
+            }
+
+            if (
+                metrics.expectedValueR <
+                VALIDATION_MIN_EV
+            ) {
+
+                reasons.push(
+                    "VALIDATION_EV_BELOW_THRESHOLD"
+                );
+            }
+
+            if (
+                metrics.profitFactor <
+                VALIDATION_MIN_PF
+            ) {
+
+                reasons.push(
+                    "VALIDATION_PF_BELOW_THRESHOLD"
+                );
+            }
+
+            if (
+                metrics.maxConsecutiveLosses >
+                MAX_VALIDATION_LOSS_STREAK
+            ) {
+
+                reasons.push(
+                    "VALIDATION_LOSS_STREAK_TOO_HIGH"
+                );
+            }
+
+            if (
+                reasons.length === 0
+            ) {
+
+                reasons.push(
+                    "VALIDATION_PASSED"
+                );
+            }
+
+            return reasons;
+        }
+
+        // =====================================================
         // VALIDATE CANDIDATE
-        //
-        // CRITICAL V14.5 FIX:
-        //
-        // validationStart -> validationEnd is completely
-        // separate from discovery.
-        //
-        // No validation trade may evaluate beyond
-        // validationEnd - 1.
-        //
-        // Therefore validation cannot see OOS results.
         // =====================================================
 
         function validateCandidate(
@@ -2746,46 +3126,91 @@ export default async function handler(req, res) {
             validationEnd
         ) {
 
+            /*
+             * V14.6 FIX:
+             *
+             * Pattern family is reconstructed only from
+             * the first three pipe-separated components.
+             *
+             * Pattern format:
+             *
+             * BUY|S:TREND_FOLLOW|T:BULLISH|...
+             *
+             * Family format:
+             *
+             * BUY|TREND_FOLLOW|BULLISH
+             */
+
             const family =
-                candidate.family ||
-                candidate.key
-                    .split("|")
-                    .slice(
-                        0,
-                        3
-                    )
-                    .join("|");
+                candidate.level ===
+                    "FAMILY"
+                    ? candidate.key
+                    : candidate.key
+                        .split("|")
+                        .map(
+                            x =>
+                                x
+                        )
+                        .filter(
+                            x =>
+                                x
+                                    .startsWith(
+                                        "S:"
+                                    ) === false &&
+                                x
+                                    .startsWith(
+                                        "T:"
+                                    ) === false &&
+                                x
+                                    .startsWith(
+                                        "V:"
+                                    ) === false &&
+                                x
+                                    .startsWith(
+                                        "G:"
+                                    ) === false &&
+                                x
+                                    .startsWith(
+                                        "H:"
+                                    ) === false &&
+                                x
+                                    .startsWith(
+                                        "R:"
+                                    ) === false
+                        )
+                        .slice(
+                            0,
+                            3
+                        )
+                        .join("|");
 
             const trades = [];
 
-            let cooldownUntil = -1;
+            let cooldownUntil =
+                validationStart - 1;
 
-            let lastPattern = null;
-            let lastPatternIndex = -9999;
+            let lastPattern =
+                null;
 
-            let lastSide = null;
-            let lastSideIndex = -9999;
+            let lastPatternIndex =
+                -9999;
+
+            let lastSide =
+                null;
+
+            let lastSideIndex =
+                -9999;
 
             const lossStreak =
                 new Map();
 
-            /*
-             * Entries must have enough candles remaining
-             * inside validation to obtain a complete outcome.
-             */
-
-            const validationTradeEnd =
-                Math.max(
-                    validationStart,
-                    validationEnd -
-                    MAX_HOLD_CANDLES
-                );
+            let skippedBoundaryTrades = 0;
 
             for (
                 let i =
                     validationStart;
                 i <
-                    validationTradeEnd;
+                    validationEnd - 1;
                 i++
             ) {
 
@@ -2804,6 +3229,7 @@ export default async function handler(req, res) {
                     );
 
                 if (!f) {
+
                     continue;
                 }
 
@@ -2836,11 +3262,12 @@ export default async function handler(req, res) {
                         candidate.level ===
                             "FAMILY"
                             ? currentFamily ===
-                              family
+                              candidate.key
                             : key ===
                               candidate.key;
 
                     if (!matched) {
+
                         continue;
                     }
 
@@ -2857,20 +3284,22 @@ export default async function handler(req, res) {
                     }
 
                     if (
-                        key === lastPattern &&
+                        key ===
+                            lastPattern &&
                         i -
-                        lastPatternIndex <
-                        SAME_PATTERN_COOLDOWN
+                            lastPatternIndex <
+                            SAME_PATTERN_COOLDOWN
                     ) {
 
                         continue;
                     }
 
                     if (
-                        setup.side === lastSide &&
+                        setup.side ===
+                            lastSide &&
                         i -
-                        lastSideIndex <
-                        SAME_SIDE_COOLDOWN
+                            lastSideIndex <
+                            SAME_SIDE_COOLDOWN
                     ) {
 
                         continue;
@@ -2897,24 +3326,24 @@ export default async function handler(req, res) {
                         f.atr14;
 
                     const stop =
-                        setup.side === "BUY"
+                        setup.side ===
+                            "BUY"
                             ? entry - a
                             : entry + a;
 
                     const target =
-                        setup.side === "BUY"
+                        setup.side ===
+                            "BUY"
                             ? entry +
-                              TARGET_R *
-                              a
+                              TARGET_R * a
                             : entry -
-                              TARGET_R *
-                              a;
+                              TARGET_R * a;
 
                     /*
-                     * IMPORTANT:
+                     * STRICT VALIDATION BOUNDARY.
                      *
-                     * Validation outcome is capped at
-                     * validationEnd - 1.
+                     * The trade may not inspect candles
+                     * belonging to OOS.
                      */
 
                     const outcome =
@@ -2928,9 +3357,34 @@ export default async function handler(req, res) {
                             validationEnd - 1
                         );
 
+                    if (
+                        outcome.resultR === null
+                    ) {
+
+                        skippedBoundaryTrades++;
+
+                        continue;
+                    }
+
+                    if (
+                        outcome.boundaryCapped
+                    ) {
+
+                        /*
+                         * Do not allow a trade whose normal
+                         * holding period crosses the validation
+                         * boundary to become a fake timeout.
+                         */
+
+                        skippedBoundaryTrades++;
+
+                        continue;
+                    }
+
                     const trade = {
 
-                        index: i,
+                        index:
+                            i,
 
                         side:
                             setup.side,
@@ -2965,8 +3419,9 @@ export default async function handler(req, res) {
                         lossStreak.set(
                             key,
                             (
-                                lossStreak.get(key) ||
-                                0
+                                lossStreak.get(
+                                    key
+                                ) || 0
                             ) + 1
                         );
 
@@ -3003,54 +3458,197 @@ export default async function handler(req, res) {
                     trades
                 );
 
+            const reasons =
+                validationFailureReasons(
+                    candidate,
+                    metrics
+                );
+
             const passed =
-                metrics.trades >=
-                    VALIDATION_MIN_SAMPLES &&
-
-                metrics.decisiveTrades >=
-                    VALIDATION_MIN_DECISIVE &&
-
-                metrics.expectedValueR >=
-                    VALIDATION_MIN_EV &&
-
-                metrics.profitFactor >=
-                    VALIDATION_MIN_PF &&
-
-                metrics.maxConsecutiveLosses <=
-                    MAX_VALIDATION_LOSS_STREAK;
+                reasons.length === 1 &&
+                reasons[0] ===
+                    "VALIDATION_PASSED";
 
             return {
 
                 passed,
 
+                reasons,
+
                 trades,
 
-                metrics
+                metrics,
+
+                skippedBoundaryTrades,
+
+                candidate: {
+
+                    key:
+                        candidate.key,
+
+                    level:
+                        candidate.level,
+
+                    discoverySamples:
+                        candidate.samples,
+
+                    discoveryDecisive:
+                        candidate.decisiveTrades,
+
+                    discoveryEV:
+                        candidate.expectedValueR,
+
+                    discoveryPF:
+                        candidate.profitFactor,
+
+                    discoveryQuality:
+                        candidate.quality,
+
+                    discoveryStableSections:
+                        candidate.stableSections,
+
+                    familyKey:
+                        family
+                }
             };
         }
 
         // =====================================================
+        // PATTERN → FAMILY RESOLUTION
+        // =====================================================
+
+        function resolveFamilyKey(
+            candidate
+        ) {
+
+            if (
+                !candidate
+            ) {
+
+                return null;
+            }
+
+            if (
+                candidate.level ===
+                "FAMILY"
+            ) {
+
+                return candidate.key;
+            }
+
+            const parts =
+                String(
+                    candidate.key
+                ).split("|");
+
+            if (
+                parts.length < 3
+            ) {
+
+                return null;
+            }
+
+            const side =
+                parts[0];
+
+            let setup =
+                null;
+
+            let trend =
+                null;
+
+            for (
+                const part
+                of parts
+            ) {
+
+                if (
+                    part.startsWith(
+                        "S:"
+                    )
+                ) {
+
+                    setup =
+                        part.slice(2);
+                }
+
+                if (
+                    part.startsWith(
+                        "T:"
+                    )
+                ) {
+
+                    trend =
+                        part.slice(2);
+                }
+            }
+
+            if (
+                !side ||
+                !setup ||
+                !trend
+            ) {
+
+                return null;
+            }
+
+            return familyKey(
+                side,
+                setup,
+                trend
+            );
+        }
+             // =====================================================
         // PROMOTION
-        //
-        // IMPORTANT V14.5 FIX:
-        //
-        // validationStart and validationEnd are explicitly
-        // supplied by the caller.
-        //
-        // We DO NOT calculate validation from inside the
-        // discovery window anymore.
         // =====================================================
 
         function promoteCandidates(
             candles,
             discovery,
             discoveryStart,
-            discoveryEnd,
-            validationStart,
-            validationEnd
+            discoveryEnd
         ) {
 
+            /*
+             * V14.6:
+             *
+             * Discovery and validation are completely
+             * separated.
+             *
+             * Discovery candidates are created only from:
+             *
+             *     discoveryStart → discoveryEnd
+             *
+             * Validation uses:
+             *
+             *     validationStart → discoveryEnd
+             *
+             * No validation outcome is allowed to become
+             * part of discovery statistics.
+             */
+
+            const validationSize =
+                Math.max(
+                    50,
+                    Math.floor(
+                        (
+                            discoveryEnd -
+                            discoveryStart
+                        ) *
+                        VALIDATION_FRACTION
+                    )
+                );
+
+            const validationStart =
+                Math.max(
+                    discoveryStart + 50,
+                    discoveryEnd -
+                    validationSize
+                );
+
             const candidates = [];
+
+            const validationResults = [];
 
             const qualifiedFamilies =
                 discovery.families.filter(
@@ -3064,6 +3662,14 @@ export default async function handler(req, res) {
                         x.qualified
                 );
 
+            /*
+             * Families are evaluated first.
+             *
+             * This gives V14.6 a stable parent-level
+             * reference before allowing detailed patterns
+             * to survive.
+             */
+
             for (
                 const candidate
                 of [
@@ -3073,31 +3679,105 @@ export default async function handler(req, res) {
             ) {
 
                 const familyKeyValue =
-                    candidate.level ===
-                        "FAMILY"
-                        ? candidate.key
-                        : candidate.key
-                            .split("|")
-                            .slice(
-                                0,
-                                3
-                            )
-                            .join("|");
+                    resolveFamilyKey(
+                        candidate
+                    );
 
                 const family =
                     discovery.families.find(
                         x =>
                             x.key ===
                             familyKeyValue
-                    );
+                    ) || null;
+
+                /*
+                 * Pattern cannot override a losing family
+                 * unless explicitly allowed.
+                 */
+
+                if (
+                    candidate.level ===
+                    "PATTERN" &&
+                    family
+                ) {
+
+                    if (
+                        family.expectedValueR <
+                        0 &&
+                        !ALLOW_PATTERN_OVERRIDE_LOSING_FAMILY
+                    ) {
+
+                        validationResults.push({
+
+                            key:
+                                candidate.key,
+
+                            level:
+                                candidate.level,
+
+                            passed:
+                                false,
+
+                            reason:
+                                "FAMILY_CONFLICT"
+                        });
+
+                        continue;
+                    }
+
+                    const gap =
+                        candidate.expectedValueR -
+                        family.expectedValueR;
+
+                    if (
+                        gap >
+                        MAX_PATTERN_FAMILY_EV_GAP
+                    ) {
+
+                        validationResults.push({
+
+                            key:
+                                candidate.key,
+
+                            level:
+                                candidate.level,
+
+                            passed:
+                                false,
+
+                            reason:
+                                "PATTERN_FAMILY_EV_GAP_TOO_LARGE"
+                        });
+
+                        continue;
+                    }
+                }
 
                 const validation =
                     validateCandidate(
                         candles,
                         candidate,
                         validationStart,
-                        validationEnd
+                        discoveryEnd
                     );
+
+                validationResults.push({
+
+                    key:
+                        candidate.key,
+
+                    level:
+                        candidate.level,
+
+                    passed:
+                        validation.passed,
+
+                    reasons:
+                        validation.reasons,
+
+                    metrics:
+                        validation.metrics
+                });
 
                 if (
                     !validation.passed
@@ -3106,52 +3786,81 @@ export default async function handler(req, res) {
                     continue;
                 }
 
-                // ---------------------------------------------
-                // FAMILY VS PATTERN
-                // ---------------------------------------------
+                /*
+                 * Anti-chasing promotion filter.
+                 *
+                 * A historically strong edge is not enough
+                 * if its actual entries are consistently
+                 * located at excessive extension.
+                 */
 
-                if (
-                    candidate.level ===
-                    "PATTERN"
+                const validationTrades =
+                    safeArray(
+                        validation.trades
+                    );
+
+                let validExtensionTrades =
+                    0;
+
+                for (
+                    const trade
+                    of validationTrades
                 ) {
 
+                    const f =
+                        features(
+                            candles,
+                            trade.index
+                        );
+
+                    if (!f) {
+
+                        continue;
+                    }
+
+                    const chase =
+                        antiChaseCheck(
+                            f,
+                            trade.side
+                        );
+
                     if (
-                        family
+                        chase.passed
                     ) {
 
-                        if (
-                            family.expectedValueR <
-                            0 &&
-                            !ALLOW_PATTERN_OVERRIDE_LOSING_FAMILY
-                        ) {
-
-                            continue;
-                        }
-
-                        const gap =
-                            candidate.expectedValueR -
-                            family.expectedValueR;
-
-                        if (
-                            gap >
-                            MAX_PATTERN_FAMILY_EV_GAP
-                        ) {
-
-                            continue;
-                        }
+                        validExtensionTrades++;
                     }
                 }
+
+                if (
+                    validationTrades.length > 0 &&
+                    validExtensionTrades === 0
+                ) {
+
+                    continue;
+                }
+
+                /*
+                 * Candidate survives.
+                 */
 
                 candidates.push({
 
                     ...candidate,
 
                     familyEvidence:
-                        family || null,
+                        family,
 
                     validation
                 });
             }
+
+            /*
+             * Rank surviving edges.
+             *
+             * Validation quality is deliberately weighted
+             * more heavily than discovery quality.
+             */
 
             candidates.sort(
                 (
@@ -3159,23 +3868,217 @@ export default async function handler(req, res) {
                     b
                 ) => {
 
+                    const aValidationEV =
+                        a.validation &&
+                        a.validation.metrics
+                            ? a.validation.metrics
+                                .expectedValueR
+                            : -999;
+
+                    const bValidationEV =
+                        b.validation &&
+                        b.validation.metrics
+                            ? b.validation.metrics
+                                .expectedValueR
+                            : -999;
+
+                    const aValidationPF =
+                        a.validation &&
+                        a.validation.metrics
+                            ? a.validation.metrics
+                                .profitFactor
+                            : 0;
+
+                    const bValidationPF =
+                        b.validation &&
+                        b.validation.metrics
+                            ? b.validation.metrics
+                                .profitFactor
+                            : 0;
+
                     const aScore =
-                        a.validation.metrics.expectedValueR *
-                        100 +
-                        a.quality;
+                        (
+                            aValidationEV *
+                            100
+                        ) +
+                        (
+                            Math.min(
+                                aValidationPF,
+                                5
+                            ) *
+                            10
+                        ) +
+                        (
+                            a.quality *
+                            0.25
+                        );
 
                     const bScore =
-                        b.validation.metrics.expectedValueR *
-                        100 +
-                        b.quality;
+                        (
+                            bValidationEV *
+                            100
+                        ) +
+                        (
+                            Math.min(
+                                bValidationPF,
+                                5
+                            ) *
+                            10
+                        ) +
+                        (
+                            b.quality *
+                            0.25
+                        );
 
-                    return bScore - aScore;
+                    return (
+                        bScore -
+                        aScore
+                    );
                 }
             );
 
             return {
 
-                candidates
+                candidates,
+
+                validationStart,
+
+                validationResults
+            };
+        }
+
+        // =====================================================
+        // EDGE DIVERSITY FILTER
+        // =====================================================
+
+        function diversifyCandidates(
+            candidates
+        ) {
+
+            const selected = [];
+
+            const familySet =
+                new Set();
+
+            const sideSet =
+                new Set();
+
+            const patternSet =
+                new Set();
+
+            for (
+                const candidate
+                of safeArray(
+                    candidates
+                )
+            ) {
+
+                const family =
+                    resolveFamilyKey(
+                        candidate
+                    );
+
+                const side =
+                    String(
+                        candidate.key
+                    ).split("|")[0];
+
+                /*
+                 * Do not allow the same exact pattern to
+                 * appear twice.
+                 */
+
+                if (
+                    patternSet.has(
+                        candidate.key
+                    )
+                ) {
+
+                    continue;
+                }
+
+                /*
+                 * Maximum edges per family.
+                 *
+                 * This is an anti-concentration protection.
+                 */
+
+                const familyCount =
+                    selected.filter(
+                        x =>
+                            resolveFamilyKey(
+                                x
+                            ) === family
+                    ).length;
+
+                if (
+                    familyCount >=
+                    MAX_EDGES_PER_FAMILY
+                ) {
+
+                    continue;
+                }
+
+                /*
+                 * Maximum edges per side.
+                 *
+                 * Prevents the final model from becoming
+                 * effectively one-directional.
+                 */
+
+                const sideCount =
+                    selected.filter(
+                        x =>
+                            String(
+                                x.key
+                            ).split("|")[0] ===
+                            side
+                    ).length;
+
+                if (
+                    sideCount >=
+                    MAX_EDGES_PER_SIDE
+                ) {
+
+                    continue;
+                }
+
+                selected.push(
+                    candidate
+                );
+
+                patternSet.add(
+                    candidate.key
+                );
+
+                familySet.add(
+                    family
+                );
+
+                sideSet.add(
+                    side
+                );
+
+                if (
+                    selected.length >=
+                    MAX_SELECTED_EDGES
+                ) {
+
+                    break;
+                }
+            }
+
+            return {
+
+                selected,
+
+                independentFamilies:
+                    familySet.size,
+
+                sides:
+                    [
+                        ...sideSet
+                    ]
             };
         }
 
@@ -3193,35 +4096,29 @@ export default async function handler(req, res) {
 
             const trades = [];
 
-            let cooldownUntil = -1;
+            let cooldownUntil =
+                testStart - 1;
 
-            let lastPattern = null;
-            let lastPatternIndex = -9999;
+            let lastPattern =
+                null;
 
-            let lastSide = null;
-            let lastSideIndex = -9999;
+            let lastPatternIndex =
+                -9999;
+
+            let lastSide =
+                null;
+
+            let lastSideIndex =
+                -9999;
 
             const lossStreak =
                 new Map();
-
-            /*
-             * Do not start trades too close to the end of
-             * the OOS window because we need a complete
-             * MAX_HOLD_CANDLES outcome inside the OOS fold.
-             */
-
-            const oosTradeEnd =
-                Math.max(
-                    testStart,
-                    testEnd -
-                    MAX_HOLD_CANDLES
-                );
 
             for (
                 let i =
                     testStart;
                 i <
-                    oosTradeEnd;
+                    testEnd - 1;
                 i++
             ) {
 
@@ -3240,6 +4137,7 @@ export default async function handler(req, res) {
                     );
 
                 if (!f) {
+
                     continue;
                 }
 
@@ -3275,26 +4173,51 @@ export default async function handler(req, res) {
                             f.trend
                         );
 
+                    /*
+                     * V14.6:
+                     *
+                     * Only an edge explicitly promoted
+                     * after internal validation may trade.
+                     */
+
                     const match =
                         selected.find(
-                            x =>
-                                (
-                                    x.level ===
-                                    "PATTERN" &&
-                                    x.key ===
-                                    key
-                                ) ||
-                                (
-                                    x.level ===
-                                    "FAMILY" &&
-                                    x.key ===
-                                    family
-                                )
+                            candidate => {
+
+                                if (
+                                    candidate.level ===
+                                    "PATTERN"
+                                ) {
+
+                                    return (
+                                        candidate.key ===
+                                        key
+                                    );
+                                }
+
+                                if (
+                                    candidate.level ===
+                                    "FAMILY"
+                                ) {
+
+                                    return (
+                                        candidate.key ===
+                                        family
+                                    );
+                                }
+
+                                return false;
+                            }
                         );
 
                     if (!match) {
+
                         continue;
                     }
+
+                    /*
+                     * Loss-streak protection.
+                     */
 
                     if (
                         (
@@ -3308,21 +4231,50 @@ export default async function handler(req, res) {
                         continue;
                     }
 
+                    /*
+                     * Same-pattern cooldown.
+                     */
+
                     if (
-                        key === lastPattern &&
+                        key ===
+                            lastPattern &&
                         i -
-                        lastPatternIndex <
-                        SAME_PATTERN_COOLDOWN
+                            lastPatternIndex <
+                            SAME_PATTERN_COOLDOWN
                     ) {
 
                         continue;
                     }
 
+                    /*
+                     * Same-side cooldown.
+                     */
+
                     if (
-                        setup.side === lastSide &&
+                        setup.side ===
+                            lastSide &&
                         i -
-                        lastSideIndex <
-                        SAME_SIDE_COOLDOWN
+                            lastSideIndex <
+                            SAME_SIDE_COOLDOWN
+                    ) {
+
+                        continue;
+                    }
+
+                    /*
+                     * Final anti-chasing protection.
+                     */
+
+                    const chase =
+                        antiChaseCheck(
+                            f,
+                            setup.side
+                        );
+
+                    if (
+                        !chase.passed &&
+                        setup.setup ===
+                            "TREND_FOLLOW"
                     ) {
 
                         continue;
@@ -3349,27 +4301,34 @@ export default async function handler(req, res) {
                         f.atr14;
 
                     const stop =
-                        setup.side === "BUY"
+                        setup.side ===
+                            "BUY"
                             ? entry - a
                             : entry + a;
 
                     const target =
-                        setup.side === "BUY"
+                        setup.side ===
+                            "BUY"
                             ? entry +
-                              TARGET_R *
-                              a
+                              TARGET_R * a
                             : entry -
-                              TARGET_R *
-                              a;
+                              TARGET_R * a;
 
                     const preferredTarget =
-                        setup.side === "BUY"
+                        setup.side ===
+                            "BUY"
                             ? entry +
                               PREFERRED_TARGET_R *
                               a
                             : entry -
                               PREFERRED_TARGET_R *
                               a;
+
+                    /*
+                     * OOS boundary is absolute.
+                     *
+                     * A trade cannot inspect the next fold.
+                     */
 
                     const outcome =
                         evaluateTrade(
@@ -3381,6 +4340,19 @@ export default async function handler(req, res) {
                             target,
                             testEnd - 1
                         );
+
+                    /*
+                     * If the holding period would cross the
+                     * fold boundary, do NOT invent a result.
+                     */
+
+                    if (
+                        outcome.resultR === null ||
+                        outcome.boundaryCapped
+                    ) {
+
+                        continue;
+                    }
 
                     const trade = {
 
@@ -3426,33 +4398,55 @@ export default async function handler(req, res) {
                             match.quality,
 
                         discoveryEV:
-                            match.expectedValueR,
+                            round(
+                                match.expectedValueR,
+                                4
+                            ),
 
                         discoveryPF:
-                            match.profitFactor,
+                            round(
+                                match.profitFactor,
+                                4
+                            ),
 
                         validationEV:
-                            match.validation.metrics
-                                .expectedValueR,
+                            round(
+                                match.validation.metrics
+                                    .expectedValueR,
+                                4
+                            ),
 
                         validationPF:
-                            match.validation.metrics
-                                .profitFactor,
+                            round(
+                                match.validation.metrics
+                                    .profitFactor,
+                                4
+                            ),
 
                         validationTrades:
                             match.validation.metrics
                                 .trades,
 
+                        validationDecisive:
+                            match.validation.metrics
+                                .decisiveTrades,
+
                         familyEV:
                             match.familyEvidence
-                                ? match.familyEvidence
-                                    .expectedValueR
+                                ? round(
+                                    match.familyEvidence
+                                        .expectedValueR,
+                                    4
+                                )
                                 : null,
 
                         familyPF:
                             match.familyEvidence
-                                ? match.familyEvidence
-                                    .profitFactor
+                                ? round(
+                                    match.familyEvidence
+                                        .profitFactor,
+                                    4
+                                )
                                 : null,
 
                         regime:
@@ -3488,6 +4482,12 @@ export default async function handler(req, res) {
                         ema9SlopeATR:
                             round(
                                 f.ema9SlopeATR,
+                                4
+                            ),
+
+                        trendStrength:
+                            round(
+                                f.trendStrength,
                                 4
                             ),
 
@@ -3545,8 +4545,9 @@ export default async function handler(req, res) {
                         lossStreak.set(
                             key,
                             (
-                                lossStreak.get(key) ||
-                                0
+                                lossStreak.get(
+                                    key
+                                ) || 0
                             ) + 1
                         );
 
@@ -3574,6 +4575,10 @@ export default async function handler(req, res) {
                     lastSideIndex =
                         i;
 
+                    /*
+                     * One trade at a time.
+                     */
+
                     break;
                 }
             }
@@ -3582,1743 +4587,105 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // API FETCH
+        // FOLD QUALITY
         // =====================================================
 
-        async function fetchHistoricalChunk(
-            accessToken,
-            startMs,
-            endMs
+        function evaluateFoldQuality(
+            metrics,
+            independentFamilies
         ) {
-
-            const url =
-                `${API_BASE}/market/historical/${INTERVAL}` +
-                `?scrip-codes=${encodeURIComponent(
-                    SCRIP_CODE
-                )}` +
-                `&start_time=${startMs}` +
-                `&end_time=${endMs}`;
-
-            const response =
-                await fetch(
-                    url,
-                    {
-                        method: "GET",
-
-                        headers: {
-
-                            Authorization:
-                                accessToken,
-
-                            "Content-Type":
-                                "application/json"
-                        }
-                    }
-                );
-
-            const text =
-                await response.text();
-
-            let payload;
-
-            try {
-
-                payload =
-                    JSON.parse(text);
-
-            } catch {
-
-                payload = {
-                    raw: text
-                };
-            }
 
             if (
-                !response.ok
+                !metrics ||
+                metrics.trades <= 0
             ) {
-
-                throw new Error(
-                    `INDstocks historical API failed: HTTP ${response.status} ${text}`
-                );
-            }
-
-            return payload;
-        }
-
-        // =====================================================
-        // LOAD DATA
-        // =====================================================
-
-        async function loadHistoricalData() {
-
-            const accessToken =
-                (
-                    process.env.INDSTOCKS_TOKEN ||
-                    process.env.INDSTOCKS_ACCESS_TOKEN ||
-                    ""
-                ).trim();
-
-            if (!accessToken) {
-
-                throw new Error(
-                    "INDSTOCKS_TOKEN is not configured."
-                );
-            }
-
-            const endMs =
-                Date.now();
-
-            const startMs =
-                endMs -
-                REQUESTED_DAYS *
-                24 *
-                60 *
-                60 *
-                1000;
-
-            const MAX_CHUNK_MS =
-                7 *
-                24 *
-                60 *
-                60 *
-                1000;
-
-            const chunks = [];
-
-            let cursor =
-                startMs;
-
-            while (
-                cursor <
-                endMs
-            ) {
-
-                const chunkEnd =
-                    Math.min(
-                        cursor +
-                        MAX_CHUNK_MS -
-                        1000,
-                        endMs
-                    );
-
-                chunks.push({
-
-                    start:
-                        cursor,
-
-                    end:
-                        chunkEnd
-                });
-
-                cursor =
-                    chunkEnd + 1000;
-            }
-
-            const all = [];
-
-            for (
-                const chunk
-                of chunks
-            ) {
-
-                const payload =
-                    await fetchHistoricalChunk(
-                        accessToken,
-                        chunk.start,
-                        chunk.end
-                    );
-
-                all.push(
-                    ...extractRows(
-                        payload
-                    )
-                );
-            }
-
-            const prepared =
-                prepareData(all);
-
-            return {
-
-                chunksRequested:
-                    chunks.length,
-
-                rawCandles:
-                    all.length,
-
-                normalizedCandles:
-                    prepared.length,
-
-                deduplicated:
-                    all.length -
-                    prepared.length,
-
-                candles:
-                    prepared
-            };
-        }
-
-        // =====================================================
-        // LOAD
-        // =====================================================
-
-        const historicalData =
-            await loadHistoricalData();
-
-        const rows =
-            historicalData.candles;
-
-        if (
-            rows.length < 500
-        ) {
-
-            return fail(
-                "Insufficient candle data from INDstocks.",
-                {
-
-                    rawCandles:
-                        historicalData.rawCandles,
-
-                    normalizedCandles:
-                        historicalData.normalizedCandles,
-
-                    minimumRequired:
-                        500
-                }
-            );
-        }
-
-        // =====================================================
-        // CURRENT CANDLE EXCLUSION
-        // =====================================================
-
-        /*
-         * The latest API candle is treated as the current
-         * candle and excluded from historical learning/OOS.
-         */
-
-        const current =
-            rows[
-                rows.length - 1
-            ];
-
-        const candles =
-            rows.slice(
-                0,
-                -1
-            );
-
-        // =====================================================
-        // WALK FORWARD
-        // =====================================================
-
-        const total =
-            candles.length;
-
-        const foldCount =
-            6;
-
-        const initialTraining =
-            250;
-
-        const remaining =
-            total -
-            initialTraining;
-
-        const testSize =
-            Math.floor(
-                remaining /
-                foldCount
-            );
-
-        const folds = [];
-
-        let trainingEnd =
-            initialTraining;
-
-        for (
-            let fold = 1;
-            fold <= foldCount;
-            fold++
-        ) {
-
-            const testStart =
-                trainingEnd;
-
-            const testEnd =
-                fold === foldCount
-                    ? total
-                    : Math.min(
-                        total,
-                        testStart +
-                        testSize
-                    );
-
-            if (
-                testStart >=
-                testEnd
-            ) {
-
-                break;
-            }
-
-            folds.push({
-
-                fold,
-
-                trainingStart:
-                    0,
-
-                trainingEnd,
-
-                testStart,
-
-                testEnd,
-
-                trainingRows:
-                    trainingEnd,
-
-                testRows:
-                    testEnd -
-                    testStart
-            });
-
-            trainingEnd =
-                testEnd;
-        }
-
-        // =====================================================
-        // EXECUTION
-        // =====================================================
-
-        const foldResults = [];
-
-        const allTrades = [];
-
-        let profitableFolds = 0;
-
-        for (
-            const fold
-            of folds
-        ) {
-
-            /*
-             * =================================================
-             * STRICT THREE-STAGE STRUCTURE
-             *
-             * TRAINING
-             *   ├── DISCOVERY
-             *   └── VALIDATION
-             *
-             * TEST
-             *   └── TRUE OOS
-             *
-             * Discovery and validation are chronologically
-             * separated.
-             * =================================================
-             */
-
-            const trainingLength =
-                fold.trainingEnd -
-                fold.trainingStart;
-
-            const validationSize =
-                Math.max(
-                    100,
-                    Math.floor(
-                        trainingLength *
-                        VALIDATION_FRACTION
-                    )
-                );
-
-            /*
-             * Prevent impossible windows.
-             */
-
-            const maximumValidation =
-                Math.max(
-                    50,
-                    trainingLength -
-                    100
-                );
-
-            const actualValidationSize =
-                Math.min(
-                    validationSize,
-                    maximumValidation
-                );
-
-            const validationStart =
-                fold.trainingEnd -
-                actualValidationSize;
-
-            const discoveryStart =
-                fold.trainingStart;
-
-            const discoveryEnd =
-                validationStart;
-
-            /*
-             * Discovery MUST end before validation begins.
-             */
-
-            const discovery =
-                discoverCandidates(
-                    candles,
-                    discoveryStart,
-                    discoveryEnd
-                );
-
-            /*
-             * Validation is completely outside discovery.
-             */
-
-            const promoted =
-                promoteCandidates(
-                    candles,
-                    discovery,
-                    discoveryStart,
-                    discoveryEnd,
-                    validationStart,
-                    fold.trainingEnd
-                );
-
-            /*
-             * Only candidates that survived internal validation
-             * are exposed to true OOS.
-             */
-
-            const selected =
-                promoted.candidates
-                    .slice(
-                        0,
-                        12
-                    );
-
-            const trades =
-                executeOOS(
-                    candles,
-                    fold.testStart,
-                    fold.testEnd,
-                    selected,
-                    fold.fold
-                );
-
-            allTrades.push(
-                ...trades
-            );
-
-            const metrics =
-                calculateMetrics(
-                    trades
-                );
-
-            if (
-                metrics.netR > 0 &&
-                metrics.expectedValueR > 0 &&
-                metrics.profitFactor > 1
-            ) {
-
-                profitableFolds++;
-            }
-
-            const independentFamilies =
-                new Set(
-                    trades.map(
-                        x =>
-                            x.family
-                    )
-                ).size;
-
-            foldResults.push({
-
-                fold:
-                    fold.fold,
-
-                trainingRows:
-                    fold.trainingRows,
-
-                discoveryRows:
-                    discoveryEnd -
-                    discoveryStart,
-
-                validationRows:
-                    fold.trainingEnd -
-                    validationStart,
-
-                testRows:
-                    fold.testRows,
-
-                discoveredFamilies:
-                    discovery.families.length,
-
-                qualifiedFamilies:
-                    discovery.families.filter(
-                        x =>
-                            x.qualified
-                    ).length,
-
-                discoveredPatterns:
-                    discovery.patterns.length,
-
-                qualifiedPatterns:
-                    discovery.patterns.filter(
-                        x =>
-                            x.qualified
-                    ).length,
-
-                validationCandidates:
-                    promoted.candidates.length,
-
-                selectedEdges:
-                    selected.length,
-
-                selectedLevels:
-                    selected.map(
-                        x =>
-                            x.level
-                    ),
-
-                selectedKeys:
-                    selected.map(
-                        x =>
-                            x.key
-                    ),
-
-                independentFamilies,
-
-                profitableFold:
-                    (
-                        metrics.netR > 0 &&
-                        metrics.expectedValueR > 0 &&
-                        metrics.profitFactor > 1
-                    ),
-
-                metrics,
-
-                tradeResults:
-                    trades.map(
-                        x =>
-                            x.resultR
-                    ),
-
-                trades
-            });
-        }
-
-        // =====================================================
-        // GLOBAL OOS
-        // =====================================================
-
-        const globalStats =
-            calculateMetrics(
-                allTrades
-            );
-
-        const patternCounts = {};
-
-        for (
-            const trade
-            of allTrades
-        ) {
-
-            patternCounts[
-                trade.pattern
-            ] =
-                (
-                    patternCounts[
-                        trade.pattern
-                    ] || 0
-                ) + 1;
-        }
-
-        const patternValues =
-            Object.values(
-                patternCounts
-            );
-
-        const maximumPatternShare =
-            allTrades.length &&
-            patternValues.length
-                ? Math.max(
-                    ...patternValues
-                ) /
-                  allTrades.length
-                : 0;
-
-        const independentFamilies =
-            new Set(
-                allTrades.map(
-                    x =>
-                        x.family
-                )
-            ).size;
-
-        const patternDiversity =
-            independentFamilies >=
-                MIN_INDEPENDENT_FAMILIES &&
-
-            maximumPatternShare <=
-                MAX_PATTERN_CONCENTRATION;
-
-        const foldValidation =
-            profitableFolds >=
-            MIN_OOS_PROFITABLE_FOLDS;
-
-        const sufficientEvidence =
-            globalStats.decisiveTrades >=
-            MIN_OOS_DECISIVE;
-
-        const profitabilityProof =
-            foldValidation &&
-
-            sufficientEvidence &&
-
-            globalStats.expectedValueR >=
-                MIN_OOS_EV &&
-
-            globalStats.profitFactor >=
-                MIN_OOS_PF &&
-
-            independentFamilies >=
-                MIN_INDEPENDENT_FAMILIES &&
-
-            patternDiversity;
-
-        const riskControl =
-            globalStats.maxDrawdownR <=
-                MAX_OOS_DRAWDOWN &&
-
-            globalStats.maxConsecutiveLosses <=
-                MAX_LOSS_STREAK;
-
-        // =====================================================
-        // BUY / SELL
-        // =====================================================
-
-        const buyStats =
-            calculateMetrics(
-                allTrades.filter(
-                    x =>
-                        x.side ===
-                        "BUY"
-                )
-            );
-
-        const sellStats =
-            calculateMetrics(
-                allTrades.filter(
-                    x =>
-                        x.side ===
-                        "SELL"
-                )
-            );
-
-        // =====================================================
-        // SETUP PERFORMANCE
-        // =====================================================
-
-        const trendFollowStats =
-            calculateMetrics(
-                allTrades.filter(
-                    x =>
-                        x.setup ===
-                        "TREND_FOLLOW"
-                )
-            );
-
-        const vwapPullbackStats =
-            calculateMetrics(
-                allTrades.filter(
-                    x =>
-                        x.setup ===
-                        "VWAP_PULLBACK"
-                )
-            );
-
-        // =====================================================
-        // CURRENT MARKET
-        // =====================================================
-
-        function currentMarket() {
-
-            const index =
-                rows.length - 1;
-
-            const f =
-                features(
-                    rows,
-                    index
-                );
-
-            if (!f) {
 
                 return {
 
-                    available:
-                        false
+                    profitable: false,
+
+                    reason:
+                        "NO_TRADES"
+                };
+            }
+
+            if (
+                metrics.maxDrawdownR >
+                MAX_OOS_DRAWDOWN
+            ) {
+
+                return {
+
+                    profitable: false,
+
+                    reason:
+                        "DRAWDOWN_LIMIT"
+                };
+            }
+
+            if (
+                metrics.maxConsecutiveLosses >
+                MAX_LOSS_STREAK
+            ) {
+
+                return {
+
+                    profitable: false,
+
+                    reason:
+                        "LOSS_STREAK_LIMIT"
+                };
+            }
+
+            if (
+                metrics.netR <= 0
+            ) {
+
+                return {
+
+                    profitable: false,
+
+                    reason:
+                        "NON_POSITIVE_NET_R"
+                };
+            }
+
+            if (
+                metrics.expectedValueR <= 0
+            ) {
+
+                return {
+
+                    profitable: false,
+
+                    reason:
+                        "NON_POSITIVE_EV"
+                };
+            }
+
+            if (
+                metrics.profitFactor <= 1
+            ) {
+
+                return {
+
+                    profitable: false,
+
+                    reason:
+                        "PF_NOT_ABOVE_ONE"
                 };
             }
 
             return {
 
-                available:
+                profitable:
                     true,
 
-                candleTimestamp:
-                    rows[index].ts,
-
-                price:
-                    round(
-                        f.close,
-                        2
-                    ),
-
-                date:
-                    istDate(
-                        rows[index].ts
-                    ),
-
-                time:
-                    getTimeBucket(
-                        rows[index].ts
-                    ),
-
-                trend:
-                    f.trend,
-
-                regime:
-                    f.regime,
-
-                rsi:
-                    round(
-                        f.rsi,
-                        2
-                    ),
-
-                vwap:
-                    round(
-                        f.vwap,
-                        2
-                    ),
-
-                vwapPosition:
-                    f.vwapDirection,
-
-                vwapDistanceATR:
-                    round(
-                        f.vwapDistanceATR,
-                        4
-                    ),
-
-                ema9:
-                    round(
-                        f.ema9,
-                        2
-                    ),
-
-                ema21:
-                    round(
-                        f.ema21,
-                        2
-                    ),
-
-                atr:
-                    round(
-                        f.atr14,
-                        2
-                    ),
-
-                trendStrength:
-                    round(
-                        f.trendStrength,
-                        4
-                    ),
-
-                emaSpreadATR:
-                    round(
-                        f.emaSpreadATR,
-                        4
-                    ),
-
-                ema9SlopeATR:
-                    round(
-                        f.ema9SlopeATR,
-                        4
-                    ),
-
-                volatility:
-                    f.volatility
+                reason:
+                    independentFamilies >=
+                        MIN_INDEPENDENT_FAMILIES
+                        ? "PASSED"
+                        : "PASSED_SINGLE_FAMILY"
             };
         }
-
-        const currentMarketData =
-            currentMarket();
-
-        // =====================================================
-        // CURRENT SIGNAL
-        // =====================================================
-
-        let currentSignal = {
-
-            status:
-                "NO_TRADE",
-
-            side:
-                null,
-
-            setup:
-                null,
-
-            reason:
-                "No V14.5 edge has passed discovery, untouched internal validation and anti-overfitting requirements.",
-
-            nextAction:
-                "WAIT"
-        };
-
-        /*
-         * IMPORTANT:
-         *
-         * Current candle is NOT added to learning.
-         *
-         * Historical learning ends at rows.length - 1.
-         *
-         * The latest completed historical candle is used to
-         * determine whether a PAPER REVIEW signal exists.
-         */
-
-        const historical =
-            rows.slice(
-                0,
-                -1
-            );
-
-        const finalDiscovery =
-            discoverCandidates(
-                historical,
-                0,
-                historical.length
-            );
-
-        /*
-         * Reserve the last 25% of historical data for
-         * untouched internal validation.
-         */
-
-        const finalTrainingLength =
-            historical.length;
-
-        const finalValidationSize =
-            Math.max(
-                100,
-                Math.floor(
-                    finalTrainingLength *
-                    VALIDATION_FRACTION
-                )
-            );
-
-        const finalMaximumValidation =
-            Math.max(
-                50,
-                finalTrainingLength -
-                100
-            );
-
-        const finalActualValidationSize =
-            Math.min(
-                finalValidationSize,
-                finalMaximumValidation
-            );
-
-        const finalValidationStart =
-            historical.length -
-            finalActualValidationSize;
-
-        /*
-         * IMPORTANT:
-         *
-         * The discovery must be rerun only on the discovery
-         * segment. We do NOT allow the final discovery snapshot
-         * above to include validation candles.
-         */
-
-        const strictFinalDiscovery =
-            discoverCandidates(
-                historical,
-                0,
-                finalValidationStart
-            );
-
-        const finalPromoted =
-            promoteCandidates(
-                historical,
-                strictFinalDiscovery,
-                0,
-                finalValidationStart,
-                finalValidationStart,
-                historical.length
-            );
-
-        const finalSelected =
-            finalPromoted.candidates
-                .slice(
-                    0,
-                    12
-                );
-
-        /*
-         * Current market/signal analysis is intentionally
-         * separate from historical learning.
-         */
-
-        const currentIndex =
-            rows.length - 1;
-
-        const currentFeatures =
-            features(
-                rows,
-                currentIndex
-            );
-
-        if (
-            currentFeatures
-        ) {
-
-            const setups =
-                detectSetups(
-                    rows,
-                    currentIndex
-                );
-
-            for (
-                const setup
-                of setups
-            ) {
-
-                const key =
-                    patternKey(
-                        setup.side,
-                        setup.setup,
-                        currentFeatures
-                    );
-
-                const family =
-                    familyKey(
-                        setup.side,
-                        setup.setup,
-                        currentFeatures.trend
-                    );
-
-                const match =
-                    finalSelected.find(
-                        x =>
-                            (
-                                x.level ===
-                                "PATTERN" &&
-                                x.key ===
-                                key
-                            ) ||
-                            (
-                                x.level ===
-                                "FAMILY" &&
-                                x.key ===
-                                family
-                            )
-                    );
-
-                const confirmation =
-                    confirmationScore(
-                        rows,
-                        currentIndex,
-                        setup.side
-                    );
-
-                if (
-                    match &&
-                    confirmation.passed
-                ) {
-
-                    currentSignal = {
-
-                        status:
-                            "SIGNAL",
-
-                        side:
-                            setup.side,
-
-                        setup:
-                            setup.setup,
-
-                        pattern:
-                            key,
-
-                        family,
-
-                        learningLevel:
-                            match.level,
-
-                        quality:
-                            match.quality,
-
-                        discoveryEV:
-                            match.expectedValueR,
-
-                        discoveryPF:
-                            match.profitFactor,
-
-                        validationEV:
-                            match.validation.metrics
-                                .expectedValueR,
-
-                        validationPF:
-                            match.validation.metrics
-                                .profitFactor,
-
-                        validationTrades:
-                            match.validation.metrics
-                                .trades,
-
-                        confirmationScore:
-                            confirmation.score,
-
-                        confirmationReasons:
-                            confirmation.reasons,
-
-                        market:
-                            currentMarketData,
-
-                        reason:
-                            "Candidate survived strict historical discovery and untouched internal validation. PAPER REVIEW ONLY.",
-
-                        nextAction:
-                            "PAPER_REVIEW_ONLY"
-                    };
-
-                    break;
-                }
-            }
-        }
-
-        // =====================================================
-        // REJECTION DIAGNOSTICS
-        // =====================================================
-
-        const rejectionDiagnostics = {
-
-            family: {
-
-                insufficientSamples:
-                    0,
-
-                insufficientDecisive:
-                    0,
-
-                insufficientStability:
-                    0,
-
-                edgeBelowThreshold:
-                    0,
-
-                recentNegative:
-                    0
-            },
-
-            pattern: {
-
-                insufficientSamples:
-                    0,
-
-                insufficientDecisive:
-                    0,
-
-                insufficientStability:
-                    0,
-
-                edgeBelowThreshold:
-                    0,
-
-                recentNegative:
-                    0,
-
-                validationFailure:
-                    0,
-
-                familyConflict:
-                    0
-            },
-
-            antiChasing: {
-
-                blockedVWAPDistance:
-                    0,
-
-                blockedEMAExtension:
-                    0,
-
-                blockedTrendExtension:
-                    0
-            }
-        };
-
-        for (
-            const family
-            of strictFinalDiscovery.families
-        ) {
-
-            if (
-                family.samples <
-                FAMILY_MIN_SAMPLES
-            ) {
-
-                rejectionDiagnostics
-                    .family
-                    .insufficientSamples++;
-            }
-
-            if (
-                family.decisiveTrades <
-                FAMILY_MIN_DECISIVE
-            ) {
-
-                rejectionDiagnostics
-                    .family
-                    .insufficientDecisive++;
-            }
-
-            if (
-                family.stableSections <
-                MIN_STABLE_SECTIONS
-            ) {
-
-                rejectionDiagnostics
-                    .family
-                    .insufficientStability++;
-            }
-
-            if (
-                family.expectedValueR <
-                FAMILY_MIN_EV ||
-                family.profitFactor <
-                FAMILY_MIN_PF
-            ) {
-
-                rejectionDiagnostics
-                    .family
-                    .edgeBelowThreshold++;
-            }
-
-            if (
-                family.recentEV < 0
-            ) {
-
-                rejectionDiagnostics
-                    .family
-                    .recentNegative++;
-            }
-        }
-
-        // =====================================================
-        // FINAL RESPONSE
-        // =====================================================
-
-        return send({
-
-            success:
-                true,
-
-            version:
-                VERSION,
-
-            status:
-                "COMPLETED",
-
-            mode:
-                "V14_5_ANTI_OVERFITTING_EDGE_SURVIVAL_TRUE_WALK_FORWARD",
-
-            paperOnly:
-                true,
-
-            realOrders:
-                false,
-
-            brokerOrderEnabled:
-                false,
-
-            brokerOrderSent:
-                false,
-
-            instrument:
-                INSTRUMENT,
-
-            scripCode:
-                SCRIP_CODE,
-
-            interval:
-                INTERVAL,
-
-            dataSource:
-                "INDSTOCKS_HISTORICAL_API",
-
-            data: {
-
-                requestedDays:
-                    REQUESTED_DAYS,
-
-                chunks:
-                    historicalData
-                        .chunksRequested,
-
-                rawCandles:
-                    historicalData
-                        .rawCandles,
-
-                finalCandles:
-                    historicalData
-                        .normalizedCandles,
-
-                deduplicated:
-                    historicalData
-                        .deduplicated,
-
-                firstCandle:
-                    rows[0],
-
-                lastCandle:
-                    rows[
-                        rows.length - 1
-                    ],
-
-                currentCandleExcluded:
-                    true
-            },
-
-            antiLeakage: {
-
-                trueWalkForward:
-                    true,
-
-                chronological:
-                    true,
-
-                shuffled:
-                    false,
-
-                currentCandleExcluded:
-                    true,
-
-                currentCandleUsedForLearning:
-                    false,
-
-                futureDataUsedForTraining:
-                    false,
-
-                futureDataUsedForSignal:
-                    false,
-
-                discoverySeparatedFromValidation:
-                    true,
-
-                validationBeforeOOS:
-                    true,
-
-                validationOutcomesCannotCrossIntoOOS:
-                    true,
-
-                discoveryOutcomesCannotCrossIntoValidation:
-                    true,
-
-                noForcedTrades:
-                    true,
-
-                overlappingPaperTrades:
-                    false,
-
-                sameCandleStopTargetBias:
-                    "STOP_FIRST"
-            },
-
-            architecture: {
-
-                version:
-                    "V14.5",
-
-                discovery:
-                    "Candidate edges are discovered only from the discovery portion of each training window.",
-
-                validation:
-                    "Candidate edges are tested on a completely untouched chronological validation segment.",
-
-                validationIsolation:
-                    "Validation trade outcomes are capped at the validation boundary and cannot enter OOS.",
-
-                discoveryIsolation:
-                    "Discovery trade outcomes are capped at the discovery boundary and cannot enter validation.",
-
-                oos:
-                    "Only candidates that survive internal validation are exposed to chronological true OOS.",
-
-                familyProtection:
-                    "Detailed patterns cannot automatically override a losing setup family.",
-
-                antiChasing:
-                    "Trend-follow entries are blocked when price or EMA structure is excessively extended.",
-
-                objective:
-                    "Prefer NO_TRADE over unsupported historical edges."
-            },
-
-            robustness: {
-
-                requestedHistoricalDays:
-                    REQUESTED_DAYS,
-
-                walkForwardFolds:
-                    folds.length,
-
-                initialTrainingRows:
-                    initialTraining,
-
-                requiredProfitableFolds:
-                    MIN_OOS_PROFITABLE_FOLDS,
-
-                actualProfitableFolds:
-                    profitableFolds,
-
-                foldValidation:
-                    foldValidation
-                        ? "PASSED"
-                        : "NOT_PASSED",
-
-                purpose:
-                    "Require an edge to survive discovery, untouched internal validation and multiple independent chronological OOS periods."
-            },
-
-            learning: {
-
-                familiesDiscovered:
-                    strictFinalDiscovery
-                        .families
-                        .length,
-
-                qualifiedFamilies:
-                    strictFinalDiscovery
-                        .families
-                        .filter(
-                            x =>
-                                x.qualified
-                        )
-                        .length,
-
-                patternsDiscovered:
-                    strictFinalDiscovery
-                        .patterns
-                        .length,
-
-                qualifiedPatterns:
-                    strictFinalDiscovery
-                        .patterns
-                        .filter(
-                            x =>
-                                x.qualified
-                        )
-                        .length,
-
-                validationSurvivors:
-                    finalPromoted
-                        .candidates
-                        .length,
-
-                selectedEdges:
-                    finalSelected.length,
-
-                familyEdges:
-                    finalPromoted
-                        .candidates
-                        .filter(
-                            x =>
-                                x.level ===
-                                "FAMILY"
-                        )
-                        .length,
-
-                detailedPatternEdges:
-                    finalPromoted
-                        .candidates
-                        .filter(
-                            x =>
-                                x.level ===
-                                "PATTERN"
-                        )
-                        .length
-            },
-
-            internalValidation: {
-
-                fraction:
-                    VALIDATION_FRACTION,
-
-                minimumSamples:
-                    VALIDATION_MIN_SAMPLES,
-
-                minimumDecisive:
-                    VALIDATION_MIN_DECISIVE,
-
-                minimumEV:
-                    VALIDATION_MIN_EV,
-
-                minimumPF:
-                    VALIDATION_MIN_PF,
-
-                maximumLossStreak:
-                    MAX_VALIDATION_LOSS_STREAK,
-
-                validationRequired:
-                    true,
-
-                validationStartIndex:
-                    finalValidationStart,
-
-                validationRows:
-                    historical.length -
-                    finalValidationStart,
-
-                discoveryRows:
-                    finalValidationStart,
-
-                leakageProtection:
-                    "STRICT_BOUNDARY",
-
-                purpose:
-                    "Prevent historically attractive patterns from immediately entering true OOS."
-            },
-
-            walkForward: {
-
-                method:
-                    "STRICT_TRUE_EXPANDING_WALK_FORWARD_WITH_ISOLATED_INTERNAL_VALIDATION",
-
-                folds:
-                    folds.length,
-
-                profitableFolds,
-
-                requiredProfitableFolds:
-                    MIN_OOS_PROFITABLE_FOLDS,
-
-                chronological:
-                    true,
-
-                shuffled:
-                    false,
-
-                results:
-                    foldResults.map(
-                        x => ({
-
-                            fold:
-                                x.fold,
-
-                            trainingRows:
-                                x.trainingRows,
-
-                            discoveryRows:
-                                x.discoveryRows,
-
-                            validationRows:
-                                x.validationRows,
-
-                            testRows:
-                                x.testRows,
-
-                            discoveredFamilies:
-                                x.discoveredFamilies,
-
-                            qualifiedFamilies:
-                                x.qualifiedFamilies,
-
-                            discoveredPatterns:
-                                x.discoveredPatterns,
-
-                            qualifiedPatterns:
-                                x.qualifiedPatterns,
-
-                            validationCandidates:
-                                x.validationCandidates,
-
-                            selectedEdges:
-                                x.selectedEdges,
-
-                            selectedLevels:
-                                x.selectedLevels,
-
-                            independentFamilies:
-                                x.independentFamilies,
-
-                            profitableFold:
-                                x.profitableFold,
-
-                            metrics:
-                                x.metrics,
-
-                            tradeResults:
-                                x.tradeResults
-                        })
-                    )
-            },
-
-            trueOOS: {
-
-                metrics:
-                    globalStats,
-
-                profitabilityProof:
-                    profitabilityProof
-                        ? "PROVEN"
-                        : "NOT_PROVEN",
-
-                riskControl:
-                    riskControl
-                        ? "PASSED"
-                        : "FAILED",
-
-                sufficientEvidence:
-                    sufficientEvidence
-                        ? "PASSED"
-                        : "INSUFFICIENT",
-
-                foldValidation:
-                    foldValidation
-                        ? "PASSED"
-                        : "FAILED",
-
-                independentFamilies,
-
-                requiredIndependentFamilies:
-                    MIN_INDEPENDENT_FAMILIES,
-
-                maximumPatternShare:
-                    round(
-                        maximumPatternShare,
-                        4
-                    ),
-
-                patternDiversity:
-                    patternDiversity
-                        ? "PASSED"
-                        : "FAILED"
-            },
-
-            buySellEvidence: {
-
-                BUY:
-                    buyStats,
-
-                SELL:
-                    sellStats
-            },
-
-            setupPerformance: {
-
-                trendFollow:
-                    trendFollowStats,
-
-                vwapPullback:
-                    vwapPullbackStats
-            },
-
-            antiChasing: {
-
-                enabled:
-                    true,
-
-                maximumTrendVWAPDistanceATR:
-                    MAX_TREND_VWAP_DISTANCE_ATR,
-
-                maximumTrendEMASpreadATR:
-                    MAX_TREND_EMA_SPREAD_ATR,
-
-                maximumTrendStrengthATR:
-                    MAX_TREND_STRENGTH_ATR,
-
-                purpose:
-                    "Prevent entries after excessive price extension."
-            },
-
-            latestLearning: {
-
-                trainingRows:
-                    historical.length,
-
-                discoveryRows:
-                    finalValidationStart,
-
-                validationRows:
-                    historical.length -
-                    finalValidationStart,
-
-                familiesDiscovered:
-                    strictFinalDiscovery
-                        .families
-                        .length,
-
-                qualifiedFamilies:
-                    strictFinalDiscovery
-                        .families
-                        .filter(
-                            x =>
-                                x.qualified
-                        )
-                        .length,
-
-                patternsDiscovered:
-                    strictFinalDiscovery
-                        .patterns
-                        .length,
-
-                qualifiedPatterns:
-                    strictFinalDiscovery
-                        .patterns
-                        .filter(
-                            x =>
-                                x.qualified
-                        )
-                        .length,
-
-                validationSurvivors:
-                    finalPromoted
-                        .candidates
-                        .length,
-
-                selectedEdges:
-                    finalSelected
-                        .map(
-                            x => ({
-
-                                key:
-                                    x.key,
-
-                                level:
-                                    x.level,
-
-                                quality:
-                                    x.quality,
-
-                                discoveryEV:
-                                    x.expectedValueR,
-
-                                discoveryPF:
-                                    x.profitFactor,
-
-                                validationEV:
-                                    x.validation.metrics
-                                        .expectedValueR,
-
-                                validationPF:
-                                    x.validation.metrics
-                                        .profitFactor,
-
-                                validationTrades:
-                                    x.validation.metrics
-                                        .trades,
-
-                                familyEV:
-                                    x.familyEvidence
-                                        ? x.familyEvidence
-                                            .expectedValueR
-                                        : null,
-
-                                familyPF:
-                                    x.familyEvidence
-                                        ? x.familyEvidence
-                                            .profitFactor
-                                        : null
-                            })
-                        ),
-
-                rejectionDiagnostics
-            },
-
-            currentMarket:
-                currentMarketData,
-
-            currentSignal,
-
-            riskPlan: {
-
-                stopR:
-                    STOP_R,
-
-                targetR:
-                    TARGET_R,
-
-                preferredTargetR:
-                    PREFERRED_TARGET_R,
-
-                riskReward:
-                    "1:2",
-
-                preferredRiskReward:
-                    "1:2.5",
-
-                maxHoldCandles:
-                    MAX_HOLD_CANDLES,
-
-                maxDrawdownR:
-                    MAX_OOS_DRAWDOWN,
-
-                maxLossStreak:
-                    MAX_LOSS_STREAK,
-
-                noStopWidening:
-                    true
-            },
-
-            paperTradeLog:
-                allTrades,
-
-            nextAction:
-                currentSignal.status ===
-                    "SIGNAL"
-                    ? "PAPER_REVIEW_ONLY"
-                    : "WAIT"
-        });
-
-    } catch (error) {
-
-        console.error(
-            "TradeMind Pro V14.5 ERROR:",
-            error
-        );
-
-        return res
-            .status(500)
-            .json({
-
-                success:
-                    false,
-
-                version:
-                    "V14.5",
-
-                status:
-                    "ERROR",
-
-                paperOnly:
-                    true,
-
-                realOrders:
-                    false,
-
-                brokerOrderEnabled:
-                    false,
-
-                brokerOrderSent:
-                    false,
-
-                error:
-                    error?.message ||
-                    String(error)
-            });
-    }
-}
+     
