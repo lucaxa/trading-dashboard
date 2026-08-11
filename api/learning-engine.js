@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V18";
+    const VERSION = "V19";
 
     try {
 
@@ -2928,7 +2928,7 @@ export default async function handler(req, res) {
                 regimeSetupPatterns
                     .filter(x =>
                         String(x.key).startsWith(`${V17_REGIME_AWARE_SIDE}|`) &&
-                        x.samples >= V17_REGIME_AWARE_MIN_SAMPLES &&
+                        x.trades >= V17_REGIME_AWARE_MIN_SAMPLES &&
                         x.decisiveTrades >= V17_REGIME_AWARE_MIN_DECISIVE &&
                         x.expectedValueR >= V17_REGIME_AWARE_MIN_EV &&
                         x.profitFactor >= V17_REGIME_AWARE_MIN_PF &&
@@ -3855,15 +3855,7 @@ export default async function handler(req, res) {
                 stableSections: x.stableSections,
                 recentEV: x.recentEV,
                 recentPF: x.recentPF,
-                genericQualified: !!x.qualified,
-                qualifiedByRegimeRules:
-                    String(x.key).startsWith(`${V17_REGIME_AWARE_SIDE}|`) &&
-                    x.samples >= V17_REGIME_AWARE_MIN_SAMPLES &&
-                    x.decisiveTrades >= V17_REGIME_AWARE_MIN_DECISIVE &&
-                    x.expectedValueR >= V17_REGIME_AWARE_MIN_EV &&
-                    x.profitFactor >= V17_REGIME_AWARE_MIN_PF &&
-                    x.stableSections >= V17_REGIME_AWARE_MIN_STABLE_SECTIONS &&
-                    x.recentEV >= 0,
+                qualified: !!x.qualified,
                 entersV17Pool: qualified.some(q => q.key === x.key)
             }));
 
@@ -5400,6 +5392,12 @@ export default async function handler(req, res) {
                         learningLevel:
                             match.level,
 
+                        matchedCandidateKey:
+                            match.key,
+
+                        matchedCandidateLevel:
+                            match.level,
+
                         quality:
                             match.quality,
 
@@ -6036,6 +6034,15 @@ export default async function handler(req, res) {
                 ...trades
             );
 
+            const v19OOSCandidateAudit =
+                buildV19SelectedCandidateOOSAudit(
+                    historicalCandles,
+                    fold.testStart,
+                    fold.testEnd,
+                    selected,
+                    trades
+                );
+
             const metrics =
                 calculateMetrics(
                     trades
@@ -6130,6 +6137,20 @@ export default async function handler(req, res) {
                         x => x.level
                     ),
 
+                selectedCandidateDetails:
+                    selected.map(x => ({
+                        key: x.key,
+                        level: x.level,
+                        direction: x.direction || null,
+                        discoveryEV: x.expectedValueR ?? null,
+                        validationEV:
+                            x.validation?.metrics?.expectedValueR ?? null,
+                        validationPF:
+                            x.validation?.metrics?.profitFactor ?? null,
+                        validationTrades:
+                            x.validation?.metrics?.trades ?? 0
+                    })),
+
                 independentFamilies,
 
                 profitableFold:
@@ -6156,13 +6177,196 @@ export default async function handler(req, res) {
 
                     diversityRejections:
                         diversified
-                            .diversityRejections
+                            .diversityRejections,
+
+                    v19SelectedCandidateOOSAudit:
+                        v19OOSCandidateAudit
                 },
 
                 trades
             });
         }
              // =====================================================
+        // V19 — SELECTED-CANDIDATE OOS LINEAGE AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. This does NOT alter candidate selection,
+        // validation, diversification, or OOS execution.
+        // It answers four separate questions for every candidate
+        // selected inside each chronological fold:
+        //   1. Was this exact candidate selected in this fold?
+        //   2. Did its exact key actually occur in the untouched OOS?
+        //   3. How many of those occurrences became executed trades?
+        //   4. What did those executed trades return?
+        //
+        // This prevents a global/final validation survivor from being
+        // incorrectly treated as if it were selected in every OOS fold.
+        // =====================================================
+
+        function buildV19SelectedCandidateOOSAudit(
+            candles,
+            testStart,
+            testEnd,
+            selected,
+            trades
+        ) {
+
+            const safeSelected =
+                safeArray(selected);
+
+            const safeTrades =
+                safeArray(trades);
+
+            return safeSelected.map(candidate => {
+
+                let rawMatchedOccurrences = 0;
+                let firstMatchedIndex = null;
+                let lastMatchedIndex = null;
+
+                for (
+                    let i = testStart;
+                    i < testEnd - 1;
+                    i++
+                ) {
+
+                    const f = features(candles, i);
+                    if (!f) continue;
+
+                    const setups = detectSetups(candles, i);
+                    if (!setups.length) continue;
+
+                    for (const setup of setups) {
+
+                        if (setup.side !== DIRECTIONAL_SIDE) {
+                            continue;
+                        }
+
+                        let matched = false;
+
+                        if (candidate.level === "PATTERN" || candidate.level === "CORE") {
+                            matched =
+                                candidate.key ===
+                                corePatternKey(
+                                    setup.side,
+                                    setup.setup,
+                                    f
+                                );
+                        } else if (candidate.level === "DIRECTIONAL") {
+                            matched =
+                                candidate.key ===
+                                patternKey(
+                                    setup.side,
+                                    setup.setup,
+                                    f
+                                );
+                        } else if (
+                            candidate.level === "CONTEXT" ||
+                            candidate.level === "ADAPTIVE_CONTEXT"
+                        ) {
+                            matched =
+                                candidate.key ===
+                                regimeContextKey(
+                                    setup.side,
+                                    setup.setup,
+                                    f
+                                );
+                        } else if (candidate.level === "REGIME_SETUP") {
+                            matched =
+                                candidate.key ===
+                                regimeSetupKey(
+                                    setup.side,
+                                    setup.setup,
+                                    f
+                                );
+                        } else if (candidate.level === "FAMILY") {
+                            matched =
+                                candidate.key ===
+                                familyKey(
+                                    setup.side,
+                                    setup.setup,
+                                    f.trend
+                                );
+                        }
+
+                        if (!matched) continue;
+
+                        rawMatchedOccurrences++;
+
+                        if (firstMatchedIndex === null) {
+                            firstMatchedIndex = i;
+                        }
+                        lastMatchedIndex = i;
+                    }
+                }
+
+                const candidateTrades =
+                    safeTrades.filter(
+                        trade =>
+                            trade.matchedCandidateKey === candidate.key &&
+                            trade.matchedCandidateLevel === candidate.level
+                    );
+
+                const wins =
+                    candidateTrades.filter(x => x.resultR > 0).length;
+
+                const losses =
+                    candidateTrades.filter(x => x.resultR < 0).length;
+
+                const timeouts =
+                    candidateTrades.filter(x => x.resultR === 0).length;
+
+                const netR =
+                    candidateTrades.reduce(
+                        (sum, x) => sum + Number(x.resultR || 0),
+                        0
+                    );
+
+                return {
+                    key: candidate.key,
+                    level: candidate.level,
+                    direction: candidate.direction || null,
+                    discoveryEV:
+                        Number.isFinite(candidate.expectedValueR)
+                            ? round(candidate.expectedValueR, 4)
+                            : null,
+                    validationEV:
+                        candidate.validation?.metrics?.expectedValueR ?? null,
+                    validationPF:
+                        candidate.validation?.metrics?.profitFactor ?? null,
+                    validationTrades:
+                        candidate.validation?.metrics?.trades ?? 0,
+                    rawMatchedOccurrences,
+                    executedTrades: candidateTrades.length,
+                    executedWins: wins,
+                    executedLosses: losses,
+                    executedTimeouts: timeouts,
+                    executedNetR: round(netR, 4),
+                    executedEV:
+                        candidateTrades.length
+                            ? round(netR / candidateTrades.length, 4)
+                            : 0,
+                    tradeResults:
+                        candidateTrades.map(x => x.resultR),
+                    firstMatchedIndex,
+                    lastMatchedIndex,
+                    firstMatchedDate:
+                        firstMatchedIndex === null
+                            ? null
+                            : istDate(candles[firstMatchedIndex].ts),
+                    lastMatchedDate:
+                        lastMatchedIndex === null
+                            ? null
+                            : istDate(candles[lastMatchedIndex].ts),
+                    status:
+                        rawMatchedOccurrences === 0
+                            ? "NO_OOS_OCCURRENCES"
+                            : candidateTrades.length === 0
+                                ? "OOS_OCCURRENCES_BUT_NO_EXECUTED_TRADES"
+                                : "OOS_EXECUTED"
+                };
+            });
+        }
+
+        // =====================================================
         // GLOBAL TRUE OOS METRICS
         // =====================================================
 
@@ -6170,6 +6374,26 @@ export default async function handler(req, res) {
             calculateMetrics(
                 allTrades
             );
+
+        // =====================================================
+        // V19 CANDIDATE LINEAGE SUMMARY
+        // =====================================================
+
+        const v19CandidateLineageAudit =
+            foldResults.map(x => ({
+                fold: x.fold,
+                testRows: x.testRows,
+                selectedCandidates:
+                    x.selectedCandidateDetails,
+                oosCandidateAudit:
+                    x.diagnostics?.v19SelectedCandidateOOSAudit || [],
+                foldNetR:
+                    x.metrics?.netR ?? 0,
+                foldProfitable:
+                    !!x.profitableFold,
+                foldQualityReason:
+                    x.foldQualityReason
+            }));
 
         // =====================================================
         // PATTERN CONCENTRATION
@@ -8201,7 +8425,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V17_REGIME_AWARE_CANDIDATE_REDESIGN_TRUE_WALK_FORWARD",
+                "V19_REGIME_SETUP_OOS_LINEAGE_AUDIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -8696,8 +8920,9 @@ export default async function handler(req, res) {
                     )
             },
 
-            trueOOS: {
+            v19CandidateLineageAudit,
 
+            trueOOS: {
                 metrics:
                     globalStats,
 
