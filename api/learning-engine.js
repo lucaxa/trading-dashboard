@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V15.6 — CANDIDATE-NATIVE PROMOTION + VALIDATION ENGINE
+ V15.7 — VALIDATION FAILURE AUDIT ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.6";
+    const VERSION = "V15.7";
 
     try {
 
@@ -4302,6 +4302,99 @@ export default async function handler(req, res) {
             };
         }
              // =====================================================
+        // V15.7 VALIDATION FAILURE AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. Does NOT change validation thresholds,
+        // candidate promotion, OOS selection, or trade execution.
+        // It exposes the exact validation failure reason and
+        // threshold margin for every validation candidate.
+        // =====================================================
+        function buildV157ValidationFailureAudit(
+            promoted
+        ) {
+
+            const results =
+                safeArray(promoted?.validationResults);
+
+            const candidates =
+                results.map(result => {
+
+                    const m = result.metrics || {};
+
+                    const failedThresholds =
+                        validationFailureReasons(m);
+
+                    return {
+                        key: result.key,
+                        level: result.level,
+                        stage: result.stage,
+                        passed: !!result.passed,
+                        primaryReason: result.primaryReason,
+                        reasons: result.reasons || [],
+                        failedThresholds,
+                        metrics: {
+                            trades: m.trades ?? 0,
+                            decisiveTrades: m.decisiveTrades ?? 0,
+                            wins: m.wins ?? 0,
+                            losses: m.losses ?? 0,
+                            timeouts: m.timeouts ?? 0,
+                            netR: m.netR ?? 0,
+                            expectedValueR: m.expectedValueR ?? 0,
+                            profitFactor: m.profitFactor ?? 0,
+                            maxConsecutiveLosses: m.maxConsecutiveLosses ?? 0
+                        },
+                        margins: {
+                            samples: (m.trades ?? 0) - VALIDATION_MIN_SAMPLES,
+                            decisive: (m.decisiveTrades ?? 0) - VALIDATION_MIN_DECISIVE,
+                            EV: round((m.expectedValueR ?? -999) - VALIDATION_MIN_EV, 4),
+                            PF: round((m.profitFactor ?? 0) - VALIDATION_MIN_PF, 4),
+                            lossStreak: MAX_VALIDATION_LOSS_STREAK - (m.maxConsecutiveLosses ?? 999)
+                        },
+                        matchedSetupOccurrences: result.matchedSetupOccurrences ?? 0,
+                        confirmationRejected: result.confirmationRejected ?? 0,
+                        cooldownRejected: result.cooldownRejected ?? 0,
+                        skippedBoundaryTrades: result.skippedBoundaryTrades ?? 0
+                    };
+                });
+
+            const reasonCounts = {};
+            const stageCounts = {};
+
+            for (const item of candidates) {
+                stageCounts[item.stage] =
+                    (stageCounts[item.stage] || 0) + 1;
+
+                for (const reason of new Set([
+                    ...item.failedThresholds,
+                    ...(item.reasons || [])
+                ])) {
+                    reasonCounts[reason] =
+                        (reasonCounts[reason] || 0) + 1;
+                }
+            }
+
+            return {
+                purpose:
+                    "Explain exactly why each validation candidate passed or failed without changing any validation, OOS, or trading rule.",
+                thresholds: {
+                    minimumSamples: VALIDATION_MIN_SAMPLES,
+                    minimumDecisive: VALIDATION_MIN_DECISIVE,
+                    minimumEV: VALIDATION_MIN_EV,
+                    minimumPF: VALIDATION_MIN_PF,
+                    maximumLossStreak: MAX_VALIDATION_LOSS_STREAK
+                },
+                auditedCandidates: candidates.length,
+                passedCandidates: candidates.filter(x => x.passed).length,
+                rejectedCandidates: candidates.filter(x => !x.passed).length,
+                stageCounts,
+                blockingReasonCounts: reasonCounts,
+                candidates,
+                guard:
+                    "Diagnostic only. V15.7 does not lower thresholds, promote failed candidates, alter true OOS selection, or place real orders."
+            };
+        }
+
+        // =====================================================
         // EDGE DIVERSITY FILTER
         // =====================================================
 
@@ -7521,7 +7614,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V15_6_CANDIDATE_NATIVE_PROMOTION_TRUE_WALK_FORWARD",
+                "V15_7_VALIDATION_FAILURE_AUDIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -7640,7 +7733,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; exit mechanics are compared diagnostically on a fixed entry set.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.7 additionally audits exact validation failure reasons and threshold margins; exit mechanics are compared diagnostically on a fixed entry set.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -7782,7 +7875,12 @@ export default async function handler(req, res) {
                     finalDiversified
                         .independentFamilies,
 
-                candidateFlow
+                candidateFlow,
+
+                v157ValidationFailureAudit:
+                    buildV157ValidationFailureAudit(
+                        finalPromoted
+                    )
             },
 
             edgeAnatomyDiagnostics: {
