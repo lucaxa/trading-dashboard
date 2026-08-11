@@ -9,6 +9,15 @@
  Mode       : PAPER ONLY
  Orders     : NONE
 
+ FIXED DATA PIPELINE
+ -------------------
+ Uses existing:
+ /api/learning-dataset
+
+ No LEARNING_DATA_URL required.
+ No DATA_URL required.
+ No new environment variable required.
+
  V13.1 improvements over V13.0
  --------------------------------
  1. Strict chronological walk-forward
@@ -27,6 +36,8 @@
 14. Explicit OOS trade accounting
 15. Current-market signal generation
 
+ PAPER ONLY
+ No real orders are placed.
 ===========================================================
 */
 
@@ -114,7 +125,9 @@ export default async function handler(req, res) {
 
         function round(x, digits = 4) {
 
-            if (!Number.isFinite(x)) return null;
+            if (!Number.isFinite(x)) {
+                return null;
+            }
 
             const p = Math.pow(10, digits);
 
@@ -131,7 +144,9 @@ export default async function handler(req, res) {
 
         function normalizeCandle(row) {
 
-            if (!row) return null;
+            if (!row) {
+                return null;
+            }
 
             const ts = n(
                 row.ts ??
@@ -140,11 +155,31 @@ export default async function handler(req, res) {
                 row.t
             );
 
-            const o = n(row.o ?? row.open);
-            const h = n(row.h ?? row.high);
-            const l = n(row.l ?? row.low);
-            const c = n(row.c ?? row.close);
-            const v = n(row.v ?? row.volume, 0);
+            const o = n(
+                row.o ??
+                row.open
+            );
+
+            const h = n(
+                row.h ??
+                row.high
+            );
+
+            const l = n(
+                row.l ??
+                row.low
+            );
+
+            const c = n(
+                row.c ??
+                row.close
+            );
+
+            const v = n(
+                row.v ??
+                row.volume,
+                0
+            );
 
             if (
                 ts === null ||
@@ -172,20 +207,49 @@ export default async function handler(req, res) {
 
         function extractRows(payload) {
 
-            if (!payload) return [];
+            if (!payload) {
+                return [];
+            }
 
             if (Array.isArray(payload)) {
                 return payload;
             }
 
+            /*
+             * Existing learning endpoint may return:
+             *
+             * {
+             *   success: true,
+             *   data: {
+             *      rows: [...]
+             *   }
+             * }
+             *
+             * Also support the other structures used
+             * elsewhere in TradeMind.
+             */
+
             const candidates = [
-                payload.data,
-                payload.candles,
-                payload.rows,
-                payload.results,
+
+                payload.data?.rows,
+
                 payload.data?.candles,
+
                 payload.data?.data,
-                payload.result?.candles
+
+                payload.rows,
+
+                payload.candles,
+
+                payload.results,
+
+                payload.result?.rows,
+
+                payload.result?.candles,
+
+                payload.result?.data,
+
+                payload.data
             ];
 
             for (const candidate of candidates) {
@@ -205,55 +269,76 @@ export default async function handler(req, res) {
         async function loadDataset() {
 
             /*
-             * V11.1 learning dataset is expected to be available
-             * through the existing project configuration.
+             * IMPORTANT:
              *
-             * Supported:
+             * V13.1 previously looked for:
              *
-             * DATA_URL
              * LEARNING_DATA_URL
-             *
-             * or direct JSON environment variable:
-             *
+             * DATA_URL
              * LEARNING_DATASET
+             *
+             * That was incorrect for this project.
+             *
+             * We use the EXISTING TradeMind learning-data
+             * endpoint instead.
+             *
+             * Existing pipeline:
+             *
+             * IndMoney / IndStocks
+             *          ↓
+             * /api/learning-dataset
+             *          ↓
+             * V11.1 learning dataset
+             *          ↓
+             * V13.1
              */
 
-            const direct =
-                process.env.LEARNING_DATASET ||
-                process.env.V11_1_LEARNING_DATASET;
+            const forwardedHost =
+                req.headers["x-forwarded-host"];
 
-            if (direct) {
+            const normalHost =
+                req.headers.host;
 
-                try {
+            const host =
+                forwardedHost ||
+                normalHost;
 
-                    const parsed = JSON.parse(direct);
-
-                    const rows = extractRows(parsed)
-                        .map(normalizeCandle)
-                        .filter(Boolean);
-
-                    if (rows.length) {
-                        return rows;
-                    }
-
-                } catch (e) {
-                    // continue to URL
-                }
-            }
-
-            const url =
-                process.env.LEARNING_DATA_URL ||
-                process.env.DATA_URL ||
-                process.env.V11_1_DATA_URL;
-
-            if (!url) {
+            if (!host) {
 
                 throw new Error(
-                    "Learning dataset not configured. Set LEARNING_DATA_URL / DATA_URL or LEARNING_DATASET."
+                    "Unable to determine current application host."
                 );
             }
 
-            const response = await fetch(url);
+            const forwardedProto =
+                req.headers["x-forwarded-proto"];
+
+            const protocol =
+                forwardedProto ||
+                "https";
+
+            const url =
+                `${protocol}://${host}` +
+                `/api/learning-dataset` +
+                `?interval=${encodeURIComponent(INTERVAL)}` +
+                `&days=${encodeURIComponent(REQUESTED_DAYS)}`;
+
+            console.log(
+                "TradeMind Pro V13.1 loading dataset:",
+                url
+            );
+
+            const response =
+                await fetch(
+                    url,
+                    {
+                        method: "GET",
+                        headers: {
+                            "Accept":
+                                "application/json"
+                        }
+                    }
+                );
 
             if (!response.ok) {
 
@@ -262,11 +347,37 @@ export default async function handler(req, res) {
                 );
             }
 
-            const payload = await response.json();
+            const payload =
+                await response.json();
 
-            return extractRows(payload)
-                .map(normalizeCandle)
-                .filter(Boolean);
+            const rawRows =
+                extractRows(payload);
+
+            if (!Array.isArray(rawRows)) {
+
+                throw new Error(
+                    "Learning dataset response does not contain a valid rows array."
+                );
+            }
+
+            const normalizedRows =
+                rawRows
+                    .map(normalizeCandle)
+                    .filter(Boolean);
+
+            if (!normalizedRows.length) {
+
+                throw new Error(
+                    "Learning dataset returned zero valid candles."
+                );
+            }
+
+            console.log(
+                "TradeMind Pro V13.1 dataset rows:",
+                normalizedRows.length
+            );
+
+            return normalizedRows;
         }
 
         // =====================================================
@@ -279,13 +390,21 @@ export default async function handler(req, res) {
 
             for (const row of rows) {
 
-                if (!row) continue;
+                if (!row) {
+                    continue;
+                }
 
-                map.set(String(row.ts), row);
+                map.set(
+                    String(row.ts),
+                    row
+                );
             }
 
             return [...map.values()]
-                .sort((a, b) => a.ts - b.ts);
+                .sort(
+                    (a, b) =>
+                        a.ts - b.ts
+                );
         }
 
         // =====================================================
@@ -294,21 +413,34 @@ export default async function handler(req, res) {
 
         function ema(values, period) {
 
-            if (values.length < period) {
+            if (
+                values.length <
+                period
+            ) {
                 return null;
             }
 
             let value = 0;
 
-            for (let i = 0; i < period; i++) {
+            for (
+                let i = 0;
+                i < period;
+                i++
+            ) {
                 value += values[i];
             }
 
             value /= period;
 
-            const multiplier = 2 / (period + 1);
+            const multiplier =
+                2 /
+                (period + 1);
 
-            for (let i = period; i < values.length; i++) {
+            for (
+                let i = period;
+                i < values.length;
+                i++
+            ) {
 
                 value =
                     (values[i] - value) *
@@ -323,35 +455,56 @@ export default async function handler(req, res) {
         // EMA SERIES
         // =====================================================
 
-        function emaSeries(values, period) {
+        function emaSeries(
+            values,
+            period
+        ) {
 
             const output =
-                new Array(values.length).fill(null);
+                new Array(
+                    values.length
+                ).fill(null);
 
-            if (values.length < period) {
+            if (
+                values.length <
+                period
+            ) {
                 return output;
             }
 
             let value = 0;
 
-            for (let i = 0; i < period; i++) {
+            for (
+                let i = 0;
+                i < period;
+                i++
+            ) {
                 value += values[i];
             }
 
             value /= period;
 
-            output[period - 1] = value;
+            output[
+                period - 1
+            ] = value;
 
-            const multiplier = 2 / (period + 1);
+            const multiplier =
+                2 /
+                (period + 1);
 
-            for (let i = period; i < values.length; i++) {
+            for (
+                let i = period;
+                i < values.length;
+                i++
+            ) {
 
                 value =
                     (values[i] - value) *
                     multiplier +
                     value;
 
-                output[i] = value;
+                output[i] =
+                    value;
             }
 
             return output;
@@ -361,47 +514,79 @@ export default async function handler(req, res) {
         // RSI
         // =====================================================
 
-        function rsi(values, period = 14) {
+        function rsi(
+            values,
+            period = 14
+        ) {
 
-            if (values.length <= period) {
+            if (
+                values.length <=
+                period
+            ) {
                 return null;
             }
 
             let gains = 0;
             let losses = 0;
 
-            for (let i = 1; i <= period; i++) {
+            for (
+                let i = 1;
+                i <= period;
+                i++
+            ) {
 
                 const diff =
-                    values[i] - values[i - 1];
+                    values[i] -
+                    values[i - 1];
 
                 if (diff >= 0) {
                     gains += diff;
                 } else {
-                    losses += Math.abs(diff);
+                    losses +=
+                        Math.abs(diff);
                 }
             }
 
-            let avgGain = gains / period;
-            let avgLoss = losses / period;
+            let avgGain =
+                gains / period;
 
-            for (let i = period + 1; i < values.length; i++) {
+            let avgLoss =
+                losses / period;
+
+            for (
+                let i = period + 1;
+                i < values.length;
+                i++
+            ) {
 
                 const diff =
-                    values[i] - values[i - 1];
+                    values[i] -
+                    values[i - 1];
 
                 const gain =
-                    diff > 0 ? diff : 0;
+                    diff > 0
+                        ? diff
+                        : 0;
 
                 const loss =
-                    diff < 0 ? Math.abs(diff) : 0;
+                    diff < 0
+                        ? Math.abs(diff)
+                        : 0;
 
                 avgGain =
-                    ((avgGain * (period - 1)) + gain) /
+                    (
+                        avgGain *
+                        (period - 1) +
+                        gain
+                    ) /
                     period;
 
                 avgLoss =
-                    ((avgLoss * (period - 1)) + loss) /
+                    (
+                        avgLoss *
+                        (period - 1) +
+                        loss
+                    ) /
                     period;
             }
 
@@ -410,53 +595,98 @@ export default async function handler(req, res) {
             }
 
             const rs =
-                avgGain / avgLoss;
+                avgGain /
+                avgLoss;
 
-            return 100 - (100 / (1 + rs));
+            return (
+                100 -
+                (
+                    100 /
+                    (1 + rs)
+                )
+            );
         }
 
         // =====================================================
         // ATR
         // =====================================================
 
-        function atr(candles, period = 14) {
+        function atr(
+            candles,
+            period = 14
+        ) {
 
-            if (candles.length <= period) {
+            if (
+                candles.length <=
+                period
+            ) {
                 return null;
             }
 
             const trs = [];
 
-            for (let i = 1; i < candles.length; i++) {
+            for (
+                let i = 1;
+                i < candles.length;
+                i++
+            ) {
 
-                const current = candles[i];
-                const previous = candles[i - 1];
+                const current =
+                    candles[i];
 
-                const tr = Math.max(
-                    current.h - current.l,
-                    Math.abs(current.h - previous.c),
-                    Math.abs(current.l - previous.c)
-                );
+                const previous =
+                    candles[i - 1];
+
+                const tr =
+                    Math.max(
+                        current.h -
+                            current.l,
+
+                        Math.abs(
+                            current.h -
+                            previous.c
+                        ),
+
+                        Math.abs(
+                            current.l -
+                            previous.c
+                        )
+                    );
 
                 trs.push(tr);
             }
 
-            if (trs.length < period) {
+            if (
+                trs.length <
+                period
+            ) {
                 return null;
             }
 
             let value = 0;
 
-            for (let i = 0; i < period; i++) {
+            for (
+                let i = 0;
+                i < period;
+                i++
+            ) {
                 value += trs[i];
             }
 
             value /= period;
 
-            for (let i = period; i < trs.length; i++) {
+            for (
+                let i = period;
+                i < trs.length;
+                i++
+            ) {
 
                 value =
-                    ((value * (period - 1)) + trs[i]) /
+                    (
+                        value *
+                        (period - 1) +
+                        trs[i]
+                    ) /
                     period;
             }
 
@@ -467,7 +697,9 @@ export default async function handler(req, res) {
         // VWAP
         // =====================================================
 
-        function calculateVWAP(candles) {
+        function calculateVWAP(
+            candles
+        ) {
 
             if (!candles.length) {
                 return null;
@@ -476,61 +708,148 @@ export default async function handler(req, res) {
             let pv = 0;
             let volume = 0;
 
-            for (const candle of candles) {
+            for (
+                const candle of candles
+            ) {
 
                 const typical =
-                    (candle.h + candle.l + candle.c) / 3;
+                    (
+                        candle.h +
+                        candle.l +
+                        candle.c
+                    ) / 3;
 
                 const vol =
-                    Math.max(0, candle.v || 0);
+                    Math.max(
+                        0,
+                        candle.v || 0
+                    );
 
-                pv += typical * vol;
+                pv +=
+                    typical * vol;
+
                 volume += vol;
             }
 
             if (volume === 0) {
-                return candles[candles.length - 1].c;
+
+                return candles[
+                    candles.length - 1
+                ].c;
             }
 
             return pv / volume;
         }
 
         // =====================================================
+        // TIME BUCKET
+        // =====================================================
+
+        function getTimeBucket(ts) {
+
+            const d =
+                new Date(
+                    ts * 1000
+                );
+
+            const hour =
+                d.getUTCHours();
+
+            const minute =
+                d.getUTCMinutes();
+
+            const mins =
+                hour * 60 +
+                minute;
+
+            if (
+                mins <
+                10 * 60
+            ) {
+                return "OPEN";
+            }
+
+            if (
+                mins <
+                12 * 60
+            ) {
+                return "MORNING";
+            }
+
+            if (
+                mins <
+                14 * 60
+            ) {
+                return "MIDDAY";
+            }
+
+            return "CLOSE";
+        }
+
+        // =====================================================
         // FEATURE ENGINE
         // =====================================================
 
-        function features(candles, index) {
+        function features(
+            candles,
+            index
+        ) {
 
             if (index < 30) {
                 return null;
             }
 
             const slice =
-                candles.slice(0, index + 1);
+                candles.slice(
+                    0,
+                    index + 1
+                );
 
             const closes =
-                slice.map(x => x.c);
+                slice.map(
+                    x => x.c
+                );
 
             const ema9 =
-                ema(closes, 9);
+                ema(
+                    closes,
+                    9
+                );
 
             const ema21 =
-                ema(closes, 21);
+                ema(
+                    closes,
+                    21
+                );
 
             const previousCloses =
-                closes.slice(0, -1);
+                closes.slice(
+                    0,
+                    -1
+                );
 
             const previousEMA9 =
-                ema(previousCloses, 9);
+                ema(
+                    previousCloses,
+                    9
+                );
 
             const rsi14 =
-                rsi(closes, 14);
+                rsi(
+                    closes,
+                    14
+                );
 
             const atr14 =
-                atr(slice, 14);
+                atr(
+                    slice,
+                    14
+                );
 
             const vwap =
-                calculateVWAP(slice);
+                calculateVWAP(
+                    slice
+                );
 
             if (
                 ema9 === null ||
@@ -550,152 +869,191 @@ export default async function handler(req, res) {
 
             const emaSpreadATR =
                 atr14 !== 0
-                    ? emaSpread / atr14
+                    ? emaSpread /
+                      atr14
                     : 0;
 
             const ema9Slope =
                 previousEMA9 === null
                     ? 0
-                    : ema9 - previousEMA9;
+                    : ema9 -
+                      previousEMA9;
 
             const ema9SlopeATR =
                 atr14 !== 0
-                    ? ema9Slope / atr14
+                    ? ema9Slope /
+                      atr14
                     : 0;
 
-            let trend = "SIDEWAYS";
+            let trend =
+                "SIDEWAYS";
 
             if (
                 ema9 > ema21 &&
                 ema9SlopeATR > 0
             ) {
-                trend = "BULLISH";
+                trend =
+                    "BULLISH";
             }
 
             if (
                 ema9 < ema21 &&
                 ema9SlopeATR < 0
             ) {
-                trend = "BEARISH";
+                trend =
+                    "BEARISH";
             }
 
-            let rsiBucket = "NEUTRAL";
+            let rsiBucket =
+                "NEUTRAL";
 
-            if (rsi14 >= 60) {
-                rsiBucket = "HIGH";
-            } else if (rsi14 >= 50) {
-                rsiBucket = "NEUTRAL_HIGH";
-            } else if (rsi14 <= 40) {
-                rsiBucket = "LOW";
-            } else if (rsi14 < 50) {
-                rsiBucket = "NEUTRAL_LOW";
+            if (
+                rsi14 >= 60
+            ) {
+                rsiBucket =
+                    "HIGH";
+            } else if (
+                rsi14 >= 50
+            ) {
+                rsiBucket =
+                    "NEUTRAL_HIGH";
+            } else if (
+                rsi14 <= 40
+            ) {
+                rsiBucket =
+                    "LOW";
+            } else if (
+                rsi14 < 50
+            ) {
+                rsiBucket =
+                    "NEUTRAL_LOW";
             }
 
-            let vwapDirection = "AT";
+            let vwapDirection =
+                "AT";
 
-            if (close > vwap) {
-                vwapDirection = "ABOVE";
-            } else if (close < vwap) {
-                vwapDirection = "BELOW";
+            if (
+                close > vwap
+            ) {
+                vwapDirection =
+                    "ABOVE";
+            } else if (
+                close < vwap
+            ) {
+                vwapDirection =
+                    "BELOW";
             }
 
             const vwapDistanceATR =
                 atr14 !== 0
-                    ? (close - vwap) / atr14
+                    ? (
+                        close -
+                        vwap
+                    ) / atr14
                     : 0;
 
             let volatility =
                 "UNKNOWN";
 
-            if (atr14 > 18) {
-                volatility = "HIGH";
-            } else if (atr14 < 8) {
-                volatility = "LOW";
+            if (
+                atr14 > 18
+            ) {
+                volatility =
+                    "HIGH";
+            } else if (
+                atr14 < 8
+            ) {
+                volatility =
+                    "LOW";
             } else {
-                volatility = "NORMAL";
+                volatility =
+                    "NORMAL";
             }
 
-            let regime = "UNKNOWN";
+            let regime =
+                "UNKNOWN";
 
             if (
-                Math.abs(emaSpreadATR) > 0.35 &&
-                Math.abs(ema9SlopeATR) > 0.08
+                Math.abs(
+                    emaSpreadATR
+                ) > 0.35 &&
+                Math.abs(
+                    ema9SlopeATR
+                ) > 0.08
             ) {
-                regime = "TRENDING";
+
+                regime =
+                    "TRENDING";
+
             } else if (
-                Math.abs(emaSpreadATR) < 0.15 &&
-                Math.abs(ema9SlopeATR) < 0.05
+                Math.abs(
+                    emaSpreadATR
+                ) < 0.15 &&
+                Math.abs(
+                    ema9SlopeATR
+                ) < 0.05
             ) {
-                regime = "RANGING";
+
+                regime =
+                    "RANGING";
+
             } else {
-                regime = "TRANSITION";
+
+                regime =
+                    "TRANSITION";
             }
 
-            let patternType = "RANGE";
+            let patternType =
+                "RANGE";
 
-            if (trend !== "SIDEWAYS") {
-                patternType = "TREND_FOLLOW";
+            if (
+                trend !==
+                "SIDEWAYS"
+            ) {
+                patternType =
+                    "TREND_FOLLOW";
             }
 
             return {
+
                 close,
+
                 ema9,
+
                 ema21,
+
                 emaSpread,
+
                 emaSpreadATR,
+
                 ema9SlopeATR,
-                rsi: rsi14,
+
+                rsi:
+                    rsi14,
+
                 rsiBucket,
+
                 atr14,
+
                 vwap,
+
                 vwapDirection,
+
                 vwapDistanceATR,
+
                 trend,
+
                 regime,
+
                 volatility,
+
                 patternType,
-                timeBucket: getTimeBucket(
-                    candles[index].ts
-                )
+
+                timeBucket:
+                    getTimeBucket(
+                        candles[index].ts
+                    )
             };
-        }
-
-        // =====================================================
-        // TIME BUCKET
-        // =====================================================
-
-        function getTimeBucket(ts) {
-
-            const d =
-                new Date(ts * 1000);
-
-            const hour =
-                d.getUTCHours();
-
-            const minute =
-                d.getUTCMinutes();
-
-            const mins =
-                hour * 60 + minute;
-
-            /*
-             * Dataset timestamps are retained exactly.
-             * This classification is intentionally coarse.
-             */
-
-            if (mins < 10 * 60) {
-                return "OPEN";
-            }
-
-            if (mins < 12 * 60) {
-                return "MORNING";
-            }
-
-            if (mins < 14 * 60) {
-                return "MIDDAY";
-            }
-
-            return "CLOSE";
         }
 
         // =====================================================
@@ -704,18 +1062,24 @@ export default async function handler(req, res) {
 
         function baseSignal(f) {
 
-            if (!f) return null;
+            if (!f) {
+                return null;
+            }
 
             if (
-                f.trend === "BULLISH" &&
-                f.vwapDirection === "ABOVE"
+                f.trend ===
+                    "BULLISH" &&
+                f.vwapDirection ===
+                    "ABOVE"
             ) {
                 return "BUY";
             }
 
             if (
-                f.trend === "BEARISH" &&
-                f.vwapDirection === "BELOW"
+                f.trend ===
+                    "BEARISH" &&
+                f.vwapDirection ===
+                    "BELOW"
             ) {
                 return "SELL";
             }
@@ -724,40 +1088,90 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // SLOPE BUCKET
+        // =====================================================
+
+        function slopeBucket(
+            slope
+        ) {
+
+            if (
+                slope > 0.08
+            ) {
+                return "STRONG";
+            }
+
+            if (
+                slope > 0.02
+            ) {
+                return "WEAK";
+            }
+
+            if (
+                slope < -0.08
+            ) {
+                return "STRONG";
+            }
+
+            if (
+                slope < -0.02
+            ) {
+                return "WEAK";
+            }
+
+            return "FLAT";
+        }
+
+        // =====================================================
         // PATTERN KEY
         // =====================================================
 
-        function patternKey(side, f) {
+        function patternKey(
+            side,
+            f
+        ) {
 
             return [
+
                 side,
+
                 `T:${f.trend}`,
+
                 `V:${f.vwapDirection}`,
+
                 `P:${f.patternType}`,
+
                 `R:${f.rsiBucket}`,
+
                 `G:${f.regime}`,
-                `S:${slopeBucket(f.ema9SlopeATR)}`,
+
+                `S:${slopeBucket(
+                    f.ema9SlopeATR
+                )}`,
+
                 `H:${f.timeBucket}`
+
             ].join("|");
         }
 
-        function familyKey(side, f) {
+        // =====================================================
+        // FAMILY KEY
+        // =====================================================
+
+        function familyKey(
+            side,
+            f
+        ) {
 
             return [
+
                 side,
+
                 `T:${f.trend}`,
+
                 `P:${f.patternType}`
+
             ].join("|");
-        }
-
-        function slopeBucket(slope) {
-
-            if (slope > 0.08) return "STRONG";
-            if (slope > 0.02) return "WEAK";
-            if (slope < -0.08) return "STRONG";
-            if (slope < -0.02) return "WEAK";
-
-            return "FLAT";
         }
 
         // =====================================================
@@ -776,94 +1190,155 @@ export default async function handler(req, res) {
             const end =
                 Math.min(
                     candles.length - 1,
-                    entryIndex + MAX_HOLD_CANDLES
+                    entryIndex +
+                        MAX_HOLD_CANDLES
                 );
 
             for (
-                let i = entryIndex + 1;
+                let i =
+                    entryIndex + 1;
                 i <= end;
                 i++
             ) {
 
-                const candle = candles[i];
+                const candle =
+                    candles[i];
 
-                if (side === "BUY") {
+                if (
+                    side === "BUY"
+                ) {
 
                     const hitStop =
-                        candle.l <= stop;
+                        candle.l <=
+                        stop;
 
                     const hitTarget =
-                        candle.h >= target;
+                        candle.h >=
+                        target;
 
-                    if (hitStop && hitTarget) {
+                    /*
+                     * STOP FIRST
+                     *
+                     * Conservative handling when
+                     * both levels appear inside
+                     * the same candle.
+                     */
+
+                    if (
+                        hitStop &&
+                        hitTarget
+                    ) {
 
                         return {
+
                             exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
+
+                            exitType:
+                                "STOP",
+
+                            resultR:
+                                -1
                         };
                     }
 
                     if (hitStop) {
 
                         return {
+
                             exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
+
+                            exitType:
+                                "STOP",
+
+                            resultR:
+                                -1
                         };
                     }
 
                     if (hitTarget) {
 
                         return {
+
                             exitIndex: i,
-                            exitType: "TARGET",
-                            resultR: 2
+
+                            exitType:
+                                "TARGET",
+
+                            resultR:
+                                2
                         };
                     }
                 }
 
-                if (side === "SELL") {
+                if (
+                    side === "SELL"
+                ) {
 
                     const hitStop =
-                        candle.h >= stop;
+                        candle.h >=
+                        stop;
 
                     const hitTarget =
-                        candle.l <= target;
+                        candle.l <=
+                        target;
 
-                    if (hitStop && hitTarget) {
+                    if (
+                        hitStop &&
+                        hitTarget
+                    ) {
 
                         return {
+
                             exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
+
+                            exitType:
+                                "STOP",
+
+                            resultR:
+                                -1
                         };
                     }
 
                     if (hitStop) {
 
                         return {
+
                             exitIndex: i,
-                            exitType: "STOP",
-                            resultR: -1
+
+                            exitType:
+                                "STOP",
+
+                            resultR:
+                                -1
                         };
                     }
 
                     if (hitTarget) {
 
                         return {
+
                             exitIndex: i,
-                            exitType: "TARGET",
-                            resultR: 2
+
+                            exitType:
+                                "TARGET",
+
+                            resultR:
+                                2
                         };
                     }
                 }
             }
 
             return {
-                exitIndex: end,
-                exitType: "TIMEOUT",
-                resultR: 0
+
+                exitIndex:
+                    end,
+
+                exitType:
+                    "TIMEOUT",
+
+                resultR:
+                    0
             };
         }
 
@@ -878,69 +1353,119 @@ export default async function handler(req, res) {
         ) {
 
             const f =
-                features(candles, index);
+                features(
+                    candles,
+                    index
+                );
 
             if (!f) {
+
                 return {
+
                     score: 0,
+
                     maxScore: 6,
+
                     passed: false
                 };
             }
 
             let score = 0;
 
-            // 1 Trend
+            // 1. Trend
             if (
-                (side === "BUY" && f.trend === "BULLISH") ||
-                (side === "SELL" && f.trend === "BEARISH")
+                (
+                    side === "BUY" &&
+                    f.trend ===
+                        "BULLISH"
+                ) ||
+                (
+                    side === "SELL" &&
+                    f.trend ===
+                        "BEARISH"
+                )
             ) {
                 score++;
             }
 
-            // 2 VWAP
+            // 2. VWAP
             if (
-                (side === "BUY" && f.vwapDirection === "ABOVE") ||
-                (side === "SELL" && f.vwapDirection === "BELOW")
+                (
+                    side === "BUY" &&
+                    f.vwapDirection ===
+                        "ABOVE"
+                ) ||
+                (
+                    side === "SELL" &&
+                    f.vwapDirection ===
+                        "BELOW"
+                )
             ) {
                 score++;
             }
 
-            // 3 EMA alignment
+            // 3. EMA alignment
             if (
-                (side === "BUY" && f.ema9 > f.ema21) ||
-                (side === "SELL" && f.ema9 < f.ema21)
+                (
+                    side === "BUY" &&
+                    f.ema9 >
+                        f.ema21
+                ) ||
+                (
+                    side === "SELL" &&
+                    f.ema9 <
+                        f.ema21
+                )
             ) {
                 score++;
             }
 
-            // 4 EMA spread
+            // 4. EMA spread
             if (
-                Math.abs(f.emaSpreadATR) >= 0.05
+                Math.abs(
+                    f.emaSpreadATR
+                ) >= 0.05
             ) {
                 score++;
             }
 
-            // 5 slope
+            // 5. Slope
             if (
-                (side === "BUY" && f.ema9SlopeATR > 0) ||
-                (side === "SELL" && f.ema9SlopeATR < 0)
+                (
+                    side === "BUY" &&
+                    f.ema9SlopeATR > 0
+                ) ||
+                (
+                    side === "SELL" &&
+                    f.ema9SlopeATR < 0
+                )
             ) {
                 score++;
             }
 
-            // 6 RSI direction
+            // 6. RSI direction
             if (
-                (side === "BUY" && f.rsi >= 50) ||
-                (side === "SELL" && f.rsi < 50)
+                (
+                    side === "BUY" &&
+                    f.rsi >= 50
+                ) ||
+                (
+                    side === "SELL" &&
+                    f.rsi < 50
+                )
             ) {
                 score++;
             }
 
             return {
+
                 score,
+
                 maxScore: 6,
-                passed: score >= ENTRY_CONFIRMATION_MIN
+
+                passed:
+                    score >=
+                    ENTRY_CONFIRMATION_MIN
             };
         }
 
@@ -954,31 +1479,45 @@ export default async function handler(req, res) {
             trainingEnd
         ) {
 
-            const patterns = new Map();
+            const patterns =
+                new Map();
 
             /*
-             * We deliberately use only candles inside the
-             * training window.
+             * ONLY training-window candles are used.
              *
-             * The outcome is calculated using subsequent
-             * candles that are ALSO inside training.
+             * Outcomes are calculated using future candles
+             * that are still inside the training window.
+             *
+             * No test candle can influence learning.
              */
 
             for (
-                let i = trainingStart + 30;
-                i < trainingEnd - MAX_HOLD_CANDLES;
+                let i =
+                    trainingStart + 30;
+
+                i <
+                    trainingEnd -
+                    MAX_HOLD_CANDLES;
+
                 i++
             ) {
 
                 const f =
-                    features(candles, i);
+                    features(
+                        candles,
+                        i
+                    );
 
-                if (!f) continue;
+                if (!f) {
+                    continue;
+                }
 
                 const side =
                     baseSignal(f);
 
-                if (!side) continue;
+                if (!side) {
+                    continue;
+                }
 
                 const confirmation =
                     confirmationScore(
@@ -987,15 +1526,23 @@ export default async function handler(req, res) {
                         side
                     );
 
-                if (!confirmation.passed) {
+                if (
+                    !confirmation.passed
+                ) {
                     continue;
                 }
 
                 const key =
-                    patternKey(side, f);
+                    patternKey(
+                        side,
+                        f
+                    );
 
                 const family =
-                    familyKey(side, f);
+                    familyKey(
+                        side,
+                        f
+                    );
 
                 const entry =
                     candles[i].c;
@@ -1003,28 +1550,39 @@ export default async function handler(req, res) {
                 const atrValue =
                     f.atr14;
 
-                if (!atrValue || atrValue <= 0) {
+                if (
+                    !atrValue ||
+                    atrValue <= 0
+                ) {
                     continue;
                 }
 
                 let stop;
                 let target;
 
-                if (side === "BUY") {
+                if (
+                    side === "BUY"
+                ) {
 
                     stop =
-                        entry - atrValue;
+                        entry -
+                        atrValue;
 
                     target =
-                        entry + 2 * atrValue;
+                        entry +
+                        2 *
+                        atrValue;
 
                 } else {
 
                     stop =
-                        entry + atrValue;
+                        entry +
+                        atrValue;
 
                     target =
-                        entry - 2 * atrValue;
+                        entry -
+                        2 *
+                        atrValue;
                 }
 
                 const result =
@@ -1037,64 +1595,121 @@ export default async function handler(req, res) {
                         target
                     );
 
-                if (!patterns.has(key)) {
+                if (
+                    !patterns.has(key)
+                ) {
 
-                    patterns.set(key, {
+                    patterns.set(
                         key,
-                        family,
-                        side,
-                        patternType: f.patternType,
-                        regime: f.regime,
-                        samples: 0,
-                        wins: 0,
-                        losses: 0,
-                        timeouts: 0,
-                        totalR: 0,
-                        results: [],
-                        foldSet: new Set(),
-                        recentResults: []
-                    });
+                        {
+
+                            key,
+
+                            family,
+
+                            side,
+
+                            patternType:
+                                f.patternType,
+
+                            regime:
+                                f.regime,
+
+                            samples: 0,
+
+                            wins: 0,
+
+                            losses: 0,
+
+                            timeouts: 0,
+
+                            totalR: 0,
+
+                            results: [],
+
+                            foldSet:
+                                new Set(),
+
+                            recentResults: []
+                        }
+                    );
                 }
 
                 const p =
-                    patterns.get(key);
+                    patterns.get(
+                        key
+                    );
 
                 p.samples++;
 
-                p.totalR += result.resultR;
+                p.totalR +=
+                    result.resultR;
 
-                p.results.push(result.resultR);
+                p.results.push(
+                    result.resultR
+                );
 
-                if (result.resultR > 0) {
+                if (
+                    result.resultR > 0
+                ) {
+
                     p.wins++;
-                } else if (result.resultR < 0) {
+
+                } else if (
+                    result.resultR < 0
+                ) {
+
                     p.losses++;
+
                 } else {
+
                     p.timeouts++;
                 }
 
                 /*
-                 * Approximate stability bucket based on
-                 * chronological thirds of training data.
+                 * Chronological stability buckets.
                  */
+
                 p.foldSet.add(
+
                     Math.floor(
-                        (i - trainingStart) /
+
+                        (
+                            i -
+                            trainingStart
+                        ) /
+
                         Math.max(
                             1,
-                            (trainingEnd - trainingStart) / 3
+
+                            (
+                                trainingEnd -
+                                trainingStart
+                            ) / 3
                         )
                     )
                 );
 
+                /*
+                 * Most recent 25% of training.
+                 */
+
                 const recentStart =
                     trainingStart +
                     Math.floor(
-                        (trainingEnd - trainingStart) *
+
+                        (
+                            trainingEnd -
+                            trainingStart
+                        ) *
+
                         0.75
                     );
 
-                if (i >= recentStart) {
+                if (
+                    i >= recentStart
+                ) {
+
                     p.recentResults.push(
                         result.resultR
                     );
@@ -1107,27 +1722,29 @@ export default async function handler(req, res) {
 
             const result = [];
 
-            for (const p of patterns.values()) {
+            for (
+                const p of patterns.values()
+            ) {
 
-                if (p.samples < 3) {
+                if (
+                    p.samples < 3
+                ) {
                     continue;
                 }
 
                 const decisive =
-                    p.wins + p.losses;
+                    p.wins +
+                    p.losses;
 
                 const winRate =
                     decisive > 0
-                        ? p.wins / decisive
-                        : 0;
-
-                const lossRate =
-                    decisive > 0
-                        ? p.losses / decisive
+                        ? p.wins /
+                          decisive
                         : 0;
 
                 const ev =
-                    p.totalR / p.samples;
+                    p.totalR /
+                    p.samples;
 
                 const grossWin =
                     p.wins * 2;
@@ -1137,7 +1754,8 @@ export default async function handler(req, res) {
 
                 const pf =
                     grossLoss > 0
-                        ? grossWin / grossLoss
+                        ? grossWin /
+                          grossLoss
                         : grossWin > 0
                             ? 999
                             : 0;
@@ -1151,7 +1769,11 @@ export default async function handler(req, res) {
                 const recentEV =
                     p.recentResults.length
                         ? p.recentResults.reduce(
-                            (a, b) => a + b,
+                            (
+                                a,
+                                b
+                            ) =>
+                                a + b,
                             0
                         ) /
                         p.recentResults.length
@@ -1160,37 +1782,54 @@ export default async function handler(req, res) {
                 const decay =
                     ev === 0
                         ? 0
-                        : (recentEV - ev) /
-                          Math.abs(ev);
+                        : (
+                            recentEV -
+                            ev
+                        ) /
+                        Math.abs(ev);
 
                 /*
-                 * Quality is intentionally conservative.
+                 * Conservative quality score.
                  */
 
                 let quality = 0;
 
-                quality += clamp(
-                    winRate * 45,
-                    0,
-                    45
-                );
-
-                quality += clamp(
-                    Math.max(ev, 0) * 20,
-                    0,
-                    20
-                );
-
-                quality += clamp(
-                    Math.max(pf - 1, 0) * 10,
-                    0,
-                    20
-                );
+                quality +=
+                    clamp(
+                        winRate * 45,
+                        0,
+                        45
+                    );
 
                 quality +=
-                    Math.min(stableFolds, 3) * 5;
+                    clamp(
+                        Math.max(
+                            ev,
+                            0
+                        ) * 20,
+                        0,
+                        20
+                    );
 
-                if (recentEV < 0) {
+                quality +=
+                    clamp(
+                        Math.max(
+                            pf - 1,
+                            0
+                        ) * 10,
+                        0,
+                        20
+                    );
+
+                quality +=
+                    Math.min(
+                        stableFolds,
+                        3
+                    ) * 5;
+
+                if (
+                    recentEV < 0
+                ) {
                     quality -= 15;
                 }
 
@@ -1201,29 +1840,91 @@ export default async function handler(req, res) {
                         100
                     );
 
+                /*
+                 * V13.1 qualification.
+                 */
+
                 const qualified =
-                    oosSamples >= MIN_OOS_SAMPLES &&
-                    stableFolds >= MIN_STABLE_FOLDS &&
-                    quality >= QUALITY_THRESHOLD &&
-                    ev >= MIN_EXPECTED_VALUE &&
-                    pf >= MIN_PROFIT_FACTOR &&
-                    decay >= -0.75 &&
+                    oosSamples >=
+                        MIN_OOS_SAMPLES &&
+
+                    stableFolds >=
+                        MIN_STABLE_FOLDS &&
+
+                    quality >=
+                        QUALITY_THRESHOLD &&
+
+                    ev >=
+                        MIN_EXPECTED_VALUE &&
+
+                    pf >=
+                        MIN_PROFIT_FACTOR &&
+
+                    decay >=
+                        -0.75 &&
+
                     decisive >= 3;
 
                 result.push({
+
                     ...p,
-                    wins: p.wins,
-                    losses: p.losses,
-                    timeouts: p.timeouts,
-                    winRate: round(winRate * 100, 2),
-                    EV: round(ev, 4),
-                    PF: round(pf, 4),
-                    expectedValueR: round(ev, 4),
-                    recentEV: round(recentEV, 4),
-                    decay: round(decay, 4),
+
+                    wins:
+                        p.wins,
+
+                    losses:
+                        p.losses,
+
+                    timeouts:
+                        p.timeouts,
+
+                    winRate:
+                        round(
+                            winRate *
+                            100,
+                            2
+                        ),
+
+                    EV:
+                        round(
+                            ev,
+                            4
+                        ),
+
+                    PF:
+                        round(
+                            pf,
+                            4
+                        ),
+
+                    expectedValueR:
+                        round(
+                            ev,
+                            4
+                        ),
+
+                    recentEV:
+                        round(
+                            recentEV,
+                            4
+                        ),
+
+                    decay:
+                        round(
+                            decay,
+                            4
+                        ),
+
                     stableFolds,
+
                     oosSamples,
-                    quality: round(quality, 2),
+
+                    quality:
+                        round(
+                            quality,
+                            2
+                        ),
+
                     qualified
                 });
             }
@@ -1235,17 +1936,28 @@ export default async function handler(req, res) {
         // DIVERSITY SELECTION
         // =====================================================
 
-        function selectPatterns(patterns) {
+        function selectPatterns(
+            patterns
+        ) {
 
             const qualified =
                 patterns
-                    .filter(p => p.qualified)
+                    .filter(
+                        p =>
+                            p.qualified
+                    )
                     .sort(
-                        (a, b) =>
-                            b.quality - a.quality
+                        (
+                            a,
+                            b
+                        ) =>
+                            b.quality -
+                            a.quality
                     );
 
-            if (!qualified.length) {
+            if (
+                !qualified.length
+            ) {
                 return [];
             }
 
@@ -1254,7 +1966,13 @@ export default async function handler(req, res) {
             const families =
                 new Set();
 
-            for (const p of qualified) {
+            /*
+             * Prefer independent families.
+             */
+
+            for (
+                const p of qualified
+            ) {
 
                 if (
                     selected.length >= 6
@@ -1262,21 +1980,25 @@ export default async function handler(req, res) {
                     break;
                 }
 
-                /*
-                 * First choose independent families.
-                 */
-
-                if (!families.has(p.family)) {
+                if (
+                    !families.has(
+                        p.family
+                    )
+                ) {
 
                     selected.push(p);
-                    families.add(p.family);
+
+                    families.add(
+                        p.family
+                    );
                 }
             }
 
             /*
-             * V13.1 is stricter than V13.0:
-             * don't allow a single family to dominate
-             * the selected model.
+             * If diversity cannot be achieved,
+             * do not manufacture another family.
+             *
+             * This is intentional.
              */
 
             if (
@@ -1293,61 +2015,108 @@ export default async function handler(req, res) {
         // CONCENTRATION
         // =====================================================
 
-        function concentration(trades) {
+        function concentration(
+            trades
+        ) {
 
-            if (!trades.length) {
+            if (
+                !trades.length
+            ) {
 
                 return {
+
                     uniquePatterns: 0,
+
                     maximumShare: 0,
+
                     patternCounts: {},
-                    concentrationPassed: false,
+
+                    concentrationPassed:
+                        false,
+
                     details: []
                 };
             }
 
             const counts = {};
 
-            for (const trade of trades) {
+            for (
+                const trade of trades
+            ) {
 
-                counts[trade.pattern] =
-                    (counts[trade.pattern] || 0) + 1;
+                counts[
+                    trade.pattern
+                ] =
+                    (
+                        counts[
+                            trade.pattern
+                        ] ||
+                        0
+                    ) + 1;
             }
 
             const uniquePatterns =
-                Object.keys(counts).length;
+                Object.keys(
+                    counts
+                ).length;
 
             const maximum =
                 Math.max(
-                    ...Object.values(counts)
+                    ...Object.values(
+                        counts
+                    )
                 );
 
             const maximumShare =
-                maximum / trades.length;
+                maximum /
+                trades.length;
 
             const details =
-                Object.entries(counts)
-                    .map(([pattern, count]) => ({
+                Object.entries(
+                    counts
+                )
+                .map(
+                    (
+                        [
+                            pattern,
+                            count
+                        ]
+                    ) => ({
+
                         pattern,
+
                         count,
+
                         share:
                             round(
                                 count /
                                 trades.length,
                                 4
                             )
-                    }));
+                    })
+                );
 
             return {
+
                 uniquePatterns,
+
                 maximumShare:
-                    round(maximumShare, 4),
-                patternCounts: counts,
+                    round(
+                        maximumShare,
+                        4
+                    ),
+
+                patternCounts:
+                    counts,
+
                 concentrationPassed:
+
                     uniquePatterns >=
-                    MIN_INDEPENDENT_PATTERNS &&
+                        MIN_INDEPENDENT_PATTERNS &&
+
                     maximumShare <=
-                    MAX_PATTERN_CONCENTRATION,
+                        MAX_PATTERN_CONCENTRATION,
+
                 details
             };
         }
@@ -1367,60 +2136,101 @@ export default async function handler(req, res) {
             const trades = [];
 
             let cooldownUntil = -1;
+
             let lastPattern = null;
-            let lastPatternIndex = -9999;
+
+            let lastPatternIndex =
+                -9999;
+
             let lastSide = null;
-            let lastSideIndex = -9999;
+
+            let lastSideIndex =
+                -9999;
 
             for (
                 let i = testStart;
-                i < testEnd - 1;
+
+                i <
+                    testEnd - 1;
+
                 i++
             ) {
 
-                if (i <= cooldownUntil) {
+                if (
+                    i <=
+                    cooldownUntil
+                ) {
                     continue;
                 }
 
                 const f =
-                    features(candles, i);
+                    features(
+                        candles,
+                        i
+                    );
 
-                if (!f) continue;
+                if (!f) {
+                    continue;
+                }
 
                 const side =
                     baseSignal(f);
 
-                if (!side) continue;
+                if (!side) {
+                    continue;
+                }
 
                 const key =
-                    patternKey(side, f);
+                    patternKey(
+                        side,
+                        f
+                    );
 
                 const selected =
                     selectedPatterns.find(
-                        p => p.key === key
+                        p =>
+                            p.key ===
+                            key
                     );
 
                 if (!selected) {
                     continue;
                 }
 
-                // Same-pattern cooldown
+                /*
+                 * Same-pattern cooldown.
+                 */
+
                 if (
-                    key === lastPattern &&
-                    i - lastPatternIndex <
-                    SAME_PATTERN_COOLDOWN
+                    key ===
+                        lastPattern &&
+
+                    i -
+                        lastPatternIndex <
+                        SAME_PATTERN_COOLDOWN
                 ) {
                     continue;
                 }
 
-                // Same-side cooldown
+                /*
+                 * Same-side cooldown.
+                 */
+
                 if (
-                    side === lastSide &&
-                    i - lastSideIndex <
-                    SAME_SIDE_COOLDOWN
+                    side ===
+                        lastSide &&
+
+                    i -
+                        lastSideIndex <
+                        SAME_SIDE_COOLDOWN
                 ) {
                     continue;
                 }
+
+                /*
+                 * Independent current-candle
+                 * confirmation.
+                 */
 
                 const confirmation =
                     confirmationScore(
@@ -1429,7 +2239,9 @@ export default async function handler(req, res) {
                         side
                     );
 
-                if (!confirmation.passed) {
+                if (
+                    !confirmation.passed
+                ) {
                     continue;
                 }
 
@@ -1447,7 +2259,9 @@ export default async function handler(req, res) {
                     f.atr14;
 
                 if (
-                    !Number.isFinite(atrValue) ||
+                    !Number.isFinite(
+                        atrValue
+                    ) ||
                     atrValue <= 0
                 ) {
                     continue;
@@ -1457,13 +2271,18 @@ export default async function handler(req, res) {
                 let target;
                 let preferredTarget;
 
-                if (side === "BUY") {
+                if (
+                    side === "BUY"
+                ) {
 
                     stop =
-                        entry - atrValue;
+                        entry -
+                        atrValue;
 
                     target =
-                        entry + 2 * atrValue;
+                        entry +
+                        2 *
+                        atrValue;
 
                     preferredTarget =
                         entry +
@@ -1473,10 +2292,13 @@ export default async function handler(req, res) {
                 } else {
 
                     stop =
-                        entry + atrValue;
+                        entry +
+                        atrValue;
 
                     target =
-                        entry - 2 * atrValue;
+                        entry -
+                        2 *
+                        atrValue;
 
                     preferredTarget =
                         entry -
@@ -1499,25 +2321,31 @@ export default async function handler(req, res) {
                     tradeNumber:
                         trades.length + 1,
 
-                    fold: foldNumber,
+                    fold:
+                        foldNumber,
 
-                    signalIndex: i,
+                    signalIndex:
+                        i,
 
                     testLocalIndex:
-                        i - testStart,
+                        i -
+                        testStart,
 
                     timestamp:
                         candles[i].ts,
 
                     side,
 
-                    pattern: key,
+                    pattern:
+                        key,
 
                     patternFamily:
                         selected.family,
 
                     patternLevel:
-                        key.split("|").length,
+                        key.split(
+                            "|"
+                        ).length,
 
                     patternType:
                         f.patternType,
@@ -1550,13 +2378,22 @@ export default async function handler(req, res) {
                         confirmation.maxScore,
 
                     entry:
-                        round(entry, 2),
+                        round(
+                            entry,
+                            2
+                        ),
 
                     stop:
-                        round(stop, 2),
+                        round(
+                            stop,
+                            2
+                        ),
 
                     target:
-                        round(target, 2),
+                        round(
+                            target,
+                            2
+                        ),
 
                     preferredTarget:
                         round(
@@ -1574,17 +2411,29 @@ export default async function handler(req, res) {
                         outcome.resultR
                 };
 
-                trades.push(trade);
+                trades.push(
+                    trade
+                );
+
+                /*
+                 * Do not allow overlapping paper trades.
+                 */
 
                 cooldownUntil =
                     outcome.exitIndex +
                     ENTRY_COOLDOWN;
 
-                lastPattern = key;
-                lastPatternIndex = i;
+                lastPattern =
+                    key;
 
-                lastSide = side;
-                lastSideIndex = i;
+                lastPatternIndex =
+                    i;
+
+                lastSide =
+                    side;
+
+                lastSideIndex =
+                    i;
             }
 
             return trades;
@@ -1594,61 +2443,87 @@ export default async function handler(req, res) {
         // STATS
         // =====================================================
 
-        function stats(trades) {
+        function stats(
+            trades
+        ) {
 
             const wins =
                 trades.filter(
-                    t => t.resultR > 0
+                    t =>
+                        t.resultR > 0
                 ).length;
 
             const losses =
                 trades.filter(
-                    t => t.resultR < 0
+                    t =>
+                        t.resultR < 0
                 ).length;
 
             const timeouts =
                 trades.filter(
-                    t => t.resultR === 0
+                    t =>
+                        t.resultR === 0
                 ).length;
 
             const decisive =
-                wins + losses;
+                wins +
+                losses;
 
             const totalWinR =
                 trades
-                    .filter(t => t.resultR > 0)
+                    .filter(
+                        t =>
+                            t.resultR > 0
+                    )
                     .reduce(
-                        (s, t) =>
-                            s + t.resultR,
+                        (
+                            s,
+                            t
+                        ) =>
+                            s +
+                            t.resultR,
                         0
                     );
 
             const totalLossR =
                 Math.abs(
                     trades
-                        .filter(t => t.resultR < 0)
+                        .filter(
+                            t =>
+                                t.resultR < 0
+                        )
                         .reduce(
-                            (s, t) =>
-                                s + t.resultR,
+                            (
+                                s,
+                                t
+                            ) =>
+                                s +
+                                t.resultR,
                             0
                         )
                 );
 
             const netR =
                 trades.reduce(
-                    (s, t) =>
-                        s + t.resultR,
+                    (
+                        s,
+                        t
+                    ) =>
+                        s +
+                        t.resultR,
                     0
                 );
 
             const ev =
                 trades.length
-                    ? netR / trades.length
+                    ? netR /
+                      trades.length
                     : 0;
 
             const pf =
                 totalLossR > 0
-                    ? totalWinR / totalLossR
+                    ? totalWinR /
+                      totalLossR
                     : totalWinR > 0
                         ? 999
                         : 0;
@@ -1660,9 +2535,12 @@ export default async function handler(req, res) {
             let lossStreak = 0;
             let maxLossStreak = 0;
 
-            for (const trade of trades) {
+            for (
+                const trade of trades
+            ) {
 
-                equity += trade.resultR;
+                equity +=
+                    trade.resultR;
 
                 peak =
                     Math.max(
@@ -1673,10 +2551,13 @@ export default async function handler(req, res) {
                 maxDD =
                     Math.max(
                         maxDD,
-                        peak - equity
+                        peak -
+                        equity
                     );
 
-                if (trade.resultR < 0) {
+                if (
+                    trade.resultR < 0
+                ) {
 
                     lossStreak++;
 
@@ -1694,7 +2575,8 @@ export default async function handler(req, res) {
 
             return {
 
-                trades: trades.length,
+                trades:
+                    trades.length,
 
                 wins,
 
@@ -1702,7 +2584,8 @@ export default async function handler(req, res) {
 
                 timeouts,
 
-                decisiveTrades: decisive,
+                decisiveTrades:
+                    decisive,
 
                 winRate:
                     decisive
@@ -1715,22 +2598,40 @@ export default async function handler(req, res) {
                         : 0,
 
                 totalWinR:
-                    round(totalWinR, 4),
+                    round(
+                        totalWinR,
+                        4
+                    ),
 
                 totalLossR:
-                    round(totalLossR, 4),
+                    round(
+                        totalLossR,
+                        4
+                    ),
 
                 netR:
-                    round(netR, 4),
+                    round(
+                        netR,
+                        4
+                    ),
 
                 expectedValueR:
-                    round(ev, 4),
+                    round(
+                        ev,
+                        4
+                    ),
 
                 profitFactor:
-                    round(pf, 4),
+                    round(
+                        pf,
+                        4
+                    ),
 
                 maxDrawdownR:
-                    round(maxDD, 4),
+                    round(
+                        maxDD,
+                        4
+                    ),
 
                 maxConsecutiveLosses:
                     maxLossStreak
@@ -1741,7 +2642,9 @@ export default async function handler(req, res) {
         // CURRENT MARKET
         // =====================================================
 
-        function currentMarket(candles) {
+        function currentMarket(
+            candles
+        ) {
 
             const index =
                 candles.length - 1;
@@ -1753,6 +2656,7 @@ export default async function handler(req, res) {
                 );
 
             if (!f) {
+
                 return {
                     available: false
                 };
@@ -1767,13 +2671,20 @@ export default async function handler(req, res) {
 
                 date:
                     new Date(
-                        candles[index].ts * 1000
+                        candles[index].ts *
+                        1000
                     )
                     .toISOString()
-                    .slice(0, 10),
+                    .slice(
+                        0,
+                        10
+                    ),
 
                 close:
-                    round(f.close, 2),
+                    round(
+                        f.close,
+                        2
+                    ),
 
                 trend:
                     f.trend,
@@ -1782,13 +2693,19 @@ export default async function handler(req, res) {
                     f.regime,
 
                 rsi:
-                    round(f.rsi, 4),
+                    round(
+                        f.rsi,
+                        4
+                    ),
 
                 rsiBucket:
                     f.rsiBucket,
 
                 vwap:
-                    round(f.vwap, 4),
+                    round(
+                        f.vwap,
+                        4
+                    ),
 
                 vwapDirection:
                     f.vwapDirection,
@@ -1800,13 +2717,22 @@ export default async function handler(req, res) {
                     ),
 
                 atr14:
-                    round(f.atr14, 4),
+                    round(
+                        f.atr14,
+                        4
+                    ),
 
                 ema9:
-                    round(f.ema9, 4),
+                    round(
+                        f.ema9,
+                        4
+                    ),
 
                 ema21:
-                    round(f.ema21, 4),
+                    round(
+                        f.ema21,
+                        4
+                    ),
 
                 emaSpreadATR:
                     round(
@@ -1839,33 +2765,52 @@ export default async function handler(req, res) {
             rows.length;
 
         rows =
-            prepareData(rows);
+            prepareData(
+                rows
+            );
 
-        if (rows.length < 300) {
+        if (
+            rows.length < 300
+        ) {
 
             return fail(
                 "Insufficient candle data.",
                 {
+
                     rawLearningRows,
+
                     normalizedRows:
                         rows.length,
-                    minimumRequired: 300
+
+                    minimumRequired:
+                        300
                 }
             );
         }
 
         /*
-         * Exclude the latest candle.
+         * CRITICAL ANTI-LEAKAGE RULE
          *
-         * This is critical because the latest candle is used
-         * only for the current-market signal.
+         * Latest candle is excluded from:
+         *
+         * - training
+         * - pattern discovery
+         * - pattern outcome calculation
+         * - OOS training
+         *
+         * It is used only for current-market analysis.
          */
 
         const historical =
-            rows.slice(0, -1);
+            rows.slice(
+                0,
+                -1
+            );
 
         const current =
-            rows[rows.length - 1];
+            rows[
+                rows.length - 1
+            ];
 
         const candles =
             historical;
@@ -1881,7 +2826,10 @@ export default async function handler(req, res) {
 
         const testSize =
             Math.floor(
-                (total - 200) /
+                (
+                    total -
+                    200
+                ) /
                 foldCount
             );
 
@@ -1900,7 +2848,9 @@ export default async function handler(req, res) {
 
             const testEnd =
                 fold === foldCount
+
                     ? total
+
                     : Math.min(
                         total,
                         testStart +
@@ -1908,19 +2858,28 @@ export default async function handler(req, res) {
                     );
 
             if (
-                testStart >= testEnd
+                testStart >=
+                testEnd
             ) {
                 break;
             }
 
             folds.push({
+
                 fold,
-                trainingStart: 0,
+
+                trainingStart:
+                    0,
+
                 trainingEnd,
+
                 testStart,
+
                 testEnd,
+
                 trainingRows:
                     trainingEnd,
+
                 testRows:
                     testEnd -
                     testStart
@@ -1938,7 +2897,9 @@ export default async function handler(req, res) {
 
         const allTrades = [];
 
-        for (const fold of folds) {
+        for (
+            const fold of folds
+        ) {
 
             const learned =
                 learnPatterns(
@@ -1949,7 +2910,8 @@ export default async function handler(req, res) {
 
             const robustPatterns =
                 learned.filter(
-                    p => p.qualified
+                    p =>
+                        p.qualified
                 );
 
             const selectedPatterns =
@@ -1957,18 +2919,11 @@ export default async function handler(req, res) {
                     learned
                 );
 
-            /*
-             * Important V13.1 rule:
-             *
-             * At least two independent families are
-             * preferred, but we do NOT manufacture
-             * trades simply to satisfy diversity.
-             */
-
             const selectedFamilies =
                 new Set(
                     selectedPatterns.map(
-                        p => p.family
+                        p =>
+                            p.family
                     )
                 );
 
@@ -1988,10 +2943,14 @@ export default async function handler(req, res) {
             );
 
             const s =
-                stats(trades);
+                stats(
+                    trades
+                );
 
             const conc =
-                concentration(trades);
+                concentration(
+                    trades
+                );
 
             foldResults.push({
 
@@ -2015,14 +2974,14 @@ export default async function handler(req, res) {
 
                 selectedPatternKeys:
                     selectedPatterns.map(
-                        p => p.key
+                        p =>
+                            p.key
                     ),
 
                 independentFamilies:
                     selectedFamilies.size,
 
-                trades:
-                    trades,
+                trades,
 
                 ...s,
 
@@ -2031,7 +2990,8 @@ export default async function handler(req, res) {
 
                 tradeResults:
                     trades.map(
-                        t => t.resultR
+                        t =>
+                            t.resultR
                     )
             });
         }
@@ -2041,26 +3001,35 @@ export default async function handler(req, res) {
         // =====================================================
 
         const globalStats =
-            stats(allTrades);
+            stats(
+                allTrades
+            );
 
         const globalConcentration =
-            concentration(allTrades);
+            concentration(
+                allTrades
+            );
 
         const independentFamilies =
             new Set(
                 allTrades.map(
-                    t => t.patternFamily
+                    t =>
+                        t.patternFamily
                 )
             ).size;
 
         const profitabilityProof =
             globalStats.expectedValueR >=
-            MIN_EXPECTED_VALUE &&
+                MIN_EXPECTED_VALUE &&
+
             globalStats.profitFactor >=
-            MIN_PROFIT_FACTOR &&
+                MIN_PROFIT_FACTOR &&
+
             globalStats.decisiveTrades >=
-            5 &&
-            globalConcentration.concentrationPassed;
+                5 &&
+
+            globalConcentration
+                .concentrationPassed;
 
         // =====================================================
         // RISK CONTROL
@@ -2068,17 +3037,29 @@ export default async function handler(req, res) {
 
         const riskControl =
             globalStats.maxDrawdownR <=
-            MAX_OOS_DRAWDOWN &&
+                MAX_OOS_DRAWDOWN &&
+
             globalStats.maxConsecutiveLosses <=
-            MAX_PATTERN_LOSS_STREAK;
+                MAX_PATTERN_LOSS_STREAK;
+
+        // =====================================================
+        // EVIDENCE
+        // =====================================================
 
         const sufficientEvidence =
-            globalStats.decisiveTrades >= 5;
+            globalStats.decisiveTrades >=
+            5;
+
+        // =====================================================
+        // PATTERN DIVERSITY
+        // =====================================================
 
         const patternDiversity =
             independentFamilies >=
                 MIN_INDEPENDENT_PATTERNS &&
-            globalConcentration.maximumShare <=
+
+            globalConcentration
+                .maximumShare <=
                 MAX_PATTERN_CONCENTRATION;
 
         // =====================================================
@@ -2091,17 +3072,26 @@ export default async function handler(req, res) {
             );
 
         let currentSignal = {
-            status: "NO_TRADE",
-            side: null,
-            market: currentMarketData,
+
+            status:
+                "NO_TRADE",
+
+            side:
+                null,
+
+            market:
+                currentMarketData,
+
             reason:
                 "Current market does not satisfy the directional signal.",
-            nextAction: "WAIT"
+
+            nextAction:
+                "WAIT"
         };
 
         /*
-         * Build current signal using ALL historical data,
-         * while NEVER using the current candle's outcome.
+         * Current signal uses the latest candle's
+         * indicators but does NOT use its outcome.
          */
 
         const currentF =
@@ -2113,7 +3103,9 @@ export default async function handler(req, res) {
         if (currentF) {
 
             const currentSide =
-                baseSignal(currentF);
+                baseSignal(
+                    currentF
+                );
 
             if (currentSide) {
 
@@ -2124,11 +3116,15 @@ export default async function handler(req, res) {
                     );
 
                 /*
-                 * Learn only from historical candles.
+                 * Train only on historical candles.
                  */
+
                 const finalPatterns =
                     learnPatterns(
-                        rows.slice(0, -1),
+                        rows.slice(
+                            0,
+                            -1
+                        ),
                         0,
                         rows.length - 1
                     );
@@ -2159,7 +3155,8 @@ export default async function handler(req, res) {
 
                     currentSignal = {
 
-                        status: "SIGNAL",
+                        status:
+                            "SIGNAL",
 
                         side:
                             currentSide,
@@ -2208,9 +3205,11 @@ export default async function handler(req, res) {
 
                     currentSignal = {
 
-                        status: "NO_TRADE",
+                        status:
+                            "NO_TRADE",
 
-                        side: null,
+                        side:
+                            null,
 
                         market:
                             currentMarketData,
@@ -2243,17 +3242,22 @@ export default async function handler(req, res) {
 
         const latestQualified =
             latestLearning.filter(
-                p => p.qualified
+                p =>
+                    p.qualified
             );
 
         const latestBuy =
             latestQualified.filter(
-                p => p.side === "BUY"
+                p =>
+                    p.side ===
+                    "BUY"
             );
 
         const latestSell =
             latestQualified.filter(
-                p => p.side === "SELL"
+                p =>
+                    p.side ===
+                    "SELL"
             );
 
         // =====================================================
@@ -2264,20 +3268,26 @@ export default async function handler(req, res) {
 
             success: true,
 
-            version: VERSION,
+            version:
+                VERSION,
 
-            status: "COMPLETED",
+            status:
+                "COMPLETED",
 
             mode:
                 "V13_1_REGIME_ADAPTIVE_EDGE_VALIDATION_TRUE_WALK_FORWARD",
 
-            paperOnly: true,
+            paperOnly:
+                true,
 
-            realOrders: false,
+            realOrders:
+                false,
 
-            brokerOrderEnabled: false,
+            brokerOrderEnabled:
+                false,
 
-            brokerOrderSent: false,
+            brokerOrderSent:
+                false,
 
             instrument:
                 INSTRUMENT,
@@ -2293,39 +3303,56 @@ export default async function handler(req, res) {
 
             antiLeakage: {
 
-                enabled: true,
+                enabled:
+                    true,
 
-                chronological: true,
+                chronological:
+                    true,
 
-                shuffled: false,
+                shuffled:
+                    false,
 
-                currentCandleExcluded: true,
+                currentCandleExcluded:
+                    true,
 
-                currentCandleOutcomeUsed: false,
+                currentCandleOutcomeUsed:
+                    false,
 
-                currentCandleUsedForLearning: false,
+                currentCandleUsedForLearning:
+                    false,
 
-                testDataUsedForTraining: false,
+                testDataUsedForTraining:
+                    false,
 
-                futureDataUsedForPatternDiscovery: false,
+                futureDataUsedForPatternDiscovery:
+                    false,
 
-                futureDataUsedForCurrentSignal: false,
+                futureDataUsedForCurrentSignal:
+                    false,
 
-                signalConditionedLearning: true,
+                signalConditionedLearning:
+                    true,
 
-                signalConditionedOOS: true,
+                signalConditionedOOS:
+                    true,
 
-                entryConfirmation: true,
+                entryConfirmation:
+                    true,
 
-                regimeValidation: true,
+                regimeValidation:
+                    true,
 
-                decayValidation: true,
+                decayValidation:
+                    true,
 
-                patternCircuitBreaker: true,
+                patternCircuitBreaker:
+                    true,
 
-                patternConcentrationControl: true,
+                patternConcentrationControl:
+                    true,
 
-                overlappingPaperTrades: false,
+                overlappingPaperTrades:
+                    false,
 
                 sameCandleStopTargetBias:
                     "STOP_FIRST"
@@ -2342,7 +3369,8 @@ export default async function handler(req, res) {
                 tertiary:
                     "VALIDATE_REGIME_STABLE_EDGES",
 
-                allowNoTrade: true,
+                allowNoTrade:
+                    true,
 
                 minimumOOSExpectedValueR:
                     MIN_EXPECTED_VALUE,
@@ -2381,7 +3409,8 @@ export default async function handler(req, res) {
                 historicalLearningRows:
                     historical.length,
 
-                currentCandleExcluded: 1,
+                currentCandleExcluded:
+                    1,
 
                 candlesTested:
                     candles.length,
@@ -2391,14 +3420,19 @@ export default async function handler(req, res) {
                         candles.map(
                             c =>
                                 new Date(
-                                    c.ts * 1000
+                                    c.ts *
+                                    1000
                                 )
                                 .toISOString()
-                                .slice(0, 10)
+                                .slice(
+                                    0,
+                                    10
+                                )
                         )
                     ).size,
 
-                invalidRows: 0,
+                invalidRows:
+                    0,
 
                 latestTimestamp:
                     current.ts,
@@ -2415,17 +3449,23 @@ export default async function handler(req, res) {
                 foldCount:
                     folds.length,
 
-                chronological: true,
+                chronological:
+                    true,
 
-                shuffled: false,
+                shuffled:
+                    false,
 
-                signalConditioned: true,
+                signalConditioned:
+                    true,
 
-                entryConfirmed: true,
+                entryConfirmed:
+                    true,
 
-                regimeAdaptive: true,
+                regimeAdaptive:
+                    true,
 
-                decayAware: true,
+                decayAware:
+                    true,
 
                 folds
             },
@@ -2495,15 +3535,19 @@ export default async function handler(req, res) {
                 independentFamilies:
                     new Set(
                         latestQualified.map(
-                            p => p.family
+                            p =>
+                                p.family
                         )
                     ).size,
 
-                signalConditioned: true,
+                signalConditioned:
+                    true,
 
-                regimeAdaptive: true,
+                regimeAdaptive:
+                    true,
 
-                decayAware: true,
+                decayAware:
+                    true,
 
                 patternTypes: {
 
@@ -2514,13 +3558,49 @@ export default async function handler(req, res) {
                                 "TREND_FOLLOW"
                         ).length,
 
-                    reversal: 0,
+                    reversal:
+                        0,
 
                     range:
                         latestQualified.filter(
                             p =>
                                 p.patternType ===
                                 "RANGE"
+                        ).length
+                },
+
+                levels: {
+
+                    level1:
+                        latestQualified.filter(
+                            p =>
+                                p.key.split(
+                                    "|"
+                                ).length <= 5
+                        ).length,
+
+                    level2:
+                        latestQualified.filter(
+                            p =>
+                                p.key.split(
+                                    "|"
+                                ).length === 6
+                        ).length,
+
+                    level3:
+                        latestQualified.filter(
+                            p =>
+                                p.key.split(
+                                    "|"
+                                ).length === 7
+                        ).length,
+
+                    level4:
+                        latestQualified.filter(
+                            p =>
+                                p.key.split(
+                                    "|"
+                                ).length >= 8
                         ).length
                 }
             },
@@ -2529,15 +3609,20 @@ export default async function handler(req, res) {
 
                 regimeValidation: {
 
-                    enabled: true,
+                    enabled:
+                        true,
 
-                    minimumSamples: 3,
+                    minimumSamples:
+                        3,
 
-                    minimumDecisiveTrades: 2,
+                    minimumDecisiveTrades:
+                        2,
 
-                    minimumEV: 0.05,
+                    minimumEV:
+                        0.05,
 
-                    minimumPF: 1.05,
+                    minimumPF:
+                        1.05,
 
                     maximumNegativeRegimeShare:
                         0.5
@@ -2545,7 +3630,8 @@ export default async function handler(req, res) {
 
                 decayDetection: {
 
-                    enabled: true,
+                    enabled:
+                        true,
 
                     recentWindowFraction:
                         0.25,
@@ -2605,7 +3691,8 @@ export default async function handler(req, res) {
                 maxHoldCandles:
                     MAX_HOLD_CANDLES,
 
-                noStopWidening: true,
+                noStopWidening:
+                    true,
 
                 maxOOSDrawdownR:
                     MAX_OOS_DRAWDOWN,
@@ -2628,14 +3715,18 @@ export default async function handler(req, res) {
 
             paperAction:
                 currentSignal.status ===
-                "SIGNAL"
+                    "SIGNAL"
+
                     ? "PAPER_REVIEW_ONLY"
+
                     : "NO_TRADE",
 
             nextAction:
                 currentSignal.status ===
-                "SIGNAL"
+                    "SIGNAL"
+
                     ? "WAIT_FOR_NEXT_CONFIRMED_CANDLE"
+
                     : "WAIT"
         });
 
@@ -2648,19 +3739,26 @@ export default async function handler(req, res) {
 
         return res.status(500).json({
 
-            success: false,
+            success:
+                false,
 
-            version: "V13.1",
+            version:
+                "V13.1",
 
-            status: "ERROR",
+            status:
+                "ERROR",
 
-            paperOnly: true,
+            paperOnly:
+                true,
 
-            realOrders: false,
+            realOrders:
+                false,
 
-            brokerOrderEnabled: false,
+            brokerOrderEnabled:
+                false,
 
-            brokerOrderSent: false,
+            brokerOrderSent:
+                false,
 
             error:
                 error?.message ||
