@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.11 — EDGE ANATOMY DIAGNOSTIC ENGINE
+ V14.12 — REGIME CONTEXT EDGE DIAGNOSTIC ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,7 +12,7 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.11 PURPOSE
+ V14.12 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.11";
+    const VERSION = "V14.12";
 
     try {
 
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
 
-        // V14.11 DIRECTION-AWARE DISCOVERY
+        // V14.12 REGIME-CONTEXT DISCOVERY
         // Only SELL-side detailed edges are eligible for this
         // additional discovery lane. The candidate must still
         // independently satisfy the existing PATTERN thresholds
@@ -120,6 +120,19 @@ export default async function handler(req, res) {
         const DIRECTIONAL_SIDE = "SELL";
         const DIRECTIONAL_MIN_FAMILY_EV = FAMILY_MIN_EV;
         const DIRECTIONAL_MIN_FAMILY_PF = FAMILY_MIN_PF;
+
+        // V14.12 REGIME-CONTEXT DISCOVERY
+        // Aggregate SELL evidence across RSI buckets while keeping
+        // setup + trend + VWAP direction + regime + time bucket.
+        // The existing PATTERN evidence floor remains unchanged.
+        const CONTEXT_SIDE = "SELL";
+        const CONTEXT_MIN_SAMPLES = PATTERN_MIN_SAMPLES;
+        const CONTEXT_MIN_DECISIVE = PATTERN_MIN_DECISIVE;
+        const CONTEXT_MIN_STABLE_SECTIONS = MIN_STABLE_SECTIONS;
+        const CONTEXT_MIN_EV = PATTERN_MIN_EV;
+        const CONTEXT_MIN_PF = PATTERN_MIN_PF;
+        const CONTEXT_MIN_FAMILY_EV = FAMILY_MIN_EV;
+        const CONTEXT_MIN_FAMILY_PF = FAMILY_MIN_PF;
 
         // V14.9 CORE EDGE THRESHOLDS (UNCHANGED)
         // Core edges aggregate detailed context variants and
@@ -1532,6 +1545,25 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
+        // V14.12 REGIME-CONTEXT KEY
+        // RSI is intentionally excluded so nearby RSI buckets do not
+        // fragment the same time/regime edge into tiny samples.
+        function regimeContextKey(
+            side,
+            setup,
+            f
+        ) {
+
+            return [
+                side,
+                `S:${setup}`,
+                `T:${f.trend}`,
+                `V:${f.vwapDirection}`,
+                `G:${f.regime}`,
+                `H:${f.timeBucket}`
+            ].join("|");
+        }
+
         // =====================================================
         // TRADE EVALUATION
         // =====================================================
@@ -1802,6 +1834,13 @@ export default async function handler(req, res) {
 
                 corePattern:
                     corePatternKey(
+                        side,
+                        setup,
+                        f
+                    ),
+
+                regimeContext:
+                    regimeContextKey(
                         side,
                         setup,
                         f
@@ -2115,6 +2154,9 @@ export default async function handler(req, res) {
             const corePatternMap =
                 new Map();
 
+            const contextMap =
+                new Map();
+
             const rawRecords = [];
 
             const stop =
@@ -2202,6 +2244,21 @@ export default async function handler(req, res) {
 
                     corePatternMap
                         .get(record.corePattern)
+                        .push(record);
+
+                    if (
+                        !contextMap.has(
+                            record.regimeContext
+                        )
+                    ) {
+                        contextMap.set(
+                            record.regimeContext,
+                            []
+                        );
+                    }
+
+                    contextMap
+                        .get(record.regimeContext)
                         .push(record);
                 }
             }
@@ -2508,6 +2565,36 @@ export default async function handler(req, res) {
                 );
             }
 
+            const contextPatterns = [];
+
+            for (
+                const [
+                    key,
+                    records
+                ] of contextMap
+            ) {
+
+                const summary =
+                    summarize(
+                        key,
+                        records,
+                        "CONTEXT"
+                    );
+
+                summary.contextVariants =
+                    new Set(
+                        records.map(
+                            x => x.pattern
+                        )
+                    ).size;
+
+                summary.direction = CONTEXT_SIDE;
+
+                contextPatterns.push(
+                    summary
+                );
+            }
+
             const directionalPatterns =
                 patterns
                     .filter(x =>
@@ -2521,6 +2608,25 @@ export default async function handler(req, res) {
                         direction: DIRECTIONAL_SIDE
                     }));
 
+            const qualifiedContextPatterns =
+                contextPatterns
+                    .filter(x =>
+                        String(x.key).startsWith(
+                            `${CONTEXT_SIDE}|`
+                        ) &&
+                        x.trades >= CONTEXT_MIN_SAMPLES &&
+                        x.decisiveTrades >= CONTEXT_MIN_DECISIVE &&
+                        x.expectedValueR >= CONTEXT_MIN_EV &&
+                        x.profitFactor >= CONTEXT_MIN_PF &&
+                        x.profitableSections >= CONTEXT_MIN_STABLE_SECTIONS &&
+                        x.recentEV >= 0
+                    )
+                    .map(x => ({
+                        ...x,
+                        level: "CONTEXT",
+                        direction: CONTEXT_SIDE
+                    }));
+
             return {
 
                 families,
@@ -2530,6 +2636,10 @@ export default async function handler(req, res) {
                 corePatterns,
 
                 directionalPatterns,
+
+                contextPatterns,
+
+                qualifiedContextPatterns,
 
                 rawRecords
             };
@@ -2749,7 +2859,13 @@ export default async function handler(req, res) {
                             ? currentFamily === candidate.key
                             : candidate.level === "DIRECTIONAL"
                                 ? detailedPattern === candidate.key
-                                : key === candidate.key;
+                                : candidate.level === "CONTEXT"
+                                    ? regimeContextKey(
+                                        setup.side,
+                                        setup.setup,
+                                        f
+                                    ) === candidate.key
+                                    : key === candidate.key;
 
                     if (!matched) {
                         continue;
@@ -3043,11 +3159,17 @@ export default async function handler(req, res) {
                     discovery.directionalPatterns
                 );
 
+            const qualifiedContext =
+                safeArray(
+                    discovery.qualifiedContextPatterns
+                );
+
             const qualified =
                 [
                     ...qualifiedFamilies,
                     ...qualifiedCoreEdges,
-                    ...qualifiedDirectional
+                    ...qualifiedDirectional,
+                    ...qualifiedContext
                 ];
 
             for (const candidate of qualified) {
@@ -3077,6 +3199,38 @@ export default async function handler(req, res) {
                  * positive enough to avoid promoting a detailed
                  * edge out of an outright losing family.
                  */
+                if (candidate.level === "CONTEXT") {
+
+                    if (!family) {
+                        candidatesRejectedBeforeValidation.push({
+                            key: candidate.key,
+                            level: candidate.level,
+                            stage: "PRE_VALIDATION",
+                            reason: "FAMILY_RESOLUTION_FAILED",
+                            familyKey: familyKeyValue
+                        });
+                        continue;
+                    }
+
+                    if (
+                        family.expectedValueR <
+                            CONTEXT_MIN_FAMILY_EV ||
+                        family.profitFactor <
+                            CONTEXT_MIN_FAMILY_PF
+                    ) {
+                        candidatesRejectedBeforeValidation.push({
+                            key: candidate.key,
+                            level: candidate.level,
+                            stage: "PRE_VALIDATION",
+                            reason: "CONTEXT_FAMILY_EDGE_TOO_WEAK",
+                            familyKey: familyKeyValue,
+                            familyEV: family.expectedValueR,
+                            familyPF: family.profitFactor
+                        });
+                        continue;
+                    }
+                }
+
                 if (candidate.level === "DIRECTIONAL") {
 
                     if (!family) {
@@ -3436,6 +3590,9 @@ export default async function handler(req, res) {
 
                     qualifiedDirectional:
                         qualifiedDirectional.length,
+
+                    qualifiedContext:
+                        qualifiedContext.length,
 
                     totalQualified:
                         qualified.length,
@@ -5144,7 +5301,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.11 edge has survived direction-aware discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
+                "No V14.12 edge has survived regime-context discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -5210,6 +5367,21 @@ export default async function handler(req, res) {
                                 return (
                                     candidate.key ===
                                     key
+                                );
+                            }
+
+                            if (
+                                candidate.level ===
+                                "CONTEXT"
+                            ) {
+
+                                return (
+                                    candidate.key ===
+                                    regimeContextKey(
+                                        setup.side,
+                                        setup.setup,
+                                        currentFeatures
+                                    )
                                 );
                             }
 
@@ -5656,7 +5828,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_11_DIRECTION_AWARE_EDGE_DISCOVERY_TRUE_WALK_FORWARD",
+                "V14_12_REGIME_CONTEXT_EDGE_DISCOVERY_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -5843,6 +6015,16 @@ export default async function handler(req, res) {
                         .patterns
                         .length,
 
+                contextPatternsDiscovered:
+                    finalDiscovery
+                        .contextPatterns
+                        .length,
+
+                qualifiedContextPatterns:
+                    finalDiscovery
+                        .qualifiedContextPatterns
+                        .length,
+
                 rawLearningRecords:
                     edgeAnatomy.rawLearningRecords,
 
@@ -5884,6 +6066,13 @@ export default async function handler(req, res) {
                         x =>
                             x.level ===
                             "PATTERN"
+                    ).length,
+
+                contextEdges:
+                    finalSelected.filter(
+                        x =>
+                            x.level ===
+                            "CONTEXT"
                     ).length,
 
                 independentSelectedFamilies:
