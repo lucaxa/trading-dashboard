@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V15.8 — VALIDATION OCCURRENCE AUDIT ENGINE
+ V15.9 — CONTEXT VARIANT INVESTIGATION ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.8";
+    const VERSION = "V15.9";
 
     try {
 
@@ -4401,14 +4401,14 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // V15.8 VALIDATION OCCURRENCE AUDIT
+        // V15.9 VALIDATION OCCURRENCE AUDIT
         // -----------------------------------------------------
         // Diagnostic + correctness fix for adaptive-context
         // validation. V15.7 used corePatternKey() for the final
         // ADAPTIVE_CONTEXT match even though adaptive candidates
         // are regime-context keys. That could produce a validation
         // candidate with zero matched occurrences.
-        // V15.8 matches ADAPTIVE_CONTEXT against regimeContextKey()
+        // V15.9 matches ADAPTIVE_CONTEXT against regimeContextKey()
         // and exposes the occurrence funnel before confirmation,
         // cooldown and exit evaluation.
         // =====================================================
@@ -4524,7 +4524,201 @@ export default async function handler(req, res) {
                             ? "NO_REGIME_CONTEXT_KEY_MATCHES"
                             : "OCCURRENCES_FOUND",
                 guard:
-                    "V15.8 preserves validation thresholds and OOS rules. Adaptive-context candidates are matched using their regime-context identity."
+                    "V15.9 preserves validation thresholds and OOS rules. Adaptive-context candidates are matched using their regime-context identity."
+            };
+        }
+
+        // =====================================================
+        // V15.9 CONTEXT-VARIANT INVESTIGATION
+        // -----------------------------------------------------
+        // Diagnostic only. Every discovered regime-context variant
+        // is inspected independently so we can see which contexts
+        // have enough historical evidence, which remain adaptive,
+        // and whether the same context actually occurs inside the
+        // untouched validation window. Nothing here promotes a
+        // candidate, changes thresholds, or creates trades.
+        // =====================================================
+        function buildV159ContextVariantInvestigation(
+            candles,
+            contextPatterns,
+            validationStart,
+            validationEnd
+        ) {
+
+            const variants = safeArray(contextPatterns).map(candidate => {
+
+                const candidateKey = String(candidate?.key || "");
+                const candidateSide = candidateKey.split("|")[0] || null;
+                const setupToken = candidateKey.match(/\|S:([^|]+)/);
+                const trendToken = candidateKey.match(/\|T:([^|]+)/);
+                const vwapToken = candidateKey.match(/\|V:([^|]+)/);
+                const regimeToken = candidateKey.match(/\|G:([^|]+)/);
+                const timeToken = candidateKey.match(/\|H:([^|]+)/);
+
+                const candidateSetup = setupToken ? setupToken[1] : null;
+                const candidateTrend = trendToken ? trendToken[1] : null;
+                const candidateVWAP = vwapToken ? vwapToken[1] : null;
+                const candidateRegime = regimeToken ? regimeToken[1] : null;
+                const candidateTime = timeToken ? timeToken[1] : null;
+
+                const counts = {
+                    candlesScanned: 0,
+                    featureAvailable: 0,
+                    setupInstances: 0,
+                    sideMatches: 0,
+                    setupMatches: 0,
+                    trendMatches: 0,
+                    vwapMatches: 0,
+                    regimeMatches: 0,
+                    timeMatches: 0,
+                    contextKeyMatches: 0,
+                    adaptiveGateRejected: 0,
+                    validationOccurrences: 0
+                };
+
+                const examples = [];
+
+                for (let i = validationStart; i < validationEnd - 1; i++) {
+                    counts.candlesScanned++;
+
+                    const f = features(candles, i);
+                    if (!f) continue;
+                    counts.featureAvailable++;
+
+                    const setups = detectSetups(candles, i);
+                    counts.setupInstances += setups.length;
+
+                    for (const setup of setups) {
+                        if (candidateSide && setup.side !== candidateSide) continue;
+                        counts.sideMatches++;
+
+                        if (candidateSetup && setup.setup !== candidateSetup) continue;
+                        counts.setupMatches++;
+
+                        if (candidateTrend && f.trend !== candidateTrend) continue;
+                        counts.trendMatches++;
+
+                        if (candidateVWAP && f.vwapDirection !== candidateVWAP) continue;
+                        counts.vwapMatches++;
+
+                        if (candidateRegime && f.regime !== candidateRegime) continue;
+                        counts.regimeMatches++;
+
+                        if (candidateTime && f.timeBucket !== candidateTime) continue;
+                        counts.timeMatches++;
+
+                        const contextKey = regimeContextKey(
+                            setup.side,
+                            setup.setup,
+                            f
+                        );
+
+                        if (contextKey !== candidate.key) continue;
+                        counts.contextKeyMatches++;
+
+                        if (candidate.level === "ADAPTIVE_CONTEXT") {
+                            const gate = pointInTimeRegimeGate(candidate.records, i);
+                            if (!gate.passed) {
+                                counts.adaptiveGateRejected++;
+                                continue;
+                            }
+                        }
+
+                        counts.validationOccurrences++;
+
+                        if (examples.length < 8) {
+                            examples.push({
+                                index: i,
+                                ts: candles[i].ts,
+                                contextKey,
+                                trend: f.trend,
+                                regime: f.regime,
+                                timeBucket: f.timeBucket,
+                                vwapDirection: f.vwapDirection
+                            });
+                        }
+                    }
+                }
+
+                const adaptiveGate = candidate.adaptiveGate || null;
+                const validationEnoughSamples = counts.validationOccurrences >= VALIDATION_MIN_SAMPLES;
+                const validationEnoughDecisive = counts.validationOccurrences >= VALIDATION_MIN_DECISIVE;
+
+                let diagnosis = "NO_VALIDATION_OCCURRENCES";
+                if (counts.validationOccurrences > 0 && !validationEnoughSamples) {
+                    diagnosis = "FEW_VALIDATION_OCCURRENCES";
+                } else if (counts.validationOccurrences >= VALIDATION_MIN_SAMPLES) {
+                    diagnosis = "ENOUGH_OCCURRENCES_FOR_METRIC_TEST";
+                }
+
+                return {
+                    rankEvidence: {
+                        trades: candidate.trades ?? 0,
+                        decisiveTrades: candidate.decisiveTrades ?? 0,
+                        EV: candidate.expectedValueR ?? 0,
+                        PF: candidate.profitFactor ?? 0,
+                        profitableSections: candidate.profitableSections ?? 0,
+                        recentEV: candidate.recentEV ?? 0,
+                        recentPF: candidate.recentPF ?? 0,
+                        qualified: !!candidate.qualified,
+                        level: candidate.level || "CONTEXT"
+                    },
+                    key: candidate.key,
+                    level: candidate.level || "CONTEXT",
+                    side: candidateSide,
+                    setup: candidateSetup,
+                    trend: candidateTrend,
+                    vwapDirection: candidateVWAP,
+                    regime: candidateRegime,
+                    timeBucket: candidateTime,
+                    contextVariants: candidate.contextVariants ?? 0,
+                    adaptiveGate: adaptiveGate ? {
+                        passed: !!adaptiveGate.passed,
+                        reasons: safeArray(adaptiveGate.reasons),
+                        eligibleRecords: adaptiveGate.eligibleRecords ?? null,
+                        recentRecords: adaptiveGate.recentRecords ?? null,
+                        metrics: adaptiveGate.metrics ?? null
+                    } : null,
+                    validationWindow: {
+                        start: validationStart,
+                        end: validationEnd,
+                        candles: Math.max(0, validationEnd - validationStart)
+                    },
+                    counts,
+                    validationEnoughSamples,
+                    validationEnoughDecisive,
+                    diagnosis,
+                    examples
+                };
+            });
+
+            const byValidationOpportunity = [...variants].sort((a, b) => {
+                if (b.counts.validationOccurrences !== a.counts.validationOccurrences) {
+                    return b.counts.validationOccurrences - a.counts.validationOccurrences;
+                }
+                if ((b.rankEvidence.EV || 0) !== (a.rankEvidence.EV || 0)) {
+                    return (b.rankEvidence.EV || 0) - (a.rankEvidence.EV || 0);
+                }
+                return (b.rankEvidence.PF || 0) - (a.rankEvidence.PF || 0);
+            });
+
+            const byHistoricalEvidence = [...variants].sort((a, b) => {
+                const aScore = (a.rankEvidence.EV || 0) * 100 + Math.min(a.rankEvidence.PF || 0, 5) * 10 + (a.rankEvidence.trades || 0) * 0.01;
+                const bScore = (b.rankEvidence.EV || 0) * 100 + Math.min(b.rankEvidence.PF || 0, 5) * 10 + (b.rankEvidence.trades || 0) * 0.01;
+                return bScore - aScore;
+            });
+
+            return {
+                purpose: "Inspect every discovered SELL regime-context variant independently and determine whether it has enough untouched validation occurrences to become testable. Diagnostic only.",
+                discoveredContextVariants: variants.length,
+                variantsWithValidationOccurrences: variants.filter(x => x.counts.validationOccurrences > 0).length,
+                variantsWithEnoughValidationSamples: variants.filter(x => x.validationEnoughSamples).length,
+                variantsWithEnoughValidationDecisive: variants.filter(x => x.validationEnoughDecisive).length,
+                variantsPassingAdaptiveGate: variants.filter(x => x.adaptiveGate?.passed).length,
+                bestValidationOpportunity: byValidationOpportunity.slice(0, 5),
+                strongestHistoricalEvidence: byHistoricalEvidence.slice(0, 5),
+                allVariants: byHistoricalEvidence,
+                guard: "V15.9 is diagnostic only. It does not promote variants, alter discovery/adaptive/validation/OOS thresholds, use validation outcomes for discovery, or place real orders."
             };
         }
 
@@ -7748,7 +7942,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V15_8_VALIDATION_OCCURRENCE_AUDIT_TRUE_WALK_FORWARD",
+                "V15_9_CONTEXT_VARIANT_INVESTIGATION_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -7867,7 +8061,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.8 additionally audits validation occurrence matching for regime-context candidates and retains the V15.7 validation-failure audit; exit mechanics are compared diagnostically on a fixed entry set.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V15.7 validation-failure audit is retained; exit mechanics are compared diagnostically on a fixed entry set.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -8043,6 +8237,14 @@ export default async function handler(req, res) {
                 buildV158ValidationOccurrenceAudit(
                     rows,
                     finalPromoted?.validationCandidates?.[0] || null,
+                    finalPromoted?.validationStart ?? 0,
+                    finalPromoted?.validationEnd ?? 0
+                ),
+
+            v159ContextVariantInvestigation:
+                buildV159ContextVariantInvestigation(
+                    rows,
+                    finalDiscovery?.contextPatterns || [],
                     finalPromoted?.validationStart ?? 0,
                     finalPromoted?.validationEnd ?? 0
                 ),
