@@ -3419,6 +3419,168 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // V15.4 QUALIFICATION FAILURE DIAGNOSTIC
+        // -----------------------------------------------------
+        // Diagnostic only. This does NOT change qualification,
+        // validation, OOS, thresholds, or candidate promotion.
+        // It traces every VWAP_PULLBACK / SELL / BEARISH
+        // regime-context candidate through the gates that can
+        // prevent it from reaching untouched validation.
+        // =====================================================
+
+        function buildV154QualificationDiagnostics(
+            discovery,
+            discoveryEnd
+        ) {
+
+            const allContexts =
+                safeArray(discovery?.contextPatterns);
+
+            const targetContexts =
+                allContexts.filter(x => {
+                    const key = String(x?.key || "");
+                    return (
+                        key.startsWith(`${V153_TARGET_SIDE}|`) &&
+                        key.includes(`|S:${V153_TARGET_SETUP}|`) &&
+                        key.includes(`|T:${V153_TARGET_TREND}|`)
+                    );
+                });
+
+            const familyKeyFor =
+                `${V153_TARGET_SIDE}|${V153_TARGET_SETUP}|${V153_TARGET_TREND}`;
+
+            const family =
+                safeArray(discovery?.families)
+                    .find(x => x.key === familyKeyFor) || null;
+
+            const diagnostics = targetContexts.map(candidate => {
+
+                const reasons = [];
+
+                const contextEvidence = {
+                    samples: candidate.samples ?? candidate.trades ?? 0,
+                    decisive: candidate.decisiveTrades ?? 0,
+                    EV: candidate.expectedValueR ?? 0,
+                    PF: candidate.profitFactor ?? 0,
+                    profitableSections: candidate.stableSections ?? candidate.profitableSections ?? 0,
+                    recentEV: candidate.recentEV ?? 0,
+                    recentPF: candidate.recentPF ?? 0,
+                    recentSamples: candidate.recentSamples ?? 0,
+                    recentDecisive: candidate.recentDecisive ?? 0
+                };
+
+                if (contextEvidence.samples < CONTEXT_MIN_SAMPLES) {
+                    reasons.push("CONTEXT_INSUFFICIENT_SAMPLES");
+                }
+                if (contextEvidence.decisive < CONTEXT_MIN_DECISIVE) {
+                    reasons.push("CONTEXT_INSUFFICIENT_DECISIVE");
+                }
+                if (contextEvidence.EV < CONTEXT_MIN_EV) {
+                    reasons.push("CONTEXT_EV_BELOW_THRESHOLD");
+                }
+                if (contextEvidence.PF < CONTEXT_MIN_PF) {
+                    reasons.push("CONTEXT_PF_BELOW_THRESHOLD");
+                }
+                if (contextEvidence.profitableSections < CONTEXT_MIN_STABLE_SECTIONS) {
+                    reasons.push("CONTEXT_STABILITY_BELOW_THRESHOLD");
+                }
+                if (contextEvidence.recentEV < 0) {
+                    reasons.push("CONTEXT_RECENT_EV_NEGATIVE");
+                }
+
+                const adaptiveGate =
+                    adaptiveContextGate(
+                        candidate,
+                        discoveryEnd
+                    );
+
+                if (!adaptiveGate.passed) {
+                    for (const reason of safeArray(adaptiveGate.reasons)) {
+                        reasons.push(reason);
+                    }
+                }
+
+                if (!family) {
+                    reasons.push("FAMILY_RESOLUTION_FAILED");
+                } else {
+                    if (family.expectedValueR < CONTEXT_MIN_FAMILY_EV) {
+                        reasons.push("CONTEXT_FAMILY_EV_TOO_WEAK");
+                    }
+                    if (family.profitFactor < CONTEXT_MIN_FAMILY_PF) {
+                        reasons.push("CONTEXT_FAMILY_PF_TOO_WEAK");
+                    }
+                }
+
+                const contextQualified =
+                    safeArray(discovery?.qualifiedContextPatterns)
+                        .some(x => x.key === candidate.key);
+
+                const adaptiveQualified =
+                    safeArray(discovery?.adaptiveContextPatterns)
+                        .some(x => x.key === candidate.key);
+
+                const reachesCurrentPromotionPool =
+                    contextQualified || adaptiveQualified;
+
+                if (!reachesCurrentPromotionPool) {
+                    reasons.push("NOT_IN_CURRENT_QUALIFIED_CONTEXT_POOL");
+                }
+
+                return {
+                    key: candidate.key,
+                    contextVariants: candidate.contextVariants ?? 0,
+                    contextEvidence,
+                    adaptiveGate: {
+                        passed: adaptiveGate.passed,
+                        reasons: adaptiveGate.reasons,
+                        eligibleRecords: adaptiveGate.eligibleRecords,
+                        recentRecords: adaptiveGate.recentRecords,
+                        metrics: adaptiveGate.metrics
+                    },
+                    currentQualifiedContext: contextQualified,
+                    currentAdaptiveContext: adaptiveQualified,
+                    currentFamily: family
+                        ? {
+                            key: family.key,
+                            qualified: !!family.qualified,
+                            samples: family.samples,
+                            decisiveTrades: family.decisiveTrades,
+                            EV: family.expectedValueR,
+                            PF: family.profitFactor,
+                            stableSections: family.stableSections
+                        }
+                        : null,
+                    wouldReachValidationPool: reachesCurrentPromotionPool && reasons.length === 0,
+                    blockingReasons: [...new Set(reasons)]
+                };
+            });
+
+            const reasonCounts = {};
+            for (const item of diagnostics) {
+                for (const reason of item.blockingReasons) {
+                    reasonCounts[reason] =
+                        (reasonCounts[reason] || 0) + 1;
+                }
+            }
+
+            return {
+                purpose:
+                    "Explain why SELL|VWAP_PULLBACK|BEARISH context candidates do or do not reach validation without changing any strategy or validation rule.",
+                target: `${V153_TARGET_SIDE}|${V153_TARGET_SETUP}|${V153_TARGET_TREND}`,
+                familyKey: familyKeyFor,
+                totalContextCandidates: targetContexts.length,
+                qualifiedContextCandidates:
+                    diagnostics.filter(x => x.currentQualifiedContext).length,
+                adaptiveContextCandidates:
+                    diagnostics.filter(x => x.currentAdaptiveContext).length,
+                candidatesThatWouldReachValidation:
+                    diagnostics.filter(x => x.wouldReachValidationPool).length,
+                blockingReasonCounts: reasonCounts,
+                candidates: diagnostics
+            };
+        }
+
+        // =====================================================
         // PROMOTION / CANDIDATE FLOW
         // =====================================================
 
@@ -3490,6 +3652,12 @@ export default async function handler(req, res) {
             const adaptiveContext =
                 safeArray(
                     discovery.adaptiveContextPatterns
+                );
+
+            const v154QualificationDiagnostics =
+                buildV154QualificationDiagnostics(
+                    discovery,
+                    discoveryEnd
                 );
 
             // V15.1 regime qualification: only SELL regime-context
@@ -3973,6 +4141,9 @@ export default async function handler(req, res) {
                                 x.stage ===
                                 "VALIDATION_REJECTED"
                         ).length
+,
+
+                    v154QualificationDiagnostics
                 }
             };
         }
