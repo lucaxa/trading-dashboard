@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.12 — REGIME CONTEXT EDGE DIAGNOSTIC ENGINE
+ V14.13 — REGIME CONTEXT EDGE DIAGNOSTIC ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,7 +12,7 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.12 PURPOSE
+ V14.13 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.12";
+    const VERSION = "V14.13";
 
     try {
 
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
 
-        // V14.12 REGIME-CONTEXT DISCOVERY
+        // V14.13 REGIME-CONTEXT DISCOVERY
         // Only SELL-side detailed edges are eligible for this
         // additional discovery lane. The candidate must still
         // independently satisfy the existing PATTERN thresholds
@@ -121,7 +121,7 @@ export default async function handler(req, res) {
         const DIRECTIONAL_MIN_FAMILY_EV = FAMILY_MIN_EV;
         const DIRECTIONAL_MIN_FAMILY_PF = FAMILY_MIN_PF;
 
-        // V14.12 REGIME-CONTEXT DISCOVERY
+        // V14.13 REGIME-CONTEXT DISCOVERY
         // Aggregate SELL evidence across RSI buckets while keeping
         // setup + trend + VWAP direction + regime + time bucket.
         // The existing PATTERN evidence floor remains unchanged.
@@ -1545,7 +1545,7 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
-        // V14.12 REGIME-CONTEXT KEY
+        // V14.13 REGIME-CONTEXT KEY
         // RSI is intentionally excluded so nearby RSI buckets do not
         // fragment the same time/regime edge into tiny samples.
         function regimeContextKey(
@@ -5245,6 +5245,237 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // V14.13 REGIME-SHIFT / EDGE-DECAY DIAGNOSTICS
+        // Diagnostic only. No promotion thresholds or validation
+        // gates are changed by this layer.
+        // =====================================================
+
+        function buildEdgeDecayDiagnostics(records, start, end) {
+
+            const safe = safeArray(records)
+                .filter(x => Number.isFinite(x.index))
+                .sort((a, b) => a.index - b.index);
+
+            const sellRecords = safe.filter(x => x.side === "SELL");
+            const sellTrendFollow = sellRecords.filter(x => x.setup === "TREND_FOLLOW");
+            const sellVWAPPullback = sellRecords.filter(x => x.setup === "VWAP_PULLBACK");
+
+            function metrics(rows) {
+                return anatomyMetrics(rows);
+            }
+
+            function sliceRows(rows, count = 8) {
+                const buckets = Array.from({ length: count }, () => []);
+                if (!rows.length) return buckets;
+
+                const minIndex = rows[0].index;
+                const maxIndex = rows[rows.length - 1].index;
+                const span = Math.max(1, maxIndex - minIndex + 1);
+
+                for (const row of rows) {
+                    const relative = row.index - minIndex;
+                    const bucket = Math.min(count - 1, Math.floor((relative / span) * count));
+                    buckets[bucket].push(row);
+                }
+                return buckets;
+            }
+
+            function chronology(rows, count = 8) {
+                return sliceRows(rows, count).map((bucket, i) => ({
+                    window: i + 1,
+                    fromIndex: bucket.length ? bucket[0].index : null,
+                    toIndex: bucket.length ? bucket[bucket.length - 1].index : null,
+                    ...metrics(bucket)
+                }));
+            }
+
+            function rolling(rows, windowSize = 60, step = 30) {
+                const output = [];
+                if (!rows.length) return output;
+
+                for (let endPos = windowSize; endPos <= rows.length; endPos += step) {
+                    const bucket = rows.slice(endPos - windowSize, endPos);
+                    output.push({
+                        endRecord: endPos,
+                        fromIndex: bucket[0].index,
+                        toIndex: bucket[bucket.length - 1].index,
+                        ...metrics(bucket)
+                    });
+                }
+
+                if (rows.length < windowSize) {
+                    output.push({
+                        endRecord: rows.length,
+                        fromIndex: rows[0].index,
+                        toIndex: rows[rows.length - 1].index,
+                        ...metrics(rows)
+                    });
+                } else if ((rows.length - windowSize) % step !== 0) {
+                    const bucket = rows.slice(-windowSize);
+                    output.push({
+                        endRecord: rows.length,
+                        fromIndex: bucket[0].index,
+                        toIndex: bucket[bucket.length - 1].index,
+                        ...metrics(bucket)
+                    });
+                }
+
+                return output;
+            }
+
+            function transitionSummary(rows) {
+                const windows = chronology(rows, 8);
+                const valid = windows.filter(x => x.trades > 0);
+                const positive = valid.filter(x => x.expectedValueR > 0).length;
+                const negative = valid.filter(x => x.expectedValueR <= 0).length;
+
+                let firstNegativeAfterPositive = null;
+                let consecutiveNegative = 0;
+                let maxConsecutiveNegative = 0;
+                let lastPositiveWindow = null;
+
+                for (const w of valid) {
+                    if (w.expectedValueR > 0) {
+                        lastPositiveWindow = w.window;
+                        consecutiveNegative = 0;
+                    } else {
+                        consecutiveNegative += 1;
+                        maxConsecutiveNegative = Math.max(maxConsecutiveNegative, consecutiveNegative);
+                        if (
+                            firstNegativeAfterPositive === null &&
+                            lastPositiveWindow !== null
+                        ) {
+                            firstNegativeAfterPositive = w.window;
+                        }
+                    }
+                }
+
+                const recentQuarter = rows.filter(
+                    x => x.index >= start + Math.floor((end - start) * 0.75)
+                );
+                const earlyHalf = rows.filter(
+                    x => x.index < start + Math.floor((end - start) * 0.5)
+                );
+
+                return {
+                    chronology: windows,
+                    positiveWindows: positive,
+                    negativeOrFlatWindows: negative,
+                    firstNegativeWindowAfterPositive: firstNegativeAfterPositive,
+                    maxConsecutiveNegativeWindows: maxConsecutiveNegative,
+                    earlyHalf: metrics(earlyHalf),
+                    recentQuarter: metrics(recentQuarter),
+                    recentMinusEarlyEV: round(
+                        metrics(recentQuarter).expectedValueR - metrics(earlyHalf).expectedValueR,
+                        4
+                    ),
+                    recentMinusEarlyPF: round(
+                        metrics(recentQuarter).profitFactor - metrics(earlyHalf).profitFactor,
+                        4
+                    )
+                };
+            }
+
+            function byContext(rows, field) {
+                const map = new Map();
+                for (const row of rows) {
+                    const key = row[field] ?? "UNKNOWN";
+                    if (!map.has(key)) map.set(key, []);
+                    map.get(key).push(row);
+                }
+
+                return Array.from(map.entries())
+                    .map(([key, group]) => ({
+                        key,
+                        trades: group.length,
+                        overall: metrics(group),
+                        chronology: chronology(group, 4),
+                        recentQuarter: metrics(
+                            group.filter(x => x.index >= start + Math.floor((end - start) * 0.75))
+                        )
+                    }))
+                    .sort((a, b) => b.trades - a.trades);
+            }
+
+            function detectDecay(rows) {
+                const windows = chronology(rows, 8).filter(x => x.trades > 0);
+                const positiveWindows = windows.filter(x => x.expectedValueR > 0);
+                const negativeWindows = windows.filter(x => x.expectedValueR <= 0);
+                const recent = windows.slice(-2);
+                const earlier = windows.slice(0, Math.max(1, windows.length - 2));
+
+                const earlierEV = earlier.length
+                    ? earlier.reduce((sum, x) => sum + x.expectedValueR, 0) / earlier.length
+                    : 0;
+                const recentEV = recent.length
+                    ? recent.reduce((sum, x) => sum + x.expectedValueR, 0) / recent.length
+                    : 0;
+
+                let classification = "INSUFFICIENT_DATA";
+                if (windows.length >= 4) {
+                    if (positiveWindows.length >= 3 && recentEV < 0 && recentEV < earlierEV) {
+                        classification = "POSSIBLE_EDGE_DECAY";
+                    } else if (positiveWindows.length >= 3 && recentEV >= 0) {
+                        classification = "NO_CLEAR_DECAY";
+                    } else if (positiveWindows.length < 3) {
+                        classification = "NO_STABLE_HISTORICAL_EDGE";
+                    } else {
+                        classification = "REGIME_INCONSISTENCY";
+                    }
+                }
+
+                return {
+                    classification,
+                    positiveWindows: positiveWindows.length,
+                    negativeOrFlatWindows: negativeWindows.length,
+                    earlierAverageWindowEV: round(earlierEV, 4),
+                    recentAverageWindowEV: round(recentEV, 4),
+                    EVChange: round(recentEV - earlierEV, 4)
+                };
+            }
+
+            return {
+                purpose:
+                    "Determine whether the historical SELL edge decays over chronological time without changing strategy thresholds or creating trades.",
+                sample: {
+                    totalLearningRecords: safe.length,
+                    sellRecords: sellRecords.length,
+                    sellTrendFollowRecords: sellTrendFollow.length,
+                    sellVWAPPullbackRecords: sellVWAPPullback.length
+                },
+                sell: {
+                    overall: metrics(sellRecords),
+                    decayAssessment: detectDecay(sellRecords),
+                    chronology: transitionSummary(sellRecords),
+                    rolling60: rolling(sellRecords, 60, 30),
+                    byRegime: byContext(sellRecords, "regime"),
+                    byTimeBucket: byContext(sellRecords, "timeBucket"),
+                    byVWAPDirection: byContext(sellRecords, "vwapDirection"),
+                    bySetup: byContext(sellRecords, "setup"),
+                    byTrend: byContext(sellRecords, "trend")
+                },
+                sellTrendFollow: {
+                    overall: metrics(sellTrendFollow),
+                    decayAssessment: detectDecay(sellTrendFollow),
+                    chronology: chronology(sellTrendFollow, 8),
+                    rolling60: rolling(sellTrendFollow, 60, 30),
+                    byRegime: byContext(sellTrendFollow, "regime"),
+                    byTimeBucket: byContext(sellTrendFollow, "timeBucket")
+                },
+                sellVWAPPullback: {
+                    overall: metrics(sellVWAPPullback),
+                    decayAssessment: detectDecay(sellVWAPPullback),
+                    chronology: chronology(sellVWAPPullback, 8),
+                    rolling60: rolling(sellVWAPPullback, 60, 30),
+                    byRegime: byContext(sellVWAPPullback, "regime"),
+                    byTimeBucket: byContext(sellVWAPPullback, "timeBucket")
+                },
+                guard:
+                    "Diagnostic only. No decay classification can promote a candidate, lower validation thresholds or enter true OOS."
+            };
+        }
+
+        // =====================================================
         // FINAL LEARNING
         // =====================================================
 
@@ -5265,6 +5496,13 @@ export default async function handler(req, res) {
         const signalPipelineDiagnostics =
             diagnoseSignalPipeline(
                 historicalCandles,
+                0,
+                historicalCandles.length
+            );
+
+        const edgeDecayDiagnostics =
+            buildEdgeDecayDiagnostics(
+                finalDiscovery.rawRecords,
                 0,
                 historicalCandles.length
             );
@@ -5301,7 +5539,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.12 edge has survived regime-context discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
+                "No V14.13 edge has survived regime-context discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -5828,7 +6066,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_12_REGIME_CONTEXT_EDGE_DISCOVERY_TRUE_WALK_FORWARD",
+                "V14_13_REGIME_SHIFT_EDGE_DECAY_DIAGNOSTIC_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -6099,6 +6337,8 @@ export default async function handler(req, res) {
                 interpretationGuard:
                     "Diagnostic only. These counts do not create trades, lower thresholds or enter validation/OOS."
             },
+
+            edgeDecayDiagnostics,
 
             internalValidation: {
 
