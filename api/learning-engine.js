@@ -1,14 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.4 — ROBUSTNESS + EVIDENCE ENGINE
-        + HIERARCHICAL LEARNING
-        + RECENT VWAP PULLBACK
-        + TREND STRENGTH
-        + TRUE WALK-FORWARD
-        + EDGE PERSISTENCE
-        + EDGE DECAY
-        + MULTI-FOLD VALIDATION
+ V14.5 — ANTI-OVERFITTING / EDGE SURVIVAL ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -18,27 +11,45 @@
  MODE:
  PAPER ONLY
  NO REAL ORDERS
-===========================================================
 
- V14.4 OBJECTIVES
+ V14.5 PURPOSE
  ----------------------------------------------------------
- 1. Increase historical evidence
- 2. Use 6 chronological walk-forward folds
- 3. Preserve strict no-leakage learning
- 4. Preserve hierarchical family/detail learning
- 5. Track edge persistence
- 6. Track recent edge decay
- 7. Separate BUY and SELL evidence
- 8. Validate recent edge quality
- 9. Require independent setup families
-10. Control pattern concentration
-11. Preserve strong trend filtering
-12. Preserve recent VWAP pullback
-13. Prevent overlapping paper trades
-14. Preserve circuit breakers
-15. Allow NO TRADE
-16. Never force profitability proof
-17. Paper-only
+ V14.4 discovered that historically strong patterns were
+ failing in true OOS execution.
+
+ V14.5 therefore changes the learning architecture:
+
+     DISCOVERY
+         ↓
+     INTERNAL VALIDATION
+         ↓
+     SURVIVAL TEST
+         ↓
+     TRUE OOS
+         ↓
+     EDGE PROMOTION
+
+ Main protections:
+
+ 1. Anti-overfitting validation
+ 2. Pattern must survive validation
+ 3. Pattern must not rely only on one historical section
+ 4. Pattern must justify itself against its family
+ 5. Anti-chasing protection
+ 6. Stronger trend quality
+ 7. VWAP pullback independently validated
+ 8. Edge persistence tracking
+ 9. Edge decay tracking
+10. Multiple profitable OOS folds required
+11. No overlapping trades
+12. Current candle excluded
+13. No future-data leakage
+14. No forced trades
+15. Paper only
+
+ IMPORTANT:
+ This version intentionally prefers NO_TRADE over weak
+ evidence.
 ===========================================================
 */
 
@@ -50,7 +61,7 @@ export default async function handler(req, res) {
         // CONFIG
         // =====================================================
 
-        const VERSION = "V14.4";
+        const VERSION = "V14.5";
 
         const INSTRUMENT = "NIFTY 50";
         const SCRIP_CODE = "NIDX_40000001";
@@ -59,11 +70,6 @@ export default async function handler(req, res) {
         const API_BASE =
             process.env.INDSTOCKS_API_BASE ||
             "https://api.indstocks.com";
-
-        /*
-         * V14.4 requests a larger historical window.
-         * The API is still fetched in maximum 7-day chunks.
-         */
 
         const REQUESTED_DAYS = Math.max(
             30,
@@ -78,88 +84,76 @@ export default async function handler(req, res) {
         );
 
         // =====================================================
-        // HIERARCHICAL LEARNING
+        // DISCOVERY
         // =====================================================
 
-        const FAMILY_MIN_SAMPLES = 8;
-        const FAMILY_MIN_DECISIVE = 5;
+        const FAMILY_MIN_SAMPLES = 12;
+        const FAMILY_MIN_DECISIVE = 8;
 
-        const PATTERN_MIN_SAMPLES = 6;
-        const PATTERN_MIN_DECISIVE = 3;
+        const PATTERN_MIN_SAMPLES = 8;
+        const PATTERN_MIN_DECISIVE = 5;
+
+        const MIN_STABLE_SECTIONS = 3;
 
         const FAMILY_MIN_EV = 0.05;
         const FAMILY_MIN_PF = 1.05;
 
-        const PATTERN_MIN_EV = 0.05;
-        const PATTERN_MIN_PF = 1.05;
-
-        const QUALITY_THRESHOLD = 55;
-
-        const MIN_STABLE_SECTIONS = 2;
+        const PATTERN_MIN_EV = 0.10;
+        const PATTERN_MIN_PF = 1.15;
 
         // =====================================================
-        // RECENT VALIDATION
+        // INTERNAL VALIDATION
         // =====================================================
 
-        const RECENT_FRACTION = 0.25;
+        const VALIDATION_FRACTION = 0.25;
 
-        const MIN_RECENT_SAMPLES = 4;
-        const MIN_RECENT_DECISIVE = 3;
+        const VALIDATION_MIN_SAMPLES = 4;
+        const VALIDATION_MIN_DECISIVE = 3;
 
-        const MIN_RECENT_EV = 0.05;
-        const MIN_RECENT_PF = 1.05;
+        const VALIDATION_MIN_EV = 0.05;
+        const VALIDATION_MIN_PF = 1.05;
 
-        const MAX_RECENT_LOSS_STREAK = 3;
-
-        // =====================================================
-        // WALK FORWARD
-        // =====================================================
-
-        const FOLD_COUNT = 6;
-
-        const INITIAL_TRAINING = 250;
-
-        const REQUIRED_PROFITABLE_FOLDS = 3;
+        const MAX_VALIDATION_LOSS_STREAK = 3;
 
         // =====================================================
-        // GLOBAL PROOF
+        // EDGE SURVIVAL
         // =====================================================
 
-        const MIN_GLOBAL_DECISIVE = 8;
+        const MIN_OOS_PROFITABLE_FOLDS = 3;
 
-        const MIN_GLOBAL_EV = 0.10;
-
-        const MIN_GLOBAL_PF = 1.20;
+        const MIN_OOS_DECISIVE = 8;
+        const MIN_OOS_EV = 0.05;
+        const MIN_OOS_PF = 1.05;
 
         const MIN_INDEPENDENT_FAMILIES = 2;
 
-        const MAX_PATTERN_CONCENTRATION = 0.75;
+        const MAX_PATTERN_CONCENTRATION = 0.70;
 
         // =====================================================
-        // EDGE PERSISTENCE
+        // FAMILY VS PATTERN PROTECTION
         // =====================================================
 
-        const MIN_PERSISTENCE_SECTIONS = 2;
+        const MAX_PATTERN_FAMILY_EV_GAP = 0.90;
 
-        const MAX_EDGE_DECAY = 0.75;
+        const ALLOW_PATTERN_OVERRIDE_LOSING_FAMILY =
+            false;
 
         // =====================================================
-        // RISK
+        // ANTI CHASING
         // =====================================================
 
-        const RISK_R = 1;
+        const MAX_TREND_VWAP_DISTANCE_ATR = 1.75;
 
-        const STOP_R = 1;
+        const MAX_TREND_EMA_SPREAD_ATR = 1.25;
 
-        const TARGET_R = 2;
+        const MAX_TREND_STRENGTH_ATR = 1.50;
 
-        const PREFERRED_TARGET_R = 2.5;
+        // =====================================================
+        // TREND QUALITY
+        // =====================================================
 
-        const MAX_HOLD_CANDLES = 12;
-
-        const MAX_OOS_DRAWDOWN = 12;
-
-        const MAX_LOSS_STREAK = 6;
+        const MIN_SPREAD_ATR = 0.20;
+        const MIN_SLOPE_ATR = 0.06;
 
         // =====================================================
         // ENTRY CONFIRMATION
@@ -168,22 +162,10 @@ export default async function handler(req, res) {
         const ENTRY_CONFIRMATION_MIN = 5;
 
         // =====================================================
-        // COOLDOWNS
-        // =====================================================
-
-        const ENTRY_COOLDOWN = 3;
-
-        const SAME_PATTERN_COOLDOWN = 5;
-
-        const SAME_SIDE_COOLDOWN = 2;
-
-        // =====================================================
-        // VWAP
+        // VWAP PULLBACK
         // =====================================================
 
         const VWAP_LOOKBACK = 8;
-
-        const VWAP_APPROACH_MAX_ATR = 1.25;
 
         const VWAP_TOUCH_MAX_ATR = 0.35;
 
@@ -194,12 +176,25 @@ export default async function handler(req, res) {
         const VWAP_MAX_CANDLES_AFTER_TOUCH = 3;
 
         // =====================================================
-        // TREND
+        // RISK
         // =====================================================
 
-        const MIN_SPREAD_ATR = 0.15;
+        const STOP_R = 1;
+        const TARGET_R = 2;
+        const PREFERRED_TARGET_R = 2.5;
 
-        const MIN_SLOPE_ATR = 0.05;
+        const MAX_HOLD_CANDLES = 12;
+
+        const MAX_OOS_DRAWDOWN = 12;
+        const MAX_LOSS_STREAK = 6;
+
+        // =====================================================
+        // COOLDOWN
+        // =====================================================
+
+        const ENTRY_COOLDOWN = 3;
+        const SAME_PATTERN_COOLDOWN = 5;
+        const SAME_SIDE_COOLDOWN = 2;
 
         // =====================================================
         // RESPONSE
@@ -256,6 +251,7 @@ export default async function handler(req, res) {
             if (
                 !Number.isFinite(value)
             ) {
+
                 return null;
             }
 
@@ -265,11 +261,9 @@ export default async function handler(req, res) {
                     digits
                 );
 
-            return (
-                Math.round(
-                    value * factor
-                ) / factor
-            );
+            return Math.round(
+                value * factor
+            ) / factor;
         }
 
         function clamp(
@@ -287,8 +281,15 @@ export default async function handler(req, res) {
             );
         }
 
+        function safeArray(value) {
+
+            return Array.isArray(value)
+                ? value
+                : [];
+        }
+
         // =====================================================
-        // NORMALIZE CANDLE
+        // CANDLE NORMALIZATION
         // =====================================================
 
         function normalizeCandle(row) {
@@ -307,26 +308,13 @@ export default async function handler(req, res) {
                     return null;
                 }
 
-                let ts =
-                    n(row[0]);
+                let ts = n(row[0]);
 
-                const o =
-                    n(row[1]);
-
-                const h =
-                    n(row[2]);
-
-                const l =
-                    n(row[3]);
-
-                const c =
-                    n(row[4]);
-
-                const v =
-                    n(
-                        row[5],
-                        0
-                    );
+                const o = n(row[1]);
+                const h = n(row[2]);
+                const l = n(row[3]);
+                const c = n(row[4]);
+                const v = n(row[5], 0);
 
                 if (
                     ts === null ||
@@ -335,6 +323,7 @@ export default async function handler(req, res) {
                     l === null ||
                     c === null
                 ) {
+
                     return null;
                 }
 
@@ -404,6 +393,7 @@ export default async function handler(req, res) {
                 l === null ||
                 c === null
             ) {
+
                 return null;
             }
 
@@ -428,7 +418,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // EXTRACT API ROWS
+        // RECURSIVE EXTRACTION
         // =====================================================
 
         function extractRows(payload) {
@@ -512,14 +502,9 @@ export default async function handler(req, res) {
             return found;
         }
 
-        // =====================================================
-        // PREPARE DATA
-        // =====================================================
-
         function prepareData(rows) {
 
-            const map =
-                new Map();
+            const map = new Map();
 
             for (
                 const row of rows
@@ -538,12 +523,8 @@ export default async function handler(req, res) {
             return [
                 ...map.values()
             ].sort(
-                (
-                    a,
-                    b
-                ) =>
-                    a.ts -
-                    b.ts
+                (a, b) =>
+                    a.ts - b.ts
             );
         }
 
@@ -581,12 +562,9 @@ export default async function handler(req, res) {
         function istParts(ts) {
 
             const parts =
-                IST_FORMATTER
-                    .formatToParts(
-                        new Date(
-                            ts * 1000
-                        )
-                    );
+                IST_FORMATTER.formatToParts(
+                    new Date(ts * 1000)
+                );
 
             const result = {};
 
@@ -595,13 +573,11 @@ export default async function handler(req, res) {
             ) {
 
                 if (
-                    p.type !==
-                    "literal"
+                    p.type !== "literal"
                 ) {
 
-                    result[
-                        p.type
-                    ] = p.value;
+                    result[p.type] =
+                        p.value;
                 }
             }
 
@@ -624,8 +600,7 @@ export default async function handler(req, res) {
                 istParts(ts);
 
             return (
-                Number(p.hour) *
-                60 +
+                Number(p.hour) * 60 +
                 Number(p.minute)
             );
         }
@@ -635,21 +610,15 @@ export default async function handler(req, res) {
             const mins =
                 istMinutes(ts);
 
-            if (
-                mins < 600
-            ) {
+            if (mins < 600) {
                 return "OPEN";
             }
 
-            if (
-                mins < 720
-            ) {
+            if (mins < 720) {
                 return "MORNING";
             }
 
-            if (
-                mins < 840
-            ) {
+            if (mins < 840) {
                 return "MIDDAY";
             }
 
@@ -657,7 +626,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // SESSION VWAP
+        // VWAP
         // =====================================================
 
         function sessionVWAP(
@@ -669,6 +638,7 @@ export default async function handler(req, res) {
                 index < 0 ||
                 !candles[index]
             ) {
+
                 return null;
             }
 
@@ -678,7 +648,6 @@ export default async function handler(req, res) {
                 );
 
             let pv = 0;
-
             let volume = 0;
 
             for (
@@ -692,6 +661,7 @@ export default async function handler(req, res) {
                         candles[i].ts
                     ) !== date
                 ) {
+
                     break;
                 }
 
@@ -712,8 +682,7 @@ export default async function handler(req, res) {
                     );
 
                 pv +=
-                    typical *
-                    v;
+                    typical * v;
 
                 volume += v;
             }
@@ -725,10 +694,7 @@ export default async function handler(req, res) {
                 return candles[index].c;
             }
 
-            return (
-                pv /
-                volume
-            );
+            return pv / volume;
         }
 
         // =====================================================
@@ -741,9 +707,10 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                values.length <
-                period
+                !Array.isArray(values) ||
+                values.length < period
             ) {
+
                 return null;
             }
 
@@ -755,12 +722,10 @@ export default async function handler(req, res) {
                 i++
             ) {
 
-                value +=
-                    values[i];
+                value += values[i];
             }
 
-            value /=
-                period;
+            value /= period;
 
             const multiplier =
                 2 /
@@ -794,14 +759,14 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                values.length <=
-                period
+                !Array.isArray(values) ||
+                values.length <= period
             ) {
+
                 return null;
             }
 
             let gains = 0;
-
             let losses = 0;
 
             for (
@@ -814,37 +779,23 @@ export default async function handler(req, res) {
                     values[i] -
                     values[i - 1];
 
-                if (
-                    diff >= 0
-                ) {
-
-                    gains +=
-                        diff;
-
+                if (diff >= 0) {
+                    gains += diff;
                 } else {
-
                     losses +=
-                        Math.abs(
-                            diff
-                        );
+                        Math.abs(diff);
                 }
             }
 
             let avgGain =
-                gains /
-                period;
+                gains / period;
 
             let avgLoss =
-                losses /
-                period;
+                losses / period;
 
             for (
-                let i =
-                    period + 1;
-
-                i <
-                    values.length;
-
+                let i = period + 1;
+                i < values.length;
                 i++
             ) {
 
@@ -867,16 +818,14 @@ export default async function handler(req, res) {
                         avgGain *
                         (period - 1) +
                         gain
-                    ) /
-                    period;
+                    ) / period;
 
                 avgLoss =
                     (
                         avgLoss *
                         (period - 1) +
                         loss
-                    ) /
-                    period;
+                    ) / period;
             }
 
             if (
@@ -887,13 +836,11 @@ export default async function handler(req, res) {
             }
 
             const rs =
-                avgGain /
-                avgLoss;
+                avgGain / avgLoss;
 
             return (
                 100 -
-                100 /
-                (1 + rs)
+                100 / (1 + rs)
             );
         }
 
@@ -907,9 +854,10 @@ export default async function handler(req, res) {
         ) {
 
             if (
-                candles.length <=
-                period
+                !Array.isArray(candles) ||
+                candles.length <= period
             ) {
+
                 return null;
             }
 
@@ -930,24 +878,16 @@ export default async function handler(req, res) {
                 trs.push(
                     Math.max(
                         c.h - c.l,
-
-                        Math.abs(
-                            c.h -
-                            p.c
-                        ),
-
-                        Math.abs(
-                            c.l -
-                            p.c
-                        )
+                        Math.abs(c.h - p.c),
+                        Math.abs(c.l - p.c)
                     )
                 );
             }
 
             if (
-                trs.length <
-                period
+                trs.length < period
             ) {
+
                 return null;
             }
 
@@ -959,12 +899,10 @@ export default async function handler(req, res) {
                 i++
             ) {
 
-                value +=
-                    trs[i];
+                value += trs[i];
             }
 
-            value /=
-                period;
+            value /= period;
 
             for (
                 let i = period;
@@ -977,8 +915,7 @@ export default async function handler(req, res) {
                         value *
                         (period - 1) +
                         trs[i]
-                    ) /
-                    period;
+                    ) / period;
             }
 
             return value;
@@ -996,6 +933,7 @@ export default async function handler(req, res) {
             if (
                 index < 30
             ) {
+
                 return null;
             }
 
@@ -1007,21 +945,14 @@ export default async function handler(req, res) {
 
             const closes =
                 slice.map(
-                    x =>
-                        x.c
+                    x => x.c
                 );
 
             const ema9 =
-                ema(
-                    closes,
-                    9
-                );
+                ema(closes, 9);
 
             const ema21 =
-                ema(
-                    closes,
-                    21
-                );
+                ema(closes, 21);
 
             const previousEMA9 =
                 ema(
@@ -1067,31 +998,25 @@ export default async function handler(req, res) {
                 candles[index].c;
 
             const spread =
-                ema9 -
-                ema21;
+                ema9 - ema21;
 
             const spreadATR =
-                spread /
-                atr14;
+                spread / atr14;
 
             const slope =
                 ema9 -
                 previousEMA9;
 
             const slopeATR =
-                slope /
-                atr14;
+                slope / atr14;
 
             let trend =
                 "SIDEWAYS";
 
             if (
-                ema9 >
-                    ema21 &&
-                spreadATR >=
-                    MIN_SPREAD_ATR &&
-                slopeATR >=
-                    MIN_SLOPE_ATR
+                ema9 > ema21 &&
+                spreadATR >= MIN_SPREAD_ATR &&
+                slopeATR >= MIN_SLOPE_ATR
             ) {
 
                 trend =
@@ -1099,12 +1024,9 @@ export default async function handler(req, res) {
             }
 
             if (
-                ema9 <
-                    ema21 &&
-                spreadATR <=
-                    -MIN_SPREAD_ATR &&
-                slopeATR <=
-                    -MIN_SLOPE_ATR
+                ema9 < ema21 &&
+                spreadATR <= -MIN_SPREAD_ATR &&
+                slopeATR <= -MIN_SLOPE_ATR
             ) {
 
                 trend =
@@ -1120,24 +1042,16 @@ export default async function handler(req, res) {
                 "TRANSITION";
 
             if (
-                Math.abs(
-                    spreadATR
-                ) >= 0.35 &&
-                Math.abs(
-                    slopeATR
-                ) >= 0.08
+                Math.abs(spreadATR) >= 0.35 &&
+                Math.abs(slopeATR) >= 0.08
             ) {
 
                 regime =
                     "TRENDING";
 
             } else if (
-                Math.abs(
-                    spreadATR
-                ) < 0.15 &&
-                Math.abs(
-                    slopeATR
-                ) < 0.05
+                Math.abs(spreadATR) < 0.15 &&
+                Math.abs(slopeATR) < 0.05
             ) {
 
                 regime =
@@ -1147,56 +1061,32 @@ export default async function handler(req, res) {
             let vwapDirection =
                 "AT";
 
-            if (
-                close >
-                vwap
-            ) {
-
+            if (close > vwap) {
                 vwapDirection =
                     "ABOVE";
-
-            } else if (
-                close <
-                vwap
-            ) {
-
+            } else if (close < vwap) {
                 vwapDirection =
                     "BELOW";
             }
 
             const vwapDistanceATR =
                 (
-                    close -
-                    vwap
-                ) /
-                atr14;
+                    close - vwap
+                ) / atr14;
 
             let rsiBucket =
                 "NEUTRAL";
 
-            if (
-                rsi14 >= 60
-            ) {
-
+            if (rsi14 >= 60) {
                 rsiBucket =
                     "HIGH";
-
-            } else if (
-                rsi14 >= 50
-            ) {
-
+            } else if (rsi14 >= 50) {
                 rsiBucket =
                     "NEUTRAL_HIGH";
-
-            } else if (
-                rsi14 <= 40
-            ) {
-
+            } else if (rsi14 <= 40) {
                 rsiBucket =
                     "LOW";
-
             } else {
-
                 rsiBucket =
                     "NEUTRAL_LOW";
             }
@@ -1204,17 +1094,10 @@ export default async function handler(req, res) {
             let volatility =
                 "NORMAL";
 
-            if (
-                atr14 > 18
-            ) {
-
+            if (atr14 > 18) {
                 volatility =
                     "HIGH";
-
-            } else if (
-                atr14 < 8
-            ) {
-
+            } else if (atr14 < 8) {
                 volatility =
                     "LOW";
             }
@@ -1270,7 +1153,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // RECENT VWAP INTERACTION
+        // VWAP INTERACTION
         // =====================================================
 
         function recentVWAPInteraction(
@@ -1296,8 +1179,7 @@ export default async function handler(req, res) {
                     VWAP_LOOKBACK
                 );
 
-            let touchIndex =
-                null;
+            let touchIndex = null;
 
             let bestDistance =
                 Infinity;
@@ -1331,29 +1213,24 @@ export default async function handler(req, res) {
                     !a ||
                     a <= 0
                 ) {
+
                     continue;
                 }
 
                 const distance =
                     Math.abs(
-                        c.c -
-                        v
-                    ) /
-                    a;
+                        c.c - v
+                    ) / a;
 
                 const highDistance =
                     Math.abs(
-                        c.h -
-                        v
-                    ) /
-                    a;
+                        c.h - v
+                    ) / a;
 
                 const lowDistance =
                     Math.abs(
-                        c.l -
-                        v
-                    ) /
-                    a;
+                        c.l - v
+                    ) / a;
 
                 const touched =
                     distance <=
@@ -1367,21 +1244,22 @@ export default async function handler(req, res) {
                         c.h >= v
                     );
 
-                if (
-                    touched
-                ) {
+                if (touched) {
 
-                    touchIndex =
-                        i;
+                    touchIndex = i;
 
                     bestDistance =
-                        distance;
+                        Math.min(
+                            bestDistance,
+                            distance
+                        );
                 }
             }
 
             if (
                 touchIndex === null
             ) {
+
                 return null;
             }
 
@@ -1402,8 +1280,7 @@ export default async function handler(req, res) {
                 Math.abs(
                     f.close -
                     f.vwap
-                ) /
-                f.atr14;
+                ) / f.atr14;
 
             if (
                 currentDistance >
@@ -1415,14 +1292,10 @@ export default async function handler(req, res) {
 
             const recovery =
                 side === "BUY"
-                    ? f.close >
-                      f.vwap
-                    : f.close <
-                      f.vwap;
+                    ? f.close > f.vwap
+                    : f.close < f.vwap;
 
-            if (
-                !recovery
-            ) {
+            if (!recovery) {
                 return null;
             }
 
@@ -1431,13 +1304,11 @@ export default async function handler(req, res) {
                     ? (
                         f.close -
                         f.vwap
-                    ) /
-                    f.atr14
+                    ) / f.atr14
                     : (
                         f.vwap -
                         f.close
-                    ) /
-                    f.atr14;
+                    ) / f.atr14;
 
             if (
                 recoveryMove <
@@ -1465,6 +1336,90 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // ANTI-CHASING
+        // =====================================================
+
+        function antiChaseCheck(
+            f,
+            side
+        ) {
+
+            if (!f) {
+
+                return {
+                    passed: false,
+                    reasons: [
+                        "NO_FEATURES"
+                    ]
+                };
+            }
+
+            const reasons = [];
+
+            if (
+                Math.abs(
+                    f.vwapDistanceATR
+                ) >
+                MAX_TREND_VWAP_DISTANCE_ATR
+            ) {
+
+                reasons.push(
+                    "VWAP_TOO_FAR"
+                );
+            }
+
+            if (
+                Math.abs(
+                    f.emaSpreadATR
+                ) >
+                MAX_TREND_EMA_SPREAD_ATR
+            ) {
+
+                reasons.push(
+                    "EMA_TOO_EXTENDED"
+                );
+            }
+
+            if (
+                f.trendStrength >
+                MAX_TREND_STRENGTH_ATR
+            ) {
+
+                reasons.push(
+                    "TREND_TOO_EXTENDED"
+                );
+            }
+
+            if (
+                side === "BUY" &&
+                f.ema9SlopeATR < 0
+            ) {
+
+                reasons.push(
+                    "BUY_SLOPE_FAILURE"
+                );
+            }
+
+            if (
+                side === "SELL" &&
+                f.ema9SlopeATR > 0
+            ) {
+
+                reasons.push(
+                    "SELL_SLOPE_FAILURE"
+                );
+            }
+
+            return {
+
+                passed:
+                    reasons.length === 0,
+
+                reasons
+            };
+        }
+
+        // =====================================================
         // SETUP DETECTION
         // =====================================================
 
@@ -1485,55 +1440,70 @@ export default async function handler(req, res) {
 
             const setups = [];
 
-            // TREND FOLLOW BUY
+            // -------------------------------------------------
+            // TREND FOLLOW
+            // -------------------------------------------------
 
             if (
-                f.trend ===
-                    "BULLISH" &&
-                f.vwapDirection ===
-                    "ABOVE"
+                f.trend === "BULLISH" &&
+                f.vwapDirection === "ABOVE"
             ) {
 
-                setups.push({
+                const chase =
+                    antiChaseCheck(
+                        f,
+                        "BUY"
+                    );
 
-                    side:
-                        "BUY",
+                if (
+                    chase.passed
+                ) {
 
-                    setup:
-                        "TREND_FOLLOW",
+                    setups.push({
 
-                    interaction:
-                        null
-                });
+                        side: "BUY",
+
+                        setup:
+                            "TREND_FOLLOW",
+
+                        interaction: null
+                    });
+                }
             }
 
-            // TREND FOLLOW SELL
-
             if (
-                f.trend ===
-                    "BEARISH" &&
-                f.vwapDirection ===
-                    "BELOW"
+                f.trend === "BEARISH" &&
+                f.vwapDirection === "BELOW"
             ) {
 
-                setups.push({
+                const chase =
+                    antiChaseCheck(
+                        f,
+                        "SELL"
+                    );
 
-                    side:
-                        "SELL",
+                if (
+                    chase.passed
+                ) {
 
-                    setup:
-                        "TREND_FOLLOW",
+                    setups.push({
 
-                    interaction:
-                        null
-                });
+                        side: "SELL",
+
+                        setup:
+                            "TREND_FOLLOW",
+
+                        interaction: null
+                    });
+                }
             }
 
-            // VWAP PULLBACK BUY
+            // -------------------------------------------------
+            // VWAP PULLBACK
+            // -------------------------------------------------
 
             if (
-                f.trend ===
-                    "BULLISH"
+                f.trend === "BULLISH"
             ) {
 
                 const interaction =
@@ -1549,8 +1519,7 @@ export default async function handler(req, res) {
 
                     setups.push({
 
-                        side:
-                            "BUY",
+                        side: "BUY",
 
                         setup:
                             "VWAP_PULLBACK",
@@ -1560,11 +1529,8 @@ export default async function handler(req, res) {
                 }
             }
 
-            // VWAP PULLBACK SELL
-
             if (
-                f.trend ===
-                    "BEARISH"
+                f.trend === "BEARISH"
             ) {
 
                 const interaction =
@@ -1580,8 +1546,7 @@ export default async function handler(req, res) {
 
                     setups.push({
 
-                        side:
-                            "SELL",
+                        side: "SELL",
 
                         setup:
                             "VWAP_PULLBACK",
@@ -1640,10 +1605,7 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-
-                reasons.push(
-                    "TREND"
-                );
+                reasons.push("TREND");
             }
 
             if (
@@ -1658,27 +1620,21 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-
-                reasons.push(
-                    "VWAP"
-                );
+                reasons.push("VWAP");
             }
 
             if (
                 (
                     side === "BUY" &&
-                    f.ema9 >
-                    f.ema21
+                    f.ema9 > f.ema21
                 ) ||
                 (
                     side === "SELL" &&
-                    f.ema9 <
-                    f.ema21
+                    f.ema9 < f.ema21
                 )
             ) {
 
                 score++;
-
                 reasons.push(
                     "EMA_ALIGNMENT"
                 );
@@ -1691,7 +1647,6 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-
                 reasons.push(
                     "EMA_SPREAD"
                 );
@@ -1709,10 +1664,7 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-
-                reasons.push(
-                    "SLOPE"
-                );
+                reasons.push("SLOPE");
             }
 
             if (
@@ -1727,10 +1679,7 @@ export default async function handler(req, res) {
             ) {
 
                 score++;
-
-                reasons.push(
-                    "RSI"
-                );
+                reasons.push("RSI");
             }
 
             return {
@@ -1772,12 +1721,12 @@ export default async function handler(req, res) {
 
             return [
                 side,
-                setup,
-                f.trend,
-                f.vwapDirection,
-                f.regime,
-                f.timeBucket,
-                f.rsiBucket
+                `S:${setup}`,
+                `T:${f.trend}`,
+                `V:${f.vwapDirection}`,
+                `G:${f.regime}`,
+                `H:${f.timeBucket}`,
+                `R:${f.rsiBucket}`
             ].join("|");
         }
 
@@ -1804,9 +1753,7 @@ export default async function handler(req, res) {
             for (
                 let i =
                     entryIndex + 1;
-
                 i <= end;
-
                 i++
             ) {
 
@@ -1824,27 +1771,9 @@ export default async function handler(req, res) {
                         candle.h >= target;
 
                     /*
-                     * Conservative same-candle
-                     * assumption:
+                     * Conservative same-candle rule:
                      * STOP FIRST.
                      */
-
-                    if (
-                        hitStop &&
-                        hitTarget
-                    ) {
-
-                        return {
-
-                            exitIndex: i,
-
-                            exitType:
-                                "STOP",
-
-                            resultR:
-                                -1
-                        };
-                    }
 
                     if (
                         hitStop
@@ -1857,8 +1786,7 @@ export default async function handler(req, res) {
                             exitType:
                                 "STOP",
 
-                            resultR:
-                                -1
+                            resultR: -1
                         };
                     }
 
@@ -1873,8 +1801,7 @@ export default async function handler(req, res) {
                             exitType:
                                 "TARGET",
 
-                            resultR:
-                                2
+                            resultR: 2
                         };
                     }
 
@@ -1887,23 +1814,6 @@ export default async function handler(req, res) {
                         candle.l <= target;
 
                     if (
-                        hitStop &&
-                        hitTarget
-                    ) {
-
-                        return {
-
-                            exitIndex: i,
-
-                            exitType:
-                                "STOP",
-
-                            resultR:
-                                -1
-                        };
-                    }
-
-                    if (
                         hitStop
                     ) {
 
@@ -1914,8 +1824,7 @@ export default async function handler(req, res) {
                             exitType:
                                 "STOP",
 
-                            resultR:
-                                -1
+                            resultR: -1
                         };
                     }
 
@@ -1930,8 +1839,7 @@ export default async function handler(req, res) {
                             exitType:
                                 "TARGET",
 
-                            resultR:
-                                2
+                            resultR: 2
                         };
                     }
                 }
@@ -1939,19 +1847,17 @@ export default async function handler(req, res) {
 
             return {
 
-                exitIndex:
-                    end,
+                exitIndex: end,
 
                 exitType:
                     "TIMEOUT",
 
-                resultR:
-                    0
+                resultR: 0
             };
         }
 
         // =====================================================
-        // LEARNING RECORD
+        // CREATE RECORD
         // =====================================================
 
         function createLearningRecord(
@@ -1981,28 +1887,46 @@ export default async function handler(req, res) {
             if (
                 !confirmation.passed
             ) {
+
                 return null;
             }
 
-            const interaction =
+            if (
                 setup ===
-                "VWAP_PULLBACK"
+                "TREND_FOLLOW"
+            ) {
 
-                    ? recentVWAPInteraction(
-                        candles,
-                        index,
+                const chase =
+                    antiChaseCheck(
+                        f,
                         side
-                    )
+                    );
 
-                    : null;
+                if (
+                    !chase.passed
+                ) {
+
+                    return null;
+                }
+            }
+
+            let interaction = null;
 
             if (
                 setup ===
-                    "VWAP_PULLBACK" &&
-                !interaction
+                "VWAP_PULLBACK"
             ) {
 
-                return null;
+                interaction =
+                    recentVWAPInteraction(
+                        candles,
+                        index,
+                        side
+                    );
+
+                if (!interaction) {
+                    return null;
+                }
             }
 
             const entry =
@@ -2012,7 +1936,6 @@ export default async function handler(req, res) {
                 f.atr14;
 
             let stop;
-
             let target;
 
             if (
@@ -2040,7 +1963,7 @@ export default async function handler(req, res) {
                     atrValue;
             }
 
-            const result =
+            const outcome =
                 evaluateTrade(
                     candles,
                     index,
@@ -2051,6 +1974,8 @@ export default async function handler(req, res) {
                 );
 
             return {
+
+                index,
 
                 side,
 
@@ -2068,9 +1993,6 @@ export default async function handler(req, res) {
                 vwapDirection:
                     f.vwapDirection,
 
-                rsiBucket:
-                    f.rsiBucket,
-
                 pattern:
                     patternKey(
                         side,
@@ -2085,13 +2007,11 @@ export default async function handler(req, res) {
                         f.trend
                     ),
 
-                index,
-
                 resultR:
-                    result.resultR,
+                    outcome.resultR,
 
                 exitIndex:
-                    result.exitIndex,
+                    outcome.exitIndex,
 
                 confirmationScore:
                     confirmation.score,
@@ -2105,15 +2025,11 @@ export default async function handler(req, res) {
         // =====================================================
 
         function calculateMetrics(
-            records
+            input
         ) {
 
-            if (
-                !Array.isArray(records)
-            ) {
-
-                records = [];
-            }
+            const records =
+                safeArray(input);
 
             const wins =
                 records.filter(
@@ -2134,8 +2050,7 @@ export default async function handler(req, res) {
                 ).length;
 
             const decisive =
-                wins +
-                losses;
+                wins + losses;
 
             const totalWinR =
                 records
@@ -2197,17 +2112,15 @@ export default async function handler(req, res) {
                         : 0;
 
             let equity = 0;
-
             let peak = 0;
-
             let maxDD = 0;
 
             let currentLossStreak = 0;
-
             let maxLossStreak = 0;
 
             for (
-                const record of records
+                const record
+                of records
             ) {
 
                 equity +=
@@ -2310,255 +2223,82 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // PERSISTENCE / EDGE QUALITY
+        // STABILITY
         // =====================================================
 
-        function analyzePersistence(
+        function calculateStability(
             records,
             start,
             end
         ) {
 
-            if (
-                !Array.isArray(records) ||
-                records.length === 0
-            ) {
-
-                return {
-
-                    sections: 0,
-
-                    stableSections: 0,
-
-                    persistence: 0,
-
-                    edgeDecay: 0,
-
-                    sectionMetrics: []
-                };
-            }
-
-            const length =
-                Math.max(
-                    1,
-                    end - start
-                );
-
-            const sectionRecords = [
+            const sections = [
                 [],
                 [],
                 [],
                 []
             ];
 
+            const width =
+                Math.max(
+                    1,
+                    (
+                        end -
+                        start
+                    ) / 4
+                );
+
             for (
-                const record of records
+                const record
+                of safeArray(records)
             ) {
 
-                const relative =
-                    (
-                        record.index -
-                        start
-                    ) /
-                    length;
-
-                let section =
-                    Math.floor(
-                        relative * 4
+                const section =
+                    Math.min(
+                        3,
+                        Math.floor(
+                            (
+                                record.index -
+                                start
+                            ) /
+                            width
+                        )
                     );
 
-                section =
-                    clamp(
-                        section,
-                        0,
-                        3
-                    );
-
-                sectionRecords[
-                    section
-                ].push(
-                    record
-                );
+                sections[section]
+                    .push(record);
             }
 
             const sectionMetrics =
-                sectionRecords.map(
-                    (section, index) => {
-
-                        const metrics =
-                            calculateMetrics(
-                                section
-                            );
-
-                        return {
-
-                            section:
-                                index + 1,
-
-                            trades:
-                                metrics.trades,
-
-                            decisiveTrades:
-                                metrics.decisiveTrades,
-
-                            netR:
-                                metrics.netR,
-
-                            expectedValueR:
-                                metrics.expectedValueR,
-
-                            profitFactor:
-                                metrics.profitFactor
-                        };
-                    }
+                sections.map(
+                    x =>
+                        calculateMetrics(x)
                 );
 
-            const validSections =
+            const profitableSections =
                 sectionMetrics.filter(
                     x =>
-                        x.trades >= 1
-                );
-
-            const positiveSections =
-                validSections.filter(
-                    x =>
-                        x.expectedValueR >= 0
+                        x.decisiveTrades > 0 &&
+                        x.expectedValueR > 0
                 ).length;
-
-            const stableSections =
-                validSections.filter(
-                    x =>
-                        x.decisiveTrades >= 1 &&
-                        x.expectedValueR >= 0
-                ).length;
-
-            const older =
-                sectionMetrics
-                    .slice(
-                        0,
-                        2
-                    )
-                    .filter(
-                        x =>
-                            x.trades > 0
-                    );
-
-            const recent =
-                sectionMetrics
-                    .slice(
-                        2,
-                        4
-                    )
-                    .filter(
-                        x =>
-                            x.trades > 0
-                    );
-
-            const oldEV =
-                older.length
-                    ? older.reduce(
-                        (
-                            sum,
-                            x
-                        ) =>
-                            sum +
-                            x.expectedValueR,
-                        0
-                    ) /
-                    older.length
-                    : 0;
-
-            const recentEV =
-                recent.length
-                    ? recent.reduce(
-                        (
-                            sum,
-                            x
-                        ) =>
-                            sum +
-                            x.expectedValueR,
-                        0
-                    ) /
-                    recent.length
-                    : 0;
-
-            let edgeDecay = 0;
-
-            if (
-                oldEV > 0
-            ) {
-
-                edgeDecay =
-                    (
-                        oldEV -
-                        recentEV
-                    ) /
-                    Math.abs(
-                        oldEV
-                    );
-
-            } else if (
-                recentEV < 0
-            ) {
-
-                edgeDecay = 1;
-            }
-
-            edgeDecay =
-                round(
-                    clamp(
-                        edgeDecay,
-                        -1,
-                        1
-                    ),
-                    4
-                );
-
-            const persistence =
-                validSections.length
-                    ? positiveSections /
-                      validSections.length
-                    : 0;
 
             return {
 
                 sections:
-                    validSections.length,
+                    sectionMetrics,
 
-                stableSections,
-
-                persistence:
-                    round(
-                        persistence,
-                        4
-                    ),
-
-                edgeDecay,
-
-                oldEV:
-                    round(
-                        oldEV,
-                        4
-                    ),
-
-                recentEV:
-                    round(
-                        recentEV,
-                        4
-                    ),
-
-                sectionMetrics
+                profitableSections
             };
         }
 
         // =====================================================
-        // LEARN HIERARCHY
+        // DISCOVER CANDIDATES
         // =====================================================
 
-        function learnHierarchy(
+        function discoverCandidates(
             candles,
-            trainingStart,
-            trainingEnd
+            start,
+            end
         ) {
 
             const familyMap =
@@ -2569,17 +2309,17 @@ export default async function handler(req, res) {
 
             const rawRecords = [];
 
-            const lastSafeIndex =
-                trainingEnd -
-                MAX_HOLD_CANDLES;
+            const stop =
+                Math.max(
+                    start + 30,
+                    end -
+                    MAX_HOLD_CANDLES
+                );
 
             for (
                 let i =
-                    trainingStart + 30;
-
-                i <
-                    lastSafeIndex;
-
+                    start + 30;
+                i < stop;
                 i++
             ) {
 
@@ -2589,14 +2329,8 @@ export default async function handler(req, res) {
                         i
                     );
 
-                if (
-                    !setups.length
-                ) {
-                    continue;
-                }
-
                 for (
-                    const setupRecord
+                    const setup
                     of setups
                 ) {
 
@@ -2604,8 +2338,8 @@ export default async function handler(req, res) {
                         createLearningRecord(
                             candles,
                             i,
-                            setupRecord.side,
-                            setupRecord.setup
+                            setup.side,
+                            setup.setup
                         );
 
                     if (!record) {
@@ -2632,9 +2366,7 @@ export default async function handler(req, res) {
                         .get(
                             record.family
                         )
-                        .push(
-                            record
-                        );
+                        .push(record);
 
                     if (
                         !patternMap.has(
@@ -2652,9 +2384,7 @@ export default async function handler(req, res) {
                         .get(
                             record.pattern
                         )
-                        .push(
-                            record
-                        );
+                        .push(record);
                 }
             }
 
@@ -2664,50 +2394,28 @@ export default async function handler(req, res) {
                 level
             ) {
 
-                if (
-                    !Array.isArray(records)
-                ) {
-                    records = [];
-                }
-
                 const metrics =
                     calculateMetrics(
                         records
                     );
 
-                const samples =
-                    records.length;
-
-                const decisive =
-                    metrics.decisiveTrades;
-
-                const winRate =
-                    decisive
-                        ? metrics.wins /
-                          decisive
-                        : 0;
-
-                const persistence =
-                    analyzePersistence(
+                const stability =
+                    calculateStability(
                         records,
-                        trainingStart,
-                        trainingEnd
+                        start,
+                        end
                     );
 
                 const recentStart =
-                    trainingStart +
+                    start +
                     Math.floor(
                         (
-                            trainingEnd -
-                            trainingStart
-                        ) *
-                        (
-                            1 -
-                            RECENT_FRACTION
-                        )
+                            end -
+                            start
+                        ) * 0.75
                     );
 
-                const recentRecords =
+                const recent =
                     records.filter(
                         x =>
                             x.index >=
@@ -2716,31 +2424,15 @@ export default async function handler(req, res) {
 
                 const recentMetrics =
                     calculateMetrics(
-                        recentRecords
+                        recent
                     );
-
-                const recentDecisive =
-                    recentMetrics
-                        .decisiveTrades;
-
-                const recentEV =
-                    recentMetrics
-                        .expectedValueR;
-
-                const recentPF =
-                    recentMetrics
-                        .profitFactor;
-
-                const recentLossStreak =
-                    recentMetrics
-                        .maxConsecutiveLosses;
 
                 let quality = 0;
 
                 quality +=
                     clamp(
-                        winRate *
-                        40,
+                        metrics.winRate *
+                        0.40,
                         0,
                         40
                     );
@@ -2750,45 +2442,32 @@ export default async function handler(req, res) {
                         Math.max(
                             metrics.expectedValueR,
                             0
-                        ) *
-                        30,
+                        ) * 25,
                         0,
-                        30
+                        25
                     );
 
                 quality +=
                     clamp(
                         Math.max(
-                            metrics.profitFactor -
-                            1,
+                            metrics.profitFactor - 1,
                             0
-                        ) *
-                        10,
+                        ) * 10,
                         0,
                         20
                     );
 
                 quality +=
                     Math.min(
-                        persistence
-                            .stableSections,
-                        4
-                    ) *
-                    2.5;
+                        stability.profitableSections,
+                        3
+                    ) * 5;
 
                 if (
-                    recentEV < 0
+                    recentMetrics.expectedValueR < 0
                 ) {
 
-                    quality -= 15;
-                }
-
-                if (
-                    persistence.edgeDecay >
-                    MAX_EDGE_DECAY
-                ) {
-
-                    quality -= 10;
+                    quality -= 20;
                 }
 
                 quality =
@@ -2798,64 +2477,44 @@ export default async function handler(req, res) {
                         100
                     );
 
-                const samplePass =
+                const minSamples =
                     level === "FAMILY"
-                        ? samples >=
-                          FAMILY_MIN_SAMPLES
-                        : samples >=
-                          PATTERN_MIN_SAMPLES;
+                        ? FAMILY_MIN_SAMPLES
+                        : PATTERN_MIN_SAMPLES;
 
-                const decisivePass =
+                const minDecisive =
                     level === "FAMILY"
-                        ? decisive >=
-                          FAMILY_MIN_DECISIVE
-                        : decisive >=
-                          PATTERN_MIN_DECISIVE;
+                        ? FAMILY_MIN_DECISIVE
+                        : PATTERN_MIN_DECISIVE;
 
-                const evPass =
+                const minEV =
                     level === "FAMILY"
-                        ? metrics.expectedValueR >=
-                          FAMILY_MIN_EV
-                        : metrics.expectedValueR >=
-                          PATTERN_MIN_EV;
+                        ? FAMILY_MIN_EV
+                        : PATTERN_MIN_EV;
 
-                const pfPass =
+                const minPF =
                     level === "FAMILY"
-                        ? metrics.profitFactor >=
-                          FAMILY_MIN_PF
-                        : metrics.profitFactor >=
-                          PATTERN_MIN_PF;
-
-                const persistencePass =
-                    persistence.stableSections >=
-                    MIN_PERSISTENCE_SECTIONS;
-
-                const recentPass =
-                    recentRecords.length >=
-                        MIN_RECENT_SAMPLES &&
-                    recentDecisive >=
-                        MIN_RECENT_DECISIVE &&
-                    recentEV >=
-                        MIN_RECENT_EV &&
-                    recentPF >=
-                        MIN_RECENT_PF &&
-                    recentLossStreak <=
-                        MAX_RECENT_LOSS_STREAK;
-
-                const decayPass =
-                    persistence.edgeDecay <=
-                    MAX_EDGE_DECAY;
+                        ? FAMILY_MIN_PF
+                        : PATTERN_MIN_PF;
 
                 const qualified =
-                    samplePass &&
-                    decisivePass &&
-                    evPass &&
-                    pfPass &&
-                    persistencePass &&
-                    recentPass &&
-                    decayPass &&
-                    quality >=
-                    QUALITY_THRESHOLD;
+                    metrics.trades >=
+                        minSamples &&
+
+                    metrics.decisiveTrades >=
+                        minDecisive &&
+
+                    metrics.expectedValueR >=
+                        minEV &&
+
+                    metrics.profitFactor >=
+                        minPF &&
+
+                    stability.profitableSections >=
+                        MIN_STABLE_SECTIONS &&
+
+                    recentMetrics.expectedValueR >=
+                        0;
 
                 return {
 
@@ -2863,21 +2522,11 @@ export default async function handler(req, res) {
 
                     level,
 
-                    side:
-                        key.startsWith(
-                            "BUY|"
-                        )
-                            ? "BUY"
-                            : "SELL",
+                    samples:
+                        metrics.trades,
 
-                    setup:
-                        key.includes(
-                            "TREND_FOLLOW"
-                        )
-                            ? "TREND_FOLLOW"
-                            : "VWAP_PULLBACK",
-
-                    samples,
+                    decisiveTrades:
+                        metrics.decisiveTrades,
 
                     wins:
                         metrics.wins,
@@ -2888,14 +2537,8 @@ export default async function handler(req, res) {
                     timeouts:
                         metrics.timeouts,
 
-                    decisiveTrades:
-                        metrics.decisiveTrades,
-
                     winRate:
-                        round(
-                            winRate * 100,
-                            2
-                        ),
+                        metrics.winRate,
 
                     netR:
                         metrics.netR,
@@ -2909,40 +2552,20 @@ export default async function handler(req, res) {
                     maxDrawdownR:
                         metrics.maxDrawdownR,
 
-                    maxConsecutiveLosses:
-                        metrics.maxConsecutiveLosses,
+                    stableSections:
+                        stability.profitableSections,
 
                     recentSamples:
-                        recentRecords.length,
+                        recent.length,
 
                     recentDecisive:
-                        recentDecisive,
+                        recentMetrics.decisiveTrades,
 
                     recentEV:
-                        round(
-                            recentEV,
-                            4
-                        ),
+                        recentMetrics.expectedValueR,
 
                     recentPF:
-                        round(
-                            recentPF,
-                            4
-                        ),
-
-                    recentLossStreak,
-
-                    persistence:
-                        persistence.persistence,
-
-                    stableSections:
-                        persistence.stableSections,
-
-                    edgeDecay:
-                        persistence.edgeDecay,
-
-                    oldEV:
-                        persistence.oldEV,
+                        recentMetrics.profitFactor,
 
                     quality:
                         round(
@@ -3005,267 +2628,432 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // SELECT EDGES
+        // VALIDATE CANDIDATE
         // =====================================================
 
-        function selectEdges(
-            learned
+        function validateCandidate(
+            candles,
+            candidate,
+            validationStart,
+            validationEnd
         ) {
 
-            const qualifiedFamilies =
-                learned.families
-                    .filter(
-                        x =>
-                            x.qualified
+            const family =
+                candidate.family ||
+                candidate.key
+                    .split("|")
+                    .slice(
+                        0,
+                        3
                     )
-                    .sort(
-                        (
-                            a,
-                            b
-                        ) =>
-                            b.quality -
-                            a.quality
-                    );
+                    .join("|");
 
-            const qualifiedPatterns =
-                learned.patterns
-                    .filter(
-                        x =>
-                            x.qualified
-                    )
-                    .sort(
-                        (
-                            a,
-                            b
-                        ) =>
-                            b.quality -
-                            a.quality
-                    );
+            const trades = [];
 
-            const selected = [];
+            let cooldownUntil = -1;
 
-            /*
-             * Family edges first.
-             */
+            let lastPattern = null;
+            let lastPatternIndex = -9999;
+
+            let lastSide = null;
+            let lastSideIndex = -9999;
+
+            const lossStreak =
+                new Map();
 
             for (
-                const family
-                of qualifiedFamilies
+                let i =
+                    validationStart;
+                i <
+                    validationEnd - 1;
+                i++
             ) {
 
                 if (
-                    selected.length >= 8
+                    i <=
+                    cooldownUntil
                 ) {
-                    break;
+
+                    continue;
                 }
 
-                selected.push({
+                const f =
+                    features(
+                        candles,
+                        i
+                    );
 
-                    ...family,
+                if (!f) {
+                    continue;
+                }
 
-                    inherited:
-                        false,
+                const setups =
+                    detectSetups(
+                        candles,
+                        i
+                    );
 
-                    familyEvidence:
-                        family,
+                for (
+                    const setup
+                    of setups
+                ) {
 
-                    patternEvidence:
-                        null
-                });
+                    const key =
+                        patternKey(
+                            setup.side,
+                            setup.setup,
+                            f
+                        );
+
+                    const currentFamily =
+                        familyKey(
+                            setup.side,
+                            setup.setup,
+                            f.trend
+                        );
+
+                    const matched =
+                        candidate.level ===
+                            "FAMILY"
+                            ? currentFamily ===
+                              family
+                            : key ===
+                              candidate.key;
+
+                    if (!matched) {
+                        continue;
+                    }
+
+                    if (
+                        (
+                            lossStreak.get(
+                                key
+                            ) || 0
+                        ) >=
+                        MAX_VALIDATION_LOSS_STREAK
+                    ) {
+
+                        continue;
+                    }
+
+                    if (
+                        key === lastPattern &&
+                        i -
+                        lastPatternIndex <
+                        SAME_PATTERN_COOLDOWN
+                    ) {
+
+                        continue;
+                    }
+
+                    if (
+                        setup.side === lastSide &&
+                        i -
+                        lastSideIndex <
+                        SAME_SIDE_COOLDOWN
+                    ) {
+
+                        continue;
+                    }
+
+                    const confirmation =
+                        confirmationScore(
+                            candles,
+                            i,
+                            setup.side
+                        );
+
+                    if (
+                        !confirmation.passed
+                    ) {
+
+                        continue;
+                    }
+
+                    const entry =
+                        candles[i].c;
+
+                    const a =
+                        f.atr14;
+
+                    const stop =
+                        setup.side === "BUY"
+                            ? entry - a
+                            : entry + a;
+
+                    const target =
+                        setup.side === "BUY"
+                            ? entry + TARGET_R * a
+                            : entry - TARGET_R * a;
+
+                    const outcome =
+                        evaluateTrade(
+                            candles,
+                            i,
+                            setup.side,
+                            entry,
+                            stop,
+                            target
+                        );
+
+                    const trade = {
+
+                        index: i,
+
+                        side:
+                            setup.side,
+
+                        setup:
+                            setup.setup,
+
+                        pattern:
+                            key,
+
+                        family:
+                            currentFamily,
+
+                        resultR:
+                            outcome.resultR,
+
+                        exitIndex:
+                            outcome.exitIndex,
+
+                        exitType:
+                            outcome.exitType
+                    };
+
+                    trades.push(
+                        trade
+                    );
+
+                    if (
+                        outcome.resultR < 0
+                    ) {
+
+                        lossStreak.set(
+                            key,
+                            (
+                                lossStreak.get(key) ||
+                                0
+                            ) + 1
+                        );
+
+                    } else {
+
+                        lossStreak.set(
+                            key,
+                            0
+                        );
+                    }
+
+                    cooldownUntil =
+                        outcome.exitIndex +
+                        ENTRY_COOLDOWN;
+
+                    lastPattern =
+                        key;
+
+                    lastPatternIndex =
+                        i;
+
+                    lastSide =
+                        setup.side;
+
+                    lastSideIndex =
+                        i;
+
+                    break;
+                }
             }
 
-            /*
-             * Detailed pattern edges.
-             */
+            const metrics =
+                calculateMetrics(
+                    trades
+                );
+
+            const passed =
+                metrics.trades >=
+                    VALIDATION_MIN_SAMPLES &&
+
+                metrics.decisiveTrades >=
+                    VALIDATION_MIN_DECISIVE &&
+
+                metrics.expectedValueR >=
+                    VALIDATION_MIN_EV &&
+
+                metrics.profitFactor >=
+                    VALIDATION_MIN_PF &&
+
+                metrics.maxConsecutiveLosses <=
+                    MAX_VALIDATION_LOSS_STREAK;
+
+            return {
+
+                passed,
+
+                trades,
+
+                metrics
+            };
+        }
+
+        // =====================================================
+        // PROMOTION
+        // =====================================================
+
+        function promoteCandidates(
+            candles,
+            discovery,
+            discoveryStart,
+            discoveryEnd
+        ) {
+
+            const validationStart =
+                discoveryEnd -
+                Math.floor(
+                    (
+                        discoveryEnd -
+                        discoveryStart
+                    ) *
+                    VALIDATION_FRACTION
+                );
+
+            const candidates = [];
+
+            const qualifiedFamilies =
+                discovery.families.filter(
+                    x =>
+                        x.qualified
+                );
+
+            const qualifiedPatterns =
+                discovery.patterns.filter(
+                    x =>
+                        x.qualified
+                );
 
             for (
-                const pattern
-                of qualifiedPatterns
+                const candidate
+                of [
+                    ...qualifiedFamilies,
+                    ...qualifiedPatterns
+                ]
             ) {
 
-                if (
-                    selected.length >= 12
-                ) {
-                    break;
-                }
-
                 const familyKeyValue =
-                    pattern.key
-                        .split("|")
-                        .slice(
-                            0,
-                            3
-                        )
-                        .join("|");
+                    candidate.level ===
+                        "FAMILY"
+                        ? candidate.key
+                        : candidate.key
+                            .split("|")
+                            .slice(
+                                0,
+                                3
+                            )
+                            .join("|");
 
                 const family =
-                    learned.families.find(
+                    discovery.families.find(
                         x =>
                             x.key ===
                             familyKeyValue
                     );
 
-                if (
-                    selected.some(
-                        x =>
-                            x.key ===
-                            pattern.key
-                    )
-                ) {
-                    continue;
-                }
-
-                selected.push({
-
-                    ...pattern,
-
-                    inherited:
-                        false,
-
-                    familyEvidence:
-                        family ||
-                        null,
-
-                    patternEvidence:
-                        pattern
-                });
-            }
-
-            /*
-             * Family inheritance.
-             */
-
-            for (
-                const family
-                of qualifiedFamilies
-            ) {
-
-                const hasDetailed =
-                    selected.some(
-                        x =>
-                            x.level ===
-                                "PATTERN" &&
-                            x.family ===
-                                family.key
+                const validation =
+                    validateCandidate(
+                        candles,
+                        candidate,
+                        validationStart,
+                        discoveryEnd
                     );
 
                 if (
-                    hasDetailed
+                    !validation.passed
                 ) {
+
                     continue;
                 }
 
+                // ---------------------------------------------
+                // FAMILY VS PATTERN
+                // ---------------------------------------------
+
                 if (
-                    selected.length >= 12
+                    candidate.level ===
+                    "PATTERN"
                 ) {
-                    break;
+
+                    if (
+                        family
+                    ) {
+
+                        if (
+                            family.expectedValueR <
+                            0 &&
+                            !ALLOW_PATTERN_OVERRIDE_LOSING_FAMILY
+                        ) {
+
+                            continue;
+                        }
+
+                        const gap =
+                            candidate.expectedValueR -
+                            family.expectedValueR;
+
+                        if (
+                            gap >
+                            MAX_PATTERN_FAMILY_EV_GAP
+                        ) {
+
+                            continue;
+                        }
+                    }
                 }
 
-                selected.push({
+                candidates.push({
 
-                    ...family,
-
-                    inherited:
-                        true,
+                    ...candidate,
 
                     familyEvidence:
-                        family,
+                        family || null,
 
-                    patternEvidence:
-                        null
+                    validation
                 });
             }
 
-            return selected;
-        }
+            candidates.sort(
+                (
+                    a,
+                    b
+                ) => {
 
-        // =====================================================
-        // CONCENTRATION
-        // =====================================================
+                    const aScore =
+                        a.validation.metrics.expectedValueR *
+                        100 +
+                        a.quality;
 
-        function concentration(
-            trades
-        ) {
+                    const bScore =
+                        b.validation.metrics.expectedValueR *
+                        100 +
+                        b.quality;
 
-            if (
-                !Array.isArray(trades) ||
-                trades.length === 0
-            ) {
-
-                return {
-
-                    uniquePatterns: 0,
-
-                    maximumShare: 0,
-
-                    patternCounts: {},
-
-                    concentrationPassed:
-                        false
-                };
-            }
-
-            const counts = {};
-
-            for (
-                const trade
-                of trades
-            ) {
-
-                const key =
-                    trade.pattern;
-
-                counts[key] =
-                    (
-                        counts[key] ||
-                        0
-                    ) + 1;
-            }
-
-            const values =
-                Object.values(
-                    counts
-                );
-
-            const maximum =
-                Math.max(
-                    ...values
-                );
-
-            const maximumShare =
-                maximum /
-                trades.length;
+                    return bScore - aScore;
+                }
+            );
 
             return {
 
-                uniquePatterns:
-                    Object.keys(
-                        counts
-                    ).length,
+                candidates,
 
-                maximumShare:
-                    round(
-                        maximumShare,
-                        4
-                    ),
-
-                patternCounts:
-                    counts,
-
-                concentrationPassed:
-                    Object.keys(
-                        counts
-                    ).length >= 2 &&
-                    maximumShare <=
-                    MAX_PATTERN_CONCENTRATION
+                validationStart
             };
         }
 
         // =====================================================
-        // EXECUTE FOLD
+        // EXECUTE OOS
         // =====================================================
 
-        function executeFold(
+        function executeOOS(
             candles,
             testStart,
             testEnd,
@@ -3275,20 +3063,13 @@ export default async function handler(req, res) {
 
             const trades = [];
 
-            let cooldownUntil =
-                -1;
+            let cooldownUntil = -1;
 
-            let lastPattern =
-                null;
+            let lastPattern = null;
+            let lastPatternIndex = -9999;
 
-            let lastPatternIndex =
-                -9999;
-
-            let lastSide =
-                null;
-
-            let lastSideIndex =
-                -9999;
+            let lastSide = null;
+            let lastSideIndex = -9999;
 
             const lossStreak =
                 new Map();
@@ -3296,10 +3077,8 @@ export default async function handler(req, res) {
             for (
                 let i =
                     testStart;
-
                 i <
                     testEnd - 1;
-
                 i++
             ) {
 
@@ -3307,6 +3086,7 @@ export default async function handler(req, res) {
                     i <=
                     cooldownUntil
                 ) {
+
                     continue;
                 }
 
@@ -3329,6 +3109,7 @@ export default async function handler(req, res) {
                 if (
                     !setups.length
                 ) {
+
                     continue;
                 }
 
@@ -3354,13 +3135,17 @@ export default async function handler(req, res) {
                     const match =
                         selected.find(
                             x =>
-                                x.key ===
-                                    key ||
                                 (
                                     x.level ===
-                                        "FAMILY" &&
+                                    "PATTERN" &&
                                     x.key ===
-                                        family
+                                    key
+                                ) ||
+                                (
+                                    x.level ===
+                                    "FAMILY" &&
+                                    x.key ===
+                                    family
                                 )
                         );
 
@@ -3376,26 +3161,27 @@ export default async function handler(req, res) {
                         ) >=
                         MAX_LOSS_STREAK
                     ) {
+
                         continue;
                     }
 
                     if (
-                        key ===
-                            lastPattern &&
+                        key === lastPattern &&
                         i -
-                            lastPatternIndex <
-                            SAME_PATTERN_COOLDOWN
+                        lastPatternIndex <
+                        SAME_PATTERN_COOLDOWN
                     ) {
+
                         continue;
                     }
 
                     if (
-                        setup.side ===
-                            lastSide &&
+                        setup.side === lastSide &&
                         i -
-                            lastSideIndex <
-                            SAME_SIDE_COOLDOWN
+                        lastSideIndex <
+                        SAME_SIDE_COOLDOWN
                     ) {
+
                         continue;
                     }
 
@@ -3409,56 +3195,32 @@ export default async function handler(req, res) {
                     if (
                         !confirmation.passed
                     ) {
+
                         continue;
                     }
 
                     const entry =
                         candles[i].c;
 
-                    const atrValue =
+                    const a =
                         f.atr14;
 
-                    let stop;
+                    const stop =
+                        setup.side === "BUY"
+                            ? entry - a
+                            : entry + a;
 
-                    let target;
+                    const target =
+                        setup.side === "BUY"
+                            ? entry + TARGET_R * a
+                            : entry - TARGET_R * a;
 
-                    let preferredTarget;
-
-                    if (
-                        setup.side ===
-                        "BUY"
-                    ) {
-
-                        stop =
-                            entry -
-                            atrValue;
-
-                        target =
-                            entry +
-                            TARGET_R *
-                            atrValue;
-
-                        preferredTarget =
-                            entry +
-                            PREFERRED_TARGET_R *
-                            atrValue;
-
-                    } else {
-
-                        stop =
-                            entry +
-                            atrValue;
-
-                        target =
-                            entry -
-                            TARGET_R *
-                            atrValue;
-
-                        preferredTarget =
-                            entry -
-                            PREFERRED_TARGET_R *
-                            atrValue;
-                    }
+                    const preferredTarget =
+                        setup.side === "BUY"
+                            ? entry +
+                              PREFERRED_TARGET_R * a
+                            : entry -
+                              PREFERRED_TARGET_R * a;
 
                     const outcome =
                         evaluateTrade(
@@ -3477,11 +3239,9 @@ export default async function handler(req, res) {
 
                         fold,
 
-                        index:
-                            i,
+                        index: i,
 
-                        signalIndex:
-                            i,
+                        signalIndex: i,
 
                         timestamp:
                             candles[i].ts,
@@ -3510,93 +3270,36 @@ export default async function handler(req, res) {
                         learningLevel:
                             match.level,
 
-                        inheritedFamily:
-                            match.inherited ||
-                            false,
-
                         quality:
                             match.quality,
 
-                        samples:
-                            match.samples,
-
-                        recentSamples:
-                            match.recentSamples,
-
-                        expectedValueR:
+                        discoveryEV:
                             match.expectedValueR,
 
-                        profitFactor:
+                        discoveryPF:
                             match.profitFactor,
 
-                        recentEV:
-                            match.recentEV,
+                        validationEV:
+                            match.validation.metrics
+                                .expectedValueR,
 
-                        recentPF:
-                            match.recentPF,
+                        validationPF:
+                            match.validation.metrics
+                                .profitFactor,
 
-                        edgeDecay:
-                            match.edgeDecay,
-
-                        persistence:
-                            match.persistence,
-
-                        stableSections:
-                            match.stableSections,
-
-                        familyQuality:
-                            match.familyEvidence
-                                ? match
-                                    .familyEvidence
-                                    .quality
-                                : null,
-
-                        patternQuality:
-                            match.patternEvidence
-                                ? match
-                                    .patternEvidence
-                                    .quality
-                                : match.quality,
-
-                        familySamples:
-                            match.familyEvidence
-                                ? match
-                                    .familyEvidence
-                                    .samples
-                                : match.samples,
-
-                        patternSamples:
-                            match.patternEvidence
-                                ? match
-                                    .patternEvidence
-                                    .samples
-                                : null,
+                        validationTrades:
+                            match.validation.metrics
+                                .trades,
 
                         familyEV:
                             match.familyEvidence
-                                ? match
-                                    .familyEvidence
-                                    .expectedValueR
-                                : match.expectedValueR,
-
-                        patternEV:
-                            match.patternEvidence
-                                ? match
-                                    .patternEvidence
+                                ? match.familyEvidence
                                     .expectedValueR
                                 : null,
 
                         familyPF:
                             match.familyEvidence
-                                ? match
-                                    .familyEvidence
-                                    .profitFactor
-                                : match.profitFactor,
-
-                        patternPF:
-                            match.patternEvidence
-                                ? match
-                                    .patternEvidence
+                                ? match.familyEvidence
                                     .profitFactor
                                 : null,
 
@@ -3621,6 +3324,18 @@ export default async function handler(req, res) {
                         vwapDistanceATR:
                             round(
                                 f.vwapDistanceATR,
+                                4
+                            ),
+
+                        emaSpreadATR:
+                            round(
+                                f.emaSpreadATR,
+                                4
+                            ),
+
+                        ema9SlopeATR:
+                            round(
+                                f.ema9SlopeATR,
                                 4
                             ),
 
@@ -3657,11 +3372,11 @@ export default async function handler(req, res) {
                         riskReward:
                             "1:2",
 
-                        resultR:
-                            outcome.resultR,
-
                         exitType:
                             outcome.exitType,
+
+                        resultR:
+                            outcome.resultR,
 
                         exitIndex:
                             outcome.exitIndex
@@ -3678,9 +3393,8 @@ export default async function handler(req, res) {
                         lossStreak.set(
                             key,
                             (
-                                lossStreak.get(
-                                    key
-                                ) || 0
+                                lossStreak.get(key) ||
+                                0
                             ) + 1
                         );
 
@@ -3716,7 +3430,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // HISTORICAL API
+        // API FETCH
         // =====================================================
 
         async function fetchHistoricalChunk(
@@ -3758,15 +3472,12 @@ export default async function handler(req, res) {
             try {
 
                 payload =
-                    JSON.parse(
-                        text
-                    );
+                    JSON.parse(text);
 
             } catch {
 
                 payload = {
-                    raw:
-                        text
+                    raw: text
                 };
             }
 
@@ -3783,17 +3494,15 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // LOAD HISTORICAL DATA
+        // LOAD DATA
         // =====================================================
 
         async function loadHistoricalData() {
 
             const accessToken =
                 (
-                    process.env
-                        .INDSTOCKS_TOKEN ||
-                    process.env
-                        .INDSTOCKS_ACCESS_TOKEN ||
+                    process.env.INDSTOCKS_TOKEN ||
+                    process.env.INDSTOCKS_ACCESS_TOKEN ||
                     ""
                 ).trim();
 
@@ -3850,8 +3559,7 @@ export default async function handler(req, res) {
                 });
 
                 cursor =
-                    chunkEnd +
-                    1000;
+                    chunkEnd + 1000;
             }
 
             const all = [];
@@ -3876,9 +3584,7 @@ export default async function handler(req, res) {
             }
 
             const prepared =
-                prepareData(
-                    all
-                );
+                prepareData(all);
 
             return {
 
@@ -3901,7 +3607,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // LOAD DATA
+        // LOAD
         // =====================================================
 
         const historicalData =
@@ -3911,11 +3617,11 @@ export default async function handler(req, res) {
             historicalData.candles;
 
         if (
-            rows.length < 600
+            rows.length < 500
         ) {
 
             return fail(
-                "Insufficient candle data for V14.4 robustness testing.",
+                "Insufficient candle data from INDstocks.",
                 {
 
                     rawCandles:
@@ -3925,7 +3631,7 @@ export default async function handler(req, res) {
                         historicalData.normalizedCandles,
 
                     minimumRequired:
-                        600
+                        500
                 }
             );
         }
@@ -3952,44 +3658,28 @@ export default async function handler(req, res) {
         const total =
             candles.length;
 
-        if (
-            total <=
-            INITIAL_TRAINING +
-            FOLD_COUNT * 50
-        ) {
+        const foldCount = 6;
 
-            return fail(
-                "Insufficient historical rows for six-fold walk-forward testing.",
-                {
+        const initialTraining = 250;
 
-                    historicalRows:
-                        total,
-
-                    requiredMoreThan:
-                        INITIAL_TRAINING +
-                        FOLD_COUNT * 50
-                }
-            );
-        }
-
-        const availableTestRows =
+        const remaining =
             total -
-            INITIAL_TRAINING;
+            initialTraining;
 
-        const baseTestSize =
+        const testSize =
             Math.floor(
-                availableTestRows /
-                FOLD_COUNT
+                remaining /
+                foldCount
             );
 
         const folds = [];
 
         let trainingEnd =
-            INITIAL_TRAINING;
+            initialTraining;
 
         for (
             let fold = 1;
-            fold <= FOLD_COUNT;
+            fold <= foldCount;
             fold++
         ) {
 
@@ -3997,18 +3687,19 @@ export default async function handler(req, res) {
                 trainingEnd;
 
             const testEnd =
-                fold === FOLD_COUNT
+                fold === foldCount
                     ? total
                     : Math.min(
                         total,
                         testStart +
-                        baseTestSize
+                        testSize
                     );
 
             if (
                 testStart >=
                 testEnd
             ) {
+
                 break;
             }
 
@@ -4045,25 +3736,70 @@ export default async function handler(req, res) {
 
         const allTrades = [];
 
+        let profitableFolds = 0;
+
         for (
             const fold
             of folds
         ) {
 
-            const learned =
-                learnHierarchy(
+            /*
+             * IMPORTANT:
+             *
+             * The last portion of the training data is
+             * reserved as internal validation.
+             *
+             * It is NOT used for candidate discovery.
+             */
+
+            const validationSize =
+                Math.max(
+                    100,
+                    Math.floor(
+                        (
+                            fold.trainingEnd -
+                            fold.trainingStart
+                        ) *
+                        VALIDATION_FRACTION
+                    )
+                );
+
+            const discoveryEnd =
+                Math.max(
+                    fold.trainingStart + 100,
+                    fold.trainingEnd -
+                    validationSize
+                );
+
+            const discovery =
+                discoverCandidates(
                     candles,
                     fold.trainingStart,
-                    fold.trainingEnd
+                    discoveryEnd
                 );
+
+            const promoted =
+                promoteCandidates(
+                    candles,
+                    discovery,
+                    fold.trainingStart,
+                    discoveryEnd
+                );
+
+            /*
+             * Only candidates that survived internal
+             * validation are allowed into OOS.
+             */
 
             const selected =
-                selectEdges(
-                    learned
-                );
+                promoted.candidates
+                    .slice(
+                        0,
+                        12
+                    );
 
             const trades =
-                executeFold(
+                executeOOS(
                     candles,
                     fold.testStart,
                     fold.testEnd,
@@ -4080,22 +3816,22 @@ export default async function handler(req, res) {
                     trades
                 );
 
-            const conc =
-                concentration(
-                    trades
-                );
-
-            const profitable =
+            if (
                 metrics.netR > 0 &&
-                metrics.decisiveTrades >= 1;
+                metrics.expectedValueR > 0 &&
+                metrics.profitFactor > 1
+            ) {
 
-            const familySet =
+                profitableFolds++;
+            }
+
+            const independentFamilies =
                 new Set(
                     trades.map(
                         x =>
                             x.family
                     )
-                );
+                ).size;
 
             foldResults.push({
 
@@ -4105,26 +3841,37 @@ export default async function handler(req, res) {
                 trainingRows:
                     fold.trainingRows,
 
+                discoveryRows:
+                    discoveryEnd -
+                    fold.trainingStart,
+
+                validationRows:
+                    fold.trainingEnd -
+                    discoveryEnd,
+
                 testRows:
                     fold.testRows,
 
                 discoveredFamilies:
-                    learned.families.length,
+                    discovery.families.length,
 
                 qualifiedFamilies:
-                    learned.families.filter(
+                    discovery.families.filter(
                         x =>
                             x.qualified
                     ).length,
 
                 discoveredPatterns:
-                    learned.patterns.length,
+                    discovery.patterns.length,
 
                 qualifiedPatterns:
-                    learned.patterns.filter(
+                    discovery.patterns.filter(
                         x =>
                             x.qualified
                     ).length,
+
+                validationCandidates:
+                    promoted.candidates.length,
 
                 selectedEdges:
                     selected.length,
@@ -4135,35 +3882,35 @@ export default async function handler(req, res) {
                             x.level
                     ),
 
-                selectedSides:
+                selectedKeys:
                     selected.map(
                         x =>
-                            x.side
+                            x.key
                     ),
 
-                independentFamilies:
-                    familySet.size,
+                independentFamilies,
 
                 profitableFold:
-                    profitable,
+                    (
+                        metrics.netR > 0 &&
+                        metrics.expectedValueR > 0 &&
+                        metrics.profitFactor > 1
+                    ),
 
                 metrics,
-
-                concentration:
-                    conc,
-
-                trades,
 
                 tradeResults:
                     trades.map(
                         x =>
                             x.resultR
-                    )
+                    ),
+
+                trades
             });
         }
 
         // =====================================================
-        // GLOBAL METRICS
+        // GLOBAL OOS
         // =====================================================
 
         const globalStats =
@@ -4171,10 +3918,36 @@ export default async function handler(req, res) {
                 allTrades
             );
 
-        const globalConcentration =
-            concentration(
-                allTrades
+        const patternCounts = {};
+
+        for (
+            const trade
+            of allTrades
+        ) {
+
+            patternCounts[
+                trade.pattern
+            ] =
+                (
+                    patternCounts[
+                        trade.pattern
+                    ] || 0
+                ) + 1;
+        }
+
+        const patternValues =
+            Object.values(
+                patternCounts
             );
+
+        const maximumPatternShare =
+            allTrades.length &&
+            patternValues.length
+                ? Math.max(
+                    ...patternValues
+                ) /
+                  allTrades.length
+                : 0;
 
         const independentFamilies =
             new Set(
@@ -4184,124 +3957,36 @@ export default async function handler(req, res) {
                 )
             ).size;
 
-        const profitableFolds =
-            foldResults.filter(
-                x =>
-                    x.profitableFold
-            ).length;
+        const patternDiversity =
+            independentFamilies >=
+                MIN_INDEPENDENT_FAMILIES &&
 
-        // =====================================================
-        // BUY / SELL EVIDENCE
-        // =====================================================
+            maximumPatternShare <=
+                MAX_PATTERN_CONCENTRATION;
 
-        const buyTrades =
-            allTrades.filter(
-                x =>
-                    x.side === "BUY"
-            );
+        const foldValidation =
+            profitableFolds >=
+            MIN_OOS_PROFITABLE_FOLDS;
 
-        const sellTrades =
-            allTrades.filter(
-                x =>
-                    x.side === "SELL"
-            );
-
-        const buyStats =
-            calculateMetrics(
-                buyTrades
-            );
-
-        const sellStats =
-            calculateMetrics(
-                sellTrades
-            );
-
-        // =====================================================
-        // SETUP PERFORMANCE
-        // =====================================================
-
-        const setupPerformance = {
-
-            trendFollow:
-                calculateMetrics(
-                    allTrades.filter(
-                        x =>
-                            x.setup ===
-                            "TREND_FOLLOW"
-                    )
-                ),
-
-            vwapPullback:
-                calculateMetrics(
-                    allTrades.filter(
-                        x =>
-                            x.setup ===
-                            "VWAP_PULLBACK"
-                    )
-                )
-        };
-
-        // =====================================================
-        // RECENT OOS
-        // =====================================================
-
-        const recentOOSStart =
-            Math.floor(
-                allTrades.length *
-                (
-                    1 -
-                    RECENT_FRACTION
-                )
-            );
-
-        const latestOOSTrades =
-            allTrades.slice(
-                recentOOSStart
-            );
-
-        const latestOOSMetrics =
-            calculateMetrics(
-                latestOOSTrades
-            );
-
-        // =====================================================
-        // GLOBAL PROOF
-        // =====================================================
+        const sufficientEvidence =
+            globalStats.decisiveTrades >=
+            MIN_OOS_DECISIVE;
 
         const profitabilityProof =
+            foldValidation &&
+
+            sufficientEvidence &&
+
             globalStats.expectedValueR >=
-                MIN_GLOBAL_EV &&
+                MIN_OOS_EV &&
 
             globalStats.profitFactor >=
-                MIN_GLOBAL_PF &&
-
-            globalStats.decisiveTrades >=
-                MIN_GLOBAL_DECISIVE &&
-
-            profitableFolds >=
-                REQUIRED_PROFITABLE_FOLDS &&
+                MIN_OOS_PF &&
 
             independentFamilies >=
                 MIN_INDEPENDENT_FAMILIES &&
 
-            globalConcentration
-                .concentrationPassed &&
-
-            latestOOSMetrics
-                .decisiveTrades >=
-                MIN_RECENT_DECISIVE &&
-
-            latestOOSMetrics
-                .expectedValueR >=
-                MIN_RECENT_EV &&
-
-            latestOOSMetrics
-                .profitFactor >=
-                MIN_RECENT_PF;
-
-        // =====================================================
-        // RISK
-        // =====================================================
+            patternDiversity;
 
         const riskControl =
             globalStats.maxDrawdownR <=
@@ -4311,143 +3996,48 @@ export default async function handler(req, res) {
                 MAX_LOSS_STREAK;
 
         // =====================================================
-        // EVIDENCE
+        // BUY / SELL
         // =====================================================
 
-        const sufficientEvidence =
-            globalStats.decisiveTrades >=
-            MIN_GLOBAL_DECISIVE;
-
-        const patternDiversity =
-            independentFamilies >=
-                MIN_INDEPENDENT_FAMILIES &&
-
-            globalConcentration
-                .maximumShare <=
-                MAX_PATTERN_CONCENTRATION;
-
-        // =====================================================
-        // LATEST LEARNING
-        // =====================================================
-
-        const latestLearning =
-            learnHierarchy(
-                candles,
-                0,
-                candles.length
+        const buyStats =
+            calculateMetrics(
+                allTrades.filter(
+                    x =>
+                        x.side ===
+                        "BUY"
+                )
             );
 
-        const qualifiedFamilies =
-            latestLearning.families
-                .filter(
+        const sellStats =
+            calculateMetrics(
+                allTrades.filter(
                     x =>
-                        x.qualified
-                );
-
-        const qualifiedPatterns =
-            latestLearning.patterns
-                .filter(
-                    x =>
-                        x.qualified
-                );
-
-        const latestSelected =
-            selectEdges(
-                latestLearning
+                        x.side ===
+                        "SELL"
+                )
             );
 
         // =====================================================
-        // REJECTION DIAGNOSTICS
+        // SETUP PERFORMANCE
         // =====================================================
 
-        const familyRejections = {
+        const trendFollowStats =
+            calculateMetrics(
+                allTrades.filter(
+                    x =>
+                        x.setup ===
+                        "TREND_FOLLOW"
+                )
+            );
 
-            insufficientSamples: 0,
-
-            insufficientDecisive: 0,
-
-            insufficientStability: 0,
-
-            edgeBelowThreshold: 0,
-
-            recentNegative: 0,
-
-            recentInsufficient: 0,
-
-            excessiveDecay: 0
-        };
-
-        for (
-            const f
-            of latestLearning.families
-        ) {
-
-            if (
-                f.samples <
-                FAMILY_MIN_SAMPLES
-            ) {
-
-                familyRejections
-                    .insufficientSamples++;
-            }
-
-            if (
-                f.decisiveTrades <
-                FAMILY_MIN_DECISIVE
-            ) {
-
-                familyRejections
-                    .insufficientDecisive++;
-            }
-
-            if (
-                f.stableSections <
-                MIN_PERSISTENCE_SECTIONS
-            ) {
-
-                familyRejections
-                    .insufficientStability++;
-            }
-
-            if (
-                f.expectedValueR <
-                FAMILY_MIN_EV ||
-                f.profitFactor <
-                FAMILY_MIN_PF
-            ) {
-
-                familyRejections
-                    .edgeBelowThreshold++;
-            }
-
-            if (
-                f.recentEV < 0
-            ) {
-
-                familyRejections
-                    .recentNegative++;
-            }
-
-            if (
-                f.recentSamples <
-                    MIN_RECENT_SAMPLES ||
-                f.recentDecisive <
-                    MIN_RECENT_DECISIVE
-            ) {
-
-                familyRejections
-                    .recentInsufficient++;
-            }
-
-            if (
-                f.edgeDecay >
-                MAX_EDGE_DECAY
-            ) {
-
-                familyRejections
-                    .excessiveDecay++;
-            }
-        }
+        const vwapPullbackStats =
+            calculateMetrics(
+                allTrades.filter(
+                    x =>
+                        x.setup ===
+                        "VWAP_PULLBACK"
+                )
+            );
 
         // =====================================================
         // CURRENT MARKET
@@ -4467,16 +4057,13 @@ export default async function handler(req, res) {
             if (!f) {
 
                 return {
-
-                    available:
-                        false
+                    available: false
                 };
             }
 
             return {
 
-                available:
-                    true,
+                available: true,
 
                 candleTimestamp:
                     rows[index].ts,
@@ -4584,7 +4171,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No qualified V14.4 edge is active.",
+                "No V14.5 edge has passed discovery, internal validation and anti-overfitting requirements.",
 
             nextAction:
                 "WAIT"
@@ -4603,203 +4190,273 @@ export default async function handler(req, res) {
             currentFeatures
         ) {
 
+            /*
+             * IMPORTANT:
+             *
+             * Current candle is NEVER used to learn
+             * the edge.
+             */
+
+            const historical =
+                rows.slice(
+                    0,
+                    -1
+                );
+
+            const finalDiscovery =
+                discoverCandidates(
+                    historical,
+                    0,
+                    historical.length
+                );
+
+            const finalPromoted =
+                promoteCandidates(
+                    historical,
+                    finalDiscovery,
+                    0,
+                    historical.length
+                );
+
+            const finalSelected =
+                finalPromoted.candidates
+                    .slice(
+                        0,
+                        12
+                    );
+
             const setups =
                 detectSetups(
                     rows,
                     currentIndex
                 );
 
-            if (
-                setups.length
+            for (
+                const setup
+                of setups
             ) {
 
-                /*
-                 * Important:
-                 *
-                 * Learning uses rows WITHOUT
-                 * the current candle.
-                 *
-                 * Current candle is used only
-                 * to determine the live paper
-                 * signal.
-                 */
-
-                const finalLearning =
-                    learnHierarchy(
-                        rows.slice(
-                            0,
-                            -1
-                        ),
-                        0,
-                        rows.length - 1
+                const key =
+                    patternKey(
+                        setup.side,
+                        setup.setup,
+                        currentFeatures
                     );
 
-                const selected =
-                    selectEdges(
-                        finalLearning
+                const family =
+                    familyKey(
+                        setup.side,
+                        setup.setup,
+                        currentFeatures.trend
                     );
 
-                for (
-                    const setup
-                    of setups
+                const match =
+                    finalSelected.find(
+                        x =>
+                            (
+                                x.level ===
+                                "PATTERN" &&
+                                x.key ===
+                                key
+                            ) ||
+                            (
+                                x.level ===
+                                "FAMILY" &&
+                                x.key ===
+                                family
+                            )
+                    );
+
+                const confirmation =
+                    confirmationScore(
+                        rows,
+                        currentIndex,
+                        setup.side
+                    );
+
+                if (
+                    match &&
+                    confirmation.passed
                 ) {
 
-                    const key =
-                        patternKey(
+                    currentSignal = {
+
+                        status:
+                            "SIGNAL",
+
+                        side:
                             setup.side,
+
+                        setup:
                             setup.setup,
-                            currentFeatures
-                        );
 
-                    const family =
-                        familyKey(
-                            setup.side,
-                            setup.setup,
-                            currentFeatures
-                                .trend
-                        );
+                        pattern:
+                            key,
 
-                    const match =
-                        selected.find(
-                            x =>
-                                x.key ===
-                                    key ||
-                                (
-                                    x.level ===
-                                        "FAMILY" &&
-                                    x.key ===
-                                        family
-                                )
-                        );
+                        family,
 
-                    const confirmation =
-                        confirmationScore(
-                            rows,
-                            currentIndex,
-                            setup.side
-                        );
+                        learningLevel:
+                            match.level,
 
-                    if (
-                        match &&
-                        confirmation.passed
-                    ) {
+                        quality:
+                            match.quality,
 
-                        /*
-                         * Never activate a live
-                         * paper signal if the
-                         * global evidence has not
-                         * proven the system.
-                         *
-                         * This keeps V14.4
-                         * conservative.
-                         */
+                        discoveryEV:
+                            match.expectedValueR,
 
-                        if (
-                            profitabilityProof
-                        ) {
+                        discoveryPF:
+                            match.profitFactor,
 
-                            currentSignal = {
+                        validationEV:
+                            match.validation.metrics
+                                .expectedValueR,
 
-                                status:
-                                    "SIGNAL",
+                        validationPF:
+                            match.validation.metrics
+                                .profitFactor,
 
-                                side:
-                                    setup.side,
+                        validationTrades:
+                            match.validation.metrics
+                                .trades,
 
-                                setup:
-                                    setup.setup,
+                        confirmationScore:
+                            confirmation.score,
 
-                                pattern:
-                                    key,
+                        confirmationReasons:
+                            confirmation.reasons,
 
-                                family,
+                        market:
+                            currentMarketData,
 
-                                learningLevel:
-                                    match.level,
+                        reason:
+                            "Candidate survived historical discovery and internal validation. PAPER REVIEW ONLY.",
 
-                                inheritedFamily:
-                                    match.inherited ||
-                                    false,
+                        nextAction:
+                            "PAPER_REVIEW_ONLY"
+                    };
 
-                                quality:
-                                    match.quality,
-
-                                samples:
-                                    match.samples,
-
-                                recentSamples:
-                                    match.recentSamples,
-
-                                expectedValueR:
-                                    match.expectedValueR,
-
-                                profitFactor:
-                                    match.profitFactor,
-
-                                recentEV:
-                                    match.recentEV,
-
-                                recentPF:
-                                    match.recentPF,
-
-                                edgeDecay:
-                                    match.edgeDecay,
-
-                                persistence:
-                                    match.persistence,
-
-                                confirmationScore:
-                                    confirmation.score,
-
-                                confirmationMaxScore:
-                                    confirmation.maxScore,
-
-                                confirmationReasons:
-                                    confirmation.reasons,
-
-                                market:
-                                    currentMarketData,
-
-                                reason:
-                                    "Qualified V14.4 edge with strict global OOS proof.",
-
-                                nextAction:
-                                    "PAPER_REVIEW_ONLY"
-                            };
-
-                            break;
-
-                        } else {
-
-                            currentSignal = {
-
-                                status:
-                                    "NO_TRADE",
-
-                                side:
-                                    null,
-
-                                setup:
-                                    null,
-
-                                candidateSide:
-                                    setup.side,
-
-                                candidateSetup:
-                                    setup.setup,
-
-                                candidatePattern:
-                                    key,
-
-                                reason:
-                                    "A historical edge exists, but V14.4 profitability proof is not yet established.",
-
-                                nextAction:
-                                    "WAIT"
-                            };
-                        }
-                    }
+                    break;
                 }
+            }
+        }
+
+        // =====================================================
+        // FINAL LEARNING SNAPSHOT
+        // =====================================================
+
+        const finalHistorical =
+            rows.slice(
+                0,
+                -1
+            );
+
+        const latestDiscovery =
+            discoverCandidates(
+                finalHistorical,
+                0,
+                finalHistorical.length
+            );
+
+        const latestPromoted =
+            promoteCandidates(
+                finalHistorical,
+                latestDiscovery,
+                0,
+                finalHistorical.length
+            );
+
+        // =====================================================
+        // REJECTION DIAGNOSTICS
+        // =====================================================
+
+        const rejectionDiagnostics = {
+
+            family:
+
+                {
+                    insufficientSamples: 0,
+                    insufficientDecisive: 0,
+                    insufficientStability: 0,
+                    edgeBelowThreshold: 0,
+                    recentNegative: 0
+                },
+
+            pattern:
+
+                {
+                    insufficientSamples: 0,
+                    insufficientDecisive: 0,
+                    insufficientStability: 0,
+                    edgeBelowThreshold: 0,
+                    recentNegative: 0,
+                    validationFailure: 0,
+                    familyConflict: 0
+                },
+
+            antiChasing: {
+
+                blockedVWAPDistance: 0,
+
+                blockedEMAExtension: 0,
+
+                blockedTrendExtension: 0
+            }
+        };
+
+        for (
+            const family
+            of latestDiscovery.families
+        ) {
+
+            if (
+                family.samples <
+                FAMILY_MIN_SAMPLES
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .insufficientSamples++;
+            }
+
+            if (
+                family.decisiveTrades <
+                FAMILY_MIN_DECISIVE
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .insufficientDecisive++;
+            }
+
+            if (
+                family.stableSections <
+                MIN_STABLE_SECTIONS
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .insufficientStability++;
+            }
+
+            if (
+                family.expectedValueR <
+                FAMILY_MIN_EV ||
+                family.profitFactor <
+                FAMILY_MIN_PF
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .edgeBelowThreshold++;
+            }
+
+            if (
+                family.recentEV < 0
+            ) {
+
+                rejectionDiagnostics
+                    .family
+                    .recentNegative++;
             }
         }
 
@@ -4809,8 +4466,7 @@ export default async function handler(req, res) {
 
         return send({
 
-            success:
-                true,
+            success: true,
 
             version:
                 VERSION,
@@ -4819,7 +4475,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_4_ROBUSTNESS_EVIDENCE_TRUE_WALK_FORWARD",
+                "V14_5_ANTI_OVERFITTING_EDGE_SURVIVAL_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -4901,28 +4557,16 @@ export default async function handler(req, res) {
                 futureDataUsedForSignal:
                     false,
 
-                hierarchicalLearning:
+                internalValidation:
                     true,
 
-                familyLearning:
+                validationBeforeOOS:
                     true,
 
-                detailedPatternLearning:
+                discoverySeparatedFromValidation:
                     true,
 
-                familyEvidenceInheritance:
-                    true,
-
-                recentVWAPPullback:
-                    true,
-
-                staleVWAPPullbackBlocked:
-                    true,
-
-                edgePersistence:
-                    true,
-
-                edgeDecayTracking:
+                noForcedTrades:
                     true,
 
                 overlappingPaperTrades:
@@ -4930,6 +4574,30 @@ export default async function handler(req, res) {
 
                 sameCandleStopTargetBias:
                     "STOP_FIRST"
+            },
+
+            architecture: {
+
+                version:
+                    "V14.5",
+
+                discovery:
+                    "Candidate edges are discovered only from the discovery portion of each training window.",
+
+                validation:
+                    "Candidate edges must survive an untouched internal validation segment before entering OOS.",
+
+                oos:
+                    "Only internally validated candidates are exposed to the chronological OOS test.",
+
+                familyProtection:
+                    "Detailed patterns cannot automatically override a losing setup family.",
+
+                antiChasing:
+                    "Trend-follow entries are blocked when price or EMA structure is excessively extended.",
+
+                objective:
+                    "Prefer NO_TRADE over unsupported historical edges."
             },
 
             robustness: {
@@ -4941,59 +4609,70 @@ export default async function handler(req, res) {
                     folds.length,
 
                 initialTrainingRows:
-                    INITIAL_TRAINING,
+                    initialTraining,
 
                 requiredProfitableFolds:
-                    REQUIRED_PROFITABLE_FOLDS,
+                    MIN_OOS_PROFITABLE_FOLDS,
 
                 actualProfitableFolds:
                     profitableFolds,
 
                 foldValidation:
-                    profitableFolds >=
-                    REQUIRED_PROFITABLE_FOLDS
+                    foldValidation
                         ? "PASSED"
                         : "NOT_PASSED",
 
                 purpose:
-                    "Increase independent chronological evidence before profitability can be proven."
+                    "Require an edge to survive internal validation and multiple independent chronological OOS periods."
             },
 
             learning: {
 
                 familiesDiscovered:
-                    latestLearning
+                    latestDiscovery
                         .families
                         .length,
 
                 qualifiedFamilies:
-                    qualifiedFamilies
+                    latestDiscovery
+                        .families
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
                         .length,
 
                 patternsDiscovered:
-                    latestLearning
+                    latestDiscovery
                         .patterns
                         .length,
 
                 qualifiedPatterns:
-                    qualifiedPatterns
+                    latestDiscovery
+                        .patterns
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
+                        .length,
+
+                validationSurvivors:
+                    latestPromoted
+                        .candidates
                         .length,
 
                 selectedEdges:
-                    latestSelected
-                        .length,
-
-                detailedPatternEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.level ===
-                                "PATTERN"
+                    latestPromoted
+                        .candidates
+                        .slice(
+                            0,
+                            12
                         )
                         .length,
 
                 familyEdges:
-                    latestSelected
+                    latestPromoted
+                        .candidates
                         .filter(
                             x =>
                                 x.level ===
@@ -5001,79 +4680,56 @@ export default async function handler(req, res) {
                         )
                         .length,
 
-                inheritedFamilyEdges:
-                    latestSelected
+                detailedPatternEdges:
+                    latestPromoted
+                        .candidates
                         .filter(
                             x =>
-                                x.inherited
-                        )
-                        .length,
-
-                buyEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.side ===
-                                "BUY"
-                        )
-                        .length,
-
-                sellEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.side ===
-                                "SELL"
+                                x.level ===
+                                "PATTERN"
                         )
                         .length
             },
 
-            edgeValidation: {
+            internalValidation: {
 
-                recentFraction:
-                    RECENT_FRACTION,
+                fraction:
+                    VALIDATION_FRACTION,
 
-                minimumRecentSamples:
-                    MIN_RECENT_SAMPLES,
+                minimumSamples:
+                    VALIDATION_MIN_SAMPLES,
 
-                minimumRecentDecisive:
-                    MIN_RECENT_DECISIVE,
+                minimumDecisive:
+                    VALIDATION_MIN_DECISIVE,
 
-                minimumRecentEV:
-                    MIN_RECENT_EV,
+                minimumEV:
+                    VALIDATION_MIN_EV,
 
-                minimumRecentPF:
-                    MIN_RECENT_PF,
+                minimumPF:
+                    VALIDATION_MIN_PF,
 
-                maximumRecentLossStreak:
-                    MAX_RECENT_LOSS_STREAK,
+                maximumLossStreak:
+                    MAX_VALIDATION_LOSS_STREAK,
 
-                minimumPersistenceSections:
-                    MIN_PERSISTENCE_SECTIONS,
+                validationRequired:
+                    true,
 
-                maximumEdgeDecay:
-                    MAX_EDGE_DECAY,
-
-                latestOOSTrades:
-                    latestOOSTrades.length,
-
-                latestOOSMetrics:
-                    latestOOSMetrics
+                purpose:
+                    "Prevent historically attractive patterns from immediately entering true OOS."
             },
 
             walkForward: {
 
                 method:
-                    "STRICT_TRUE_EXPANDING_WALK_FORWARD",
+                    "STRICT_TRUE_EXPANDING_WALK_FORWARD_WITH_INTERNAL_VALIDATION",
 
                 folds:
                     folds.length,
 
-                requiredProfitableFolds:
-                    REQUIRED_PROFITABLE_FOLDS,
+                profitableFolds,
 
-                profitableFolds:
-                    profitableFolds,
+                requiredProfitableFolds:
+                    MIN_OOS_PROFITABLE_FOLDS,
 
                 chronological:
                     true,
@@ -5091,6 +4747,12 @@ export default async function handler(req, res) {
                             trainingRows:
                                 x.trainingRows,
 
+                            discoveryRows:
+                                x.discoveryRows,
+
+                            validationRows:
+                                x.validationRows,
+
                             testRows:
                                 x.testRows,
 
@@ -5106,14 +4768,14 @@ export default async function handler(req, res) {
                             qualifiedPatterns:
                                 x.qualifiedPatterns,
 
+                            validationCandidates:
+                                x.validationCandidates,
+
                             selectedEdges:
                                 x.selectedEdges,
 
                             selectedLevels:
                                 x.selectedLevels,
-
-                            selectedSides:
-                                x.selectedSides,
 
                             independentFamilies:
                                 x.independentFamilies,
@@ -5151,37 +4813,25 @@ export default async function handler(req, res) {
                         : "INSUFFICIENT",
 
                 foldValidation:
-                    profitableFolds >=
-                    REQUIRED_PROFITABLE_FOLDS
+                    foldValidation
                         ? "PASSED"
                         : "FAILED",
 
-                independentFamilies:
-                    independentFamilies,
+                independentFamilies,
 
                 requiredIndependentFamilies:
                     MIN_INDEPENDENT_FAMILIES,
 
                 maximumPatternShare:
-                    globalConcentration
-                        .maximumShare,
+                    round(
+                        maximumPatternShare,
+                        4
+                    ),
 
                 patternDiversity:
                     patternDiversity
                         ? "PASSED"
-                        : "FAILED",
-
-                globalExpectedValueR:
-                    globalStats
-                        .expectedValueR,
-
-                globalProfitFactor:
-                    globalStats
-                        .profitFactor,
-
-                globalDecisiveTrades:
-                    globalStats
-                        .decisiveTrades
+                        : "FAILED"
             },
 
             buySellEvidence: {
@@ -5196,12 +4846,120 @@ export default async function handler(req, res) {
             setupPerformance: {
 
                 trendFollow:
-                    setupPerformance
-                        .trendFollow,
+                    trendFollowStats,
 
                 vwapPullback:
-                    setupPerformance
-                        .vwapPullback
+                    vwapPullbackStats
+            },
+
+            antiChasing: {
+
+                enabled:
+                    true,
+
+                maximumTrendVWAPDistanceATR:
+                    MAX_TREND_VWAP_DISTANCE_ATR,
+
+                maximumTrendEMASpreadATR:
+                    MAX_TREND_EMA_SPREAD_ATR,
+
+                maximumTrendStrengthATR:
+                    MAX_TREND_STRENGTH_ATR,
+
+                purpose:
+                    "Prevent entries after excessive price extension."
+            },
+
+            latestLearning: {
+
+                trainingRows:
+                    finalHistorical.length,
+
+                familiesDiscovered:
+                    latestDiscovery
+                        .families
+                        .length,
+
+                qualifiedFamilies:
+                    latestDiscovery
+                        .families
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
+                        .length,
+
+                patternsDiscovered:
+                    latestDiscovery
+                        .patterns
+                        .length,
+
+                qualifiedPatterns:
+                    latestDiscovery
+                        .patterns
+                        .filter(
+                            x =>
+                                x.qualified
+                        )
+                        .length,
+
+                validationSurvivors:
+                    latestPromoted
+                        .candidates
+                        .length,
+
+                selectedEdges:
+                    latestPromoted
+                        .candidates
+                        .slice(
+                            0,
+                            12
+                        )
+                        .map(
+                            x => ({
+
+                                key:
+                                    x.key,
+
+                                level:
+                                    x.level,
+
+                                quality:
+                                    x.quality,
+
+                                discoveryEV:
+                                    x.expectedValueR,
+
+                                discoveryPF:
+                                    x.profitFactor,
+
+                                validationEV:
+                                    x.validation.metrics
+                                        .expectedValueR,
+
+                                validationPF:
+                                    x.validation.metrics
+                                        .profitFactor,
+
+                                validationTrades:
+                                    x.validation.metrics
+                                        .trades,
+
+                                familyEV:
+                                    x.familyEvidence
+                                        ? x.familyEvidence
+                                            .expectedValueR
+                                        : null,
+
+                                familyPF:
+                                    x.familyEvidence
+                                        ? x.familyEvidence
+                                            .profitFactor
+                                        : null
+                            })
+                        ),
+
+                rejectionDiagnostics
             },
 
             currentMarket:
@@ -5209,214 +4967,7 @@ export default async function handler(req, res) {
 
             currentSignal,
 
-            latestLearning: {
-
-                trainingRows:
-                    candles.length,
-
-                familiesDiscovered:
-                    latestLearning
-                        .families
-                        .length,
-
-                qualifiedFamilies:
-                    qualifiedFamilies
-                        .length,
-
-                patternsDiscovered:
-                    latestLearning
-                        .patterns
-                        .length,
-
-                qualifiedPatterns:
-                    qualifiedPatterns
-                        .length,
-
-                selectedEdges:
-                    latestSelected
-                        .length,
-
-                buyEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.side ===
-                                "BUY"
-                        )
-                        .length,
-
-                sellEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.side ===
-                                "SELL"
-                        )
-                        .length,
-
-                trendFollowEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.setup ===
-                                "TREND_FOLLOW"
-                        )
-                        .length,
-
-                vwapPullbackEdges:
-                    latestSelected
-                        .filter(
-                            x =>
-                                x.setup ===
-                                "VWAP_PULLBACK"
-                        )
-                        .length,
-
-                familyRejections
-            },
-
-            validationRules: {
-
-                historicalAPI: {
-
-                    endpoint:
-                        `/market/historical/${INTERVAL}`,
-
-                    maximumChunkDays:
-                        7,
-
-                    chunkingEnabled:
-                        true,
-
-                    requestedMaximumDays:
-                        60
-                },
-
-                sessionVWAP: {
-
-                    enabled:
-                        true,
-
-                    reset:
-                        "DAILY",
-
-                    timezone:
-                        "Asia/Kolkata"
-                },
-
-                hierarchicalLearning: {
-
-                    enabled:
-                        true,
-
-                    familyLevel:
-                        true,
-
-                    detailedPatternLevel:
-                        true,
-
-                    inheritance:
-                        true
-                },
-
-                trendStrength: {
-
-                    enabled:
-                        true,
-
-                    minimumSpreadATR:
-                        MIN_SPREAD_ATR,
-
-                    minimumSlopeATR:
-                        MIN_SLOPE_ATR
-                },
-
-                vwapPullback: {
-
-                    enabled:
-                        true,
-
-                    recentOnly:
-                        true,
-
-                    lookbackCandles:
-                        VWAP_LOOKBACK,
-
-                    approachMaximumATR:
-                        VWAP_APPROACH_MAX_ATR,
-
-                    touchMaximumATR:
-                        VWAP_TOUCH_MAX_ATR,
-
-                    recoveryMinimumATR:
-                        VWAP_RECOVERY_MIN_ATR,
-
-                    maximumEntryDistanceATR:
-                        VWAP_MAX_ENTRY_DISTANCE_ATR,
-
-                    maximumCandlesAfterTouch:
-                        VWAP_MAX_CANDLES_AFTER_TOUCH,
-
-                    staleEntryProtection:
-                        true
-                },
-
-                edgeValidation: {
-
-                    recentFraction:
-                        RECENT_FRACTION,
-
-                    minimumRecentSamples:
-                        MIN_RECENT_SAMPLES,
-
-                    minimumRecentDecisive:
-                        MIN_RECENT_DECISIVE,
-
-                    minimumRecentEV:
-                        MIN_RECENT_EV,
-
-                    minimumRecentPF:
-                        MIN_RECENT_PF,
-
-                    maximumRecentLossStreak:
-                        MAX_RECENT_LOSS_STREAK,
-
-                    minimumPersistenceSections:
-                        MIN_PERSISTENCE_SECTIONS,
-
-                    maximumEdgeDecay:
-                        MAX_EDGE_DECAY
-                },
-
-                diversity: {
-
-                    minimumIndependentFamilies:
-                        MIN_INDEPENDENT_FAMILIES,
-
-                    maximumPatternConcentration:
-                        MAX_PATTERN_CONCENTRATION
-                },
-
-                circuitBreaker: {
-
-                    maximumLossStreak:
-                        MAX_LOSS_STREAK,
-
-                    entryCooldownCandles:
-                        ENTRY_COOLDOWN,
-
-                    samePatternCooldownCandles:
-                        SAME_PATTERN_COOLDOWN,
-
-                    sameSideCooldownCandles:
-                        SAME_SIDE_COOLDOWN
-                }
-            },
-
             riskPlan: {
-
-                riskPerTradeR:
-                    RISK_R,
 
                 stopR:
                     STOP_R,
@@ -5436,36 +4987,30 @@ export default async function handler(req, res) {
                 maxHoldCandles:
                     MAX_HOLD_CANDLES,
 
-                noStopWidening:
-                    true,
-
                 maxDrawdownR:
                     MAX_OOS_DRAWDOWN,
 
                 maxLossStreak:
-                    MAX_LOSS_STREAK
+                    MAX_LOSS_STREAK,
+
+                noStopWidening:
+                    true
             },
 
             paperTradeLog:
                 allTrades,
 
-            paperAction:
-                currentSignal.status ===
-                    "SIGNAL"
-                    ? "PAPER_REVIEW_ONLY"
-                    : "NO_TRADE",
-
             nextAction:
                 currentSignal.status ===
                     "SIGNAL"
-                    ? "WAIT_FOR_NEXT_CONFIRMED_CANDLE"
+                    ? "PAPER_REVIEW_ONLY"
                     : "WAIT"
         });
 
     } catch (error) {
 
         console.error(
-            "TradeMind Pro V14.4 ERROR:",
+            "TradeMind Pro V14.5 ERROR:",
             error
         );
 
@@ -5476,7 +5021,7 @@ export default async function handler(req, res) {
                 success: false,
 
                 version:
-                    "V14.4",
+                    "V14.5",
 
                 status:
                     "ERROR",
