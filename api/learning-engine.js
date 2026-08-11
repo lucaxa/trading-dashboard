@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.10 — EDGE ANATOMY DIAGNOSTIC ENGINE
+ V14.11 — EDGE ANATOMY DIAGNOSTIC ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,12 +12,12 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.10 PURPOSE
+ V14.11 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
 
- V14.10 DOES NOT loosen profitability thresholds.
+ V14.11 DOES NOT loosen profitability thresholds.
 
  Instead it makes the complete candidate pipeline visible:
 
@@ -39,7 +39,7 @@
       ↓
    TRUE OOS
 
- Main V14.10 changes:
+ Main V14.11 changes:
  1. Explicit candidate-flow diagnostics
  2. Every qualified candidate gets a diagnostic status
  3. Exact reason for family/pattern rejection
@@ -59,13 +59,13 @@
 17. Paper only
 
  IMPORTANT:
- V14.10 is a diagnostic version, NOT a strategy-loosening version.
+ V14.11 is a diagnostic version, NOT a strategy-loosening version.
 ===========================================================
 */
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.10";
+    const VERSION = "V14.11";
 
     try {
 
@@ -111,6 +111,15 @@ export default async function handler(req, res) {
 
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
+
+        // V14.11 DIRECTION-AWARE DISCOVERY
+        // Only SELL-side detailed edges are eligible for this
+        // additional discovery lane. The candidate must still
+        // independently satisfy the existing PATTERN thresholds
+        // and 3-section stability requirement.
+        const DIRECTIONAL_SIDE = "SELL";
+        const DIRECTIONAL_MIN_FAMILY_EV = FAMILY_MIN_EV;
+        const DIRECTIONAL_MIN_FAMILY_PF = FAMILY_MIN_PF;
 
         // V14.9 CORE EDGE THRESHOLDS (UNCHANGED)
         // Core edges aggregate detailed context variants and
@@ -2499,6 +2508,19 @@ export default async function handler(req, res) {
                 );
             }
 
+            const directionalPatterns =
+                patterns
+                    .filter(x =>
+                        String(x.key).startsWith(
+                            `${DIRECTIONAL_SIDE}|`
+                        ) && x.qualified
+                    )
+                    .map(x => ({
+                        ...x,
+                        level: "DIRECTIONAL",
+                        direction: DIRECTIONAL_SIDE
+                    }));
+
             return {
 
                 families,
@@ -2506,6 +2528,8 @@ export default async function handler(req, res) {
                 patterns,
 
                 corePatterns,
+
+                directionalPatterns,
 
                 rawRecords
             };
@@ -2723,7 +2747,9 @@ export default async function handler(req, res) {
                     const matched =
                         candidate.level === "FAMILY"
                             ? currentFamily === candidate.key
-                            : key === candidate.key;
+                            : candidate.level === "DIRECTIONAL"
+                                ? detailedPattern === candidate.key
+                                : key === candidate.key;
 
                     if (!matched) {
                         continue;
@@ -2989,7 +3015,7 @@ export default async function handler(req, res) {
 
             const validationResults = [];
 
-            // V14.10: validation survivors promoted from the
+            // V14.11: validation survivors promoted from the
             // candidate pipeline are collected here.
             const candidates = [];
 
@@ -3012,10 +3038,16 @@ export default async function handler(req, res) {
                     x => x.qualified
                 );
 
+            const qualifiedDirectional =
+                safeArray(
+                    discovery.directionalPatterns
+                );
+
             const qualified =
                 [
                     ...qualifiedFamilies,
-                    ...qualifiedCoreEdges
+                    ...qualifiedCoreEdges,
+                    ...qualifiedDirectional
                 ];
 
             for (const candidate of qualified) {
@@ -3031,6 +3063,51 @@ export default async function handler(req, res) {
                             x.key ===
                             familyKeyValue
                     ) || null;
+
+                /*
+                 * V14.11 DIRECTION-AWARE LANE
+                 * -----------------------------------------------
+                 * A SELL detailed edge may enter untouched
+                 * validation when the detailed edge itself has
+                 * already passed the existing PATTERN evidence
+                 * gates. We do NOT lower those gates.
+                 *
+                 * The parent family does not need 3 profitable
+                 * sections here, but it must remain historically
+                 * positive enough to avoid promoting a detailed
+                 * edge out of an outright losing family.
+                 */
+                if (candidate.level === "DIRECTIONAL") {
+
+                    if (!family) {
+                        candidatesRejectedBeforeValidation.push({
+                            key: candidate.key,
+                            level: candidate.level,
+                            stage: "PRE_VALIDATION",
+                            reason: "FAMILY_RESOLUTION_FAILED",
+                            familyKey: familyKeyValue
+                        });
+                        continue;
+                    }
+
+                    if (
+                        family.expectedValueR <
+                            DIRECTIONAL_MIN_FAMILY_EV ||
+                        family.profitFactor <
+                            DIRECTIONAL_MIN_FAMILY_PF
+                    ) {
+                        candidatesRejectedBeforeValidation.push({
+                            key: candidate.key,
+                            level: candidate.level,
+                            stage: "PRE_VALIDATION",
+                            reason: "DIRECTIONAL_FAMILY_EDGE_TOO_WEAK",
+                            familyKey: familyKeyValue,
+                            familyEV: family.expectedValueR,
+                            familyPF: family.profitFactor
+                        });
+                        continue;
+                    }
+                }
 
                 /*
                  * -------------------------------------------------
@@ -3357,6 +3434,9 @@ export default async function handler(req, res) {
                     qualifiedPatterns:
                         qualifiedPatterns.length,
 
+                    qualifiedDirectional:
+                        qualifiedDirectional.length,
+
                     totalQualified:
                         qualified.length,
 
@@ -3596,12 +3676,32 @@ export default async function handler(req, res) {
 
                                 if (
                                     candidate.level ===
-                                    "PATTERN"
+                                    "PATTERN" ||
+                                    candidate.level ===
+                                    "CORE"
                                 ) {
 
                                     return (
                                         candidate.key ===
                                         key
+                                    );
+                                }
+
+                                if (
+                                    candidate.level ===
+                                    "DIRECTIONAL"
+                                ) {
+
+                                    const detailedPattern =
+                                        patternKey(
+                                            setup.side,
+                                            setup.setup,
+                                            f
+                                        );
+
+                                    return (
+                                        candidate.key ===
+                                        detailedPattern
                                     );
                                 }
 
@@ -4762,7 +4862,7 @@ export default async function handler(req, res) {
             getCurrentMarket();
 
         // =====================================================
-        // V14.10 EDGE ANATOMY DIAGNOSTICS
+        // V14.11 EDGE ANATOMY DIAGNOSTICS
         // No strategy thresholds are changed here.
         // This layer explains where evidence is being lost.
         // =====================================================
@@ -5044,7 +5144,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.10 edge has survived discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
+                "No V14.11 edge has survived direction-aware discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -5103,13 +5203,24 @@ export default async function handler(req, res) {
                             if (
                                 candidate.level ===
                                 "PATTERN" ||
-                            candidate.level ===
+                                candidate.level ===
                                 "CORE"
                             ) {
 
                                 return (
                                     candidate.key ===
                                     key
+                                );
+                            }
+
+                            if (
+                                candidate.level ===
+                                "DIRECTIONAL"
+                            ) {
+
+                                return (
+                                    candidate.key ===
+                                    detailedPattern
                                 );
                             }
 
@@ -5230,7 +5341,7 @@ export default async function handler(req, res) {
                         currentMarket,
 
                     reason:
-                        "V14.10 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
+                        "V14.11 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
 
                     nextAction:
                         "PAPER_REVIEW_ONLY"
@@ -5545,7 +5656,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_10_EDGE_ANATOMY_DIAGNOSTIC_TRUE_WALK_FORWARD",
+                "V14_11_DIRECTION_AWARE_EDGE_DISCOVERY_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
