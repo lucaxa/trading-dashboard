@@ -3730,7 +3730,7 @@ export default async function handler(req, res) {
                 const trendToken = key.match(/\|T:([^|]+)/);
                 const candidateSetup = setupToken ? setupToken[1] : null;
                 const candidateTrend = trendToken ? trendToken[1] : null;
-                const regimeToken = candidateKey.match(/\|G:([^|]+)/);
+                const regimeToken = key.match(/\|G:([^|]+)/);
                 const candidateRegime = regimeToken ? regimeToken[1] : null;
 
                 if (!candidateSide || !candidateSetup || !candidateTrend || (candidate.level === "REGIME_SETUP" && !candidateRegime)) {
