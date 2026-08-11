@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.1";
+    const VERSION = "V15.2";
 
     try {
 
@@ -153,6 +153,24 @@ export default async function handler(req, res) {
         const ADAPTIVE_HALF_LIFE_RECORDS = 60;
         const ADAPTIVE_MIN_EFFECTIVE_SAMPLES = 6;
 
+        // =====================================================
+        // V15.2 PRE-ENTRY REGIME GATE
+        // -----------------------------------------------------
+        // The V15.1 adaptive gate was evaluated from the static
+        // discovery record set. V15.2 makes the qualification
+        // explicitly point-in-time: only completed historical
+        // records whose exits occurred BEFORE the current entry
+        // index may qualify the regime.
+        //
+        // No current/future outcome is allowed into the gate.
+        // =====================================================
+        const V152_GATE_LOOKBACK_RECORDS = 12;
+        const V152_GATE_MIN_DECISIVE = 5;
+        const V152_GATE_MIN_EV = 0.05;
+        const V152_GATE_MIN_PF = 1.05;
+        const V152_GATE_MAX_LOSS_STREAK = 3;
+        const V152_GATE_MAX_RECENT_TIMEOUTS = 4;
+
         // V14.9 CORE EDGE THRESHOLDS (UNCHANGED)
         // Core edges aggregate detailed context variants and
         // must meet the existing FAMILY evidence floor.
@@ -239,7 +257,7 @@ export default async function handler(req, res) {
         const VWAP_MAX_CANDLES_AFTER_TOUCH = 3;
 
         // =====================================================
-        // V15.1 ACTIVE EXIT MODEL
+        // V15.2 ACTIVE EXIT MODEL
         // -----------------------------------------------------
         // FAST mechanics selected from the V15 diagnostic comparison.
         // Fixed experiment; not an OOS promotion.
@@ -2246,6 +2264,58 @@ export default async function handler(req, res) {
             };
         }
 
+        function pointInTimeRegimeGate(records, currentIndex) {
+
+            const eligible = safeArray(records)
+                .filter(x =>
+                    x &&
+                    Number.isFinite(x.index) &&
+                    x.index < currentIndex &&
+                    Number.isFinite(x.exitIndex) &&
+                    x.exitIndex < currentIndex
+                )
+                .sort((a, b) => a.index - b.index);
+
+            const recent = eligible.slice(-V152_GATE_LOOKBACK_RECORDS);
+            const metrics = calculateMetrics(recent);
+
+            const reasons = [];
+
+            if (recent.length < V152_GATE_LOOKBACK_RECORDS) {
+                reasons.push("V152_GATE_INSUFFICIENT_COMPLETED_RECORDS");
+            }
+
+            if (metrics.decisiveTrades < V152_GATE_MIN_DECISIVE) {
+                reasons.push("V152_GATE_INSUFFICIENT_DECISIVE_RECORDS");
+            }
+
+            if (metrics.expectedValueR < V152_GATE_MIN_EV) {
+                reasons.push("V152_GATE_EV_BELOW_THRESHOLD");
+            }
+
+            if (metrics.profitFactor < V152_GATE_MIN_PF) {
+                reasons.push("V152_GATE_PF_BELOW_THRESHOLD");
+            }
+
+            if (metrics.maxConsecutiveLosses > V152_GATE_MAX_LOSS_STREAK) {
+                reasons.push("V152_GATE_LOSS_STREAK_TOO_HIGH");
+            }
+
+            if (metrics.timeouts > V152_GATE_MAX_RECENT_TIMEOUTS) {
+                reasons.push("V152_GATE_TIMEOUTS_TOO_HIGH");
+            }
+
+            return {
+                passed: reasons.length === 0,
+                reasons,
+                eligibleRecords: eligible.length,
+                recentRecords: recent.length,
+                recentStartIndex: recent.length ? recent[0].index : null,
+                recentEndIndex: recent.length ? recent[recent.length - 1].index : null,
+                metrics
+            };
+        }
+
         function adaptiveContextGate(candidate, discoveryEnd) {
 
             const records = safeArray(candidate?.records);
@@ -3100,6 +3170,16 @@ export default async function handler(req, res) {
 
                     if (!matched) {
                         continue;
+                    }
+
+                    if (candidate.level === "ADAPTIVE_CONTEXT") {
+                        const gate = pointInTimeRegimeGate(
+                            candidate.records,
+                            i
+                        );
+                        if (!gate.passed) {
+                            continue;
+                        }
                     }
 
                     matchedSetupOccurrences++;
@@ -4146,8 +4226,10 @@ export default async function handler(req, res) {
                         setup.side === ADAPTIVE_CONTEXT_SIDE &&
                         match.level === "ADAPTIVE_CONTEXT"
                     ) {
-                        const gate = match.adaptiveGate ||
-                            adaptiveContextGate(match, match.records?.length ? Math.max(...match.records.map(x => x.index)) + 1 : testStart);
+                        const gate = pointInTimeRegimeGate(
+                            match.records,
+                            i
+                        );
                         if (!gate.passed) {
                             continue;
                         }
