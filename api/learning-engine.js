@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15.2";
+    const VERSION = "V15.3";
 
     try {
 
@@ -170,6 +170,19 @@ export default async function handler(req, res) {
         const V152_GATE_MIN_PF = 1.05;
         const V152_GATE_MAX_LOSS_STREAK = 3;
         const V152_GATE_MAX_RECENT_TIMEOUTS = 4;
+
+        // =====================================================
+        // V15.3 FOCUSED SURVIVAL TEST
+        // -----------------------------------------------------
+        // V15.2 showed that SELL|VWAP_PULLBACK|BEARISH is the
+        // strongest currently surviving family candidate. V15.3
+        // isolates that setup and tests only its regime-context
+        // candidates with the FAST exit model.
+        // No thresholds are relaxed.
+        // =====================================================
+        const V153_TARGET_SIDE = "SELL";
+        const V153_TARGET_SETUP = "VWAP_PULLBACK";
+        const V153_TARGET_TREND = "BEARISH";
 
         // V14.9 CORE EDGE THRESHOLDS (UNCHANGED)
         // Core edges aggregate detailed context variants and
@@ -3129,7 +3142,11 @@ export default async function handler(req, res) {
 
                 for (const setup of setups) {
 
-                    if (setup.side !== DIRECTIONAL_SIDE) {
+                    if (setup.side !== V153_TARGET_SIDE) {
+                        continue;
+                    }
+
+                    if (setup.setup !== V153_TARGET_SETUP) {
                         continue;
                     }
 
@@ -3484,10 +3501,33 @@ export default async function handler(req, res) {
                     ...qualifiedContext,
                     ...adaptiveContext
                 ].filter(
-                    x => x && x.key && x.key.startsWith("SELL|")
+                    x => {
+                        if (!x || !x.key) return false;
+
+                        const key = String(x.key);
+
+                        return (
+                            key.startsWith(`${V153_TARGET_SIDE}|`) &&
+                            key.includes(`|S:${V153_TARGET_SETUP}|`) &&
+                            key.includes(`|T:${V153_TARGET_TREND}|`)
+                        );
+                    }
                 );
 
             for (const candidate of qualified) {
+
+                if (
+                    !String(candidate.key).includes(`|S:${V153_TARGET_SETUP}|`) ||
+                    !String(candidate.key).includes(`|T:${V153_TARGET_TREND}|`)
+                ) {
+                    candidatesRejectedBeforeValidation.push({
+                        key: candidate.key,
+                        level: candidate.level,
+                        stage: "PRE_VALIDATION",
+                        reason: "V15_3_TARGET_SETUP_FILTER"
+                    });
+                    continue;
+                }
 
                 const familyKeyValue =
                     resolveFamilyKey(
@@ -7443,6 +7483,15 @@ export default async function handler(req, res) {
             regimeFingerprintDiagnostics,
 
             strategyMechanicsDiagnostics,
+
+            v153FocusedTest: {
+                side: V153_TARGET_SIDE,
+                setup: V153_TARGET_SETUP,
+                trend: V153_TARGET_TREND,
+                exitModel: ACTIVE_EXIT_MODEL_KEY,
+                purpose: "Isolate SELL VWAP_PULLBACK BEARISH regime-context candidates and test them through unchanged validation and true OOS gates.",
+                guard: "This filter does not lower thresholds or use validation/OOS outcomes for discovery."
+            },
 
             adaptiveRegimeGate: {
                 enabled: true,
