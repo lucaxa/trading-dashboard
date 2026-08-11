@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V20";
+    const VERSION = "V21";
 
     try {
 
@@ -6645,6 +6645,185 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // V21 — EDGE PERSISTENCE TEST
+        // -----------------------------------------------------
+        // Diagnostic only. This does NOT change discovery,
+        // qualification, validation, diversification, OOS
+        // execution, thresholds, exits, or risk controls.
+        //
+        // V20 proved that exact candidate selection is mostly
+        // late/emergent. V21 measures whether an exact edge
+        // persists through chronological folds once it appears.
+        //
+        // Persistence is measured separately for:
+        //   DISCOVERED
+        //   QUALIFIED
+        //   VALIDATION CANDIDATE
+        //   VALIDATION SURVIVOR
+        //   SELECTED
+        //   OOS EXECUTED
+        //
+        // This avoids treating a candidate that appears once as
+        // equivalent to a candidate that repeatedly survives.
+        // =====================================================
+
+        function buildV21EdgePersistenceAudit(foldResults) {
+
+            const byKey = new Map();
+            const folds = safeArray(foldResults).map(x => x.fold);
+
+            function ensure(key, levels) {
+                if (!byKey.has(key)) {
+                    byKey.set(key, {
+                        key,
+                        levels: [],
+                        foldsDiscovered: [],
+                        foldsQualified: [],
+                        foldsValidationCandidate: [],
+                        foldsValidationSurvivor: [],
+                        foldsSelected: [],
+                        foldsOOSExecuted: [],
+                        oosTradesByFold: {},
+                        oosNetRByFold: {}
+                    });
+                }
+                const row = byKey.get(key);
+                for (const level of safeArray(levels)) {
+                    if (level && !row.levels.includes(level)) row.levels.push(level);
+                }
+                return row;
+            }
+
+            for (const fold of safeArray(foldResults)) {
+                const audit = fold.diagnostics?.v20FoldCandidateStabilityAudit || {};
+                for (const row of safeArray(audit.candidateRows)) {
+                    const x = ensure(row.key, row.levels);
+                    if (row.discovered) x.foldsDiscovered.push(fold.fold);
+                    if (row.qualified) x.foldsQualified.push(fold.fold);
+                    if (row.validationCandidate) x.foldsValidationCandidate.push(fold.fold);
+                    if (row.validationSurvivor) x.foldsValidationSurvivor.push(fold.fold);
+                    if (row.selected) x.foldsSelected.push(fold.fold);
+                    if ((row.executedOOSTrades || 0) > 0) x.foldsOOSExecuted.push(fold.fold);
+                    x.oosTradesByFold[fold.fold] = row.executedOOSTrades || 0;
+                    x.oosNetRByFold[fold.fold] = round(row.oosNetR || 0, 4);
+                }
+            }
+
+            function consecutiveRun(list) {
+                const set = new Set(list);
+                let best = 0;
+                let current = 0;
+                for (const fold of folds) {
+                    if (set.has(fold)) {
+                        current++;
+                        best = Math.max(best, current);
+                    } else {
+                        current = 0;
+                    }
+                }
+                return best;
+            }
+
+            function gapCount(list) {
+                if (list.length < 2) return 0;
+                const set = new Set(list);
+                let gaps = 0;
+                for (let i = Math.min(...list); i <= Math.max(...list); i++) {
+                    if (!set.has(i)) gaps++;
+                }
+                return gaps;
+            }
+
+            function firstLast(list) {
+                return list.length
+                    ? { first: Math.min(...list), last: Math.max(...list) }
+                    : { first: null, last: null };
+            }
+
+            const rows = [...byKey.values()].map(x => {
+                const discovered = firstLast(x.foldsDiscovered);
+                const selected = firstLast(x.foldsSelected);
+                const oos = firstLast(x.foldsOOSExecuted);
+
+                const present = x.foldsDiscovered.length;
+                const selectedRate = present
+                    ? round((x.foldsSelected.length / present) * 100, 2)
+                    : 0;
+                const survivorRate = present
+                    ? round((x.foldsValidationSurvivor.length / present) * 100, 2)
+                    : 0;
+
+                let classification = "NO_PERSISTENCE";
+                if (x.foldsSelected.length >= 3 && consecutiveRun(x.foldsSelected) >= 2) {
+                    classification = "PERSISTENT_SELECTED_EDGE";
+                } else if (x.foldsSelected.length >= 2) {
+                    classification = "RECURRING_SELECTED_EDGE";
+                } else if (x.foldsSelected.length === 1) {
+                    classification = "SINGLE_FOLD_SELECTED_EDGE";
+                } else if (x.foldsValidationSurvivor.length >= 2) {
+                    classification = "RECURRING_VALIDATED_EDGE";
+                } else if (x.foldsQualified.length >= 2) {
+                    classification = "RECURRING_QUALIFIED_EDGE";
+                } else if (x.foldsDiscovered.length >= 2) {
+                    classification = "RECURRING_DISCOVERED_EDGE";
+                }
+
+                return {
+                    key: x.key,
+                    levels: x.levels,
+                    foldsDiscovered: x.foldsDiscovered,
+                    foldsQualified: x.foldsQualified,
+                    foldsValidationCandidate: x.foldsValidationCandidate,
+                    foldsValidationSurvivor: x.foldsValidationSurvivor,
+                    foldsSelected: x.foldsSelected,
+                    foldsOOSExecuted: x.foldsOOSExecuted,
+                    totalOOSTrades: Object.values(x.oosTradesByFold).reduce((a,b) => a + Number(b || 0), 0),
+                    totalOOSNetR: round(Object.values(x.oosNetRByFold).reduce((a,b) => a + Number(b || 0), 0), 4),
+                    discoveryPresence: present,
+                    selectedRateAcrossPresentFolds: selectedRate,
+                    validationSurvivorRateAcrossPresentFolds: survivorRate,
+                    firstDiscoveredFold: discovered.first,
+                    lastDiscoveredFold: discovered.last,
+                    firstSelectedFold: selected.first,
+                    lastSelectedFold: selected.last,
+                    firstOOSFold: oos.first,
+                    lastOOSFold: oos.last,
+                    discoveredConsecutiveRun: consecutiveRun(x.foldsDiscovered),
+                    qualifiedConsecutiveRun: consecutiveRun(x.foldsQualified),
+                    validationSurvivorConsecutiveRun: consecutiveRun(x.foldsValidationSurvivor),
+                    selectedConsecutiveRun: consecutiveRun(x.foldsSelected),
+                    oosConsecutiveRun: consecutiveRun(x.foldsOOSExecuted),
+                    selectedGaps: gapCount(x.foldsSelected),
+                    oosGaps: gapCount(x.foldsOOSExecuted),
+                    persistenceClassification: classification
+                };
+            });
+
+            const persistent = rows.filter(x => x.persistenceClassification === "PERSISTENT_SELECTED_EDGE");
+            const recurringSelected = rows.filter(x =>
+                x.persistenceClassification === "PERSISTENT_SELECTED_EDGE" ||
+                x.persistenceClassification === "RECURRING_SELECTED_EDGE"
+            );
+            const singleFold = rows.filter(x => x.persistenceClassification === "SINGLE_FOLD_SELECTED_EDGE");
+
+            return {
+                purpose: "Measure exact candidate persistence across chronological expanding walk-forward folds without changing strategy mechanics.",
+                foldsAnalyzed: folds.length,
+                requiredPersistentSelectedFolds: 2,
+                persistentSelectedEdges: persistent.length,
+                recurringSelectedEdges: recurringSelected.length,
+                singleFoldSelectedEdges: singleFold.length,
+                stableEdgeDetected: persistent.length > 0,
+                candidateCount: rows.length,
+                candidates: rows,
+                interpretationGuard: "Diagnostic only. V21 does not promote, reject, trade, or modify any candidate. Persistence is measured after the existing V20 fold-local pipeline has already run."
+            };
+        }
+
+        const v21EdgePersistenceAudit =
+            buildV21EdgePersistenceAudit(foldResults);
+
+        // =====================================================
         // GLOBAL TRUE OOS METRICS
         // =====================================================
 
@@ -8728,7 +8907,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V20_FOLD_CANDIDATE_STABILITY_AUDIT_TRUE_WALK_FORWARD",
+                "V21_EDGE_PERSISTENCE_TEST_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -8847,7 +9026,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -9231,6 +9410,8 @@ export default async function handler(req, res) {
             v20FoldCandidateStabilityAudit,
 
             v20CrossFoldCandidateStability,
+
+            v21EdgePersistenceAudit,
 
             trueOOS: {
                 metrics:
