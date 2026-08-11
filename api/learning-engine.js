@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.9 — CORE EDGE AGGREGATION + FAMILY STABILITY ENGINE
+ V14.10 — EDGE ANATOMY DIAGNOSTIC ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,12 +12,12 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.9 PURPOSE
+ V14.10 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
 
- V14.9 DOES NOT loosen profitability thresholds.
+ V14.10 DOES NOT loosen profitability thresholds.
 
  Instead it makes the complete candidate pipeline visible:
 
@@ -39,7 +39,7 @@
       ↓
    TRUE OOS
 
- Main V14.9 changes:
+ Main V14.10 changes:
  1. Explicit candidate-flow diagnostics
  2. Every qualified candidate gets a diagnostic status
  3. Exact reason for family/pattern rejection
@@ -59,13 +59,13 @@
 17. Paper only
 
  IMPORTANT:
- V14.9 is a core-edge aggregation version, NOT a strategy-loosening version.
+ V14.10 is a diagnostic version, NOT a strategy-loosening version.
 ===========================================================
 */
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.9";
+    const VERSION = "V14.10";
 
     try {
 
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
 
-        // V14.9 CORE EDGE THRESHOLDS
+        // V14.9 CORE EDGE THRESHOLDS (UNCHANGED)
         // Core edges aggregate detailed context variants and
         // must meet the existing FAMILY evidence floor.
         const CORE_MIN_SAMPLES = FAMILY_MIN_SAMPLES;
@@ -149,7 +149,7 @@ export default async function handler(req, res) {
         const MAX_PATTERN_CONCENTRATION = 0.70;
 
         // =====================================================
-        // V14.9 DIVERSIFICATION LIMITS
+        // V14.9 DIVERSIFICATION LIMITS (UNCHANGED)
         // Explicitly defined.
         // =====================================================
 
@@ -2989,7 +2989,7 @@ export default async function handler(req, res) {
 
             const validationResults = [];
 
-            // V14.9: validation survivors promoted from the
+            // V14.10: validation survivors promoted from the
             // candidate pipeline are collected here.
             const candidates = [];
 
@@ -4762,11 +4762,251 @@ export default async function handler(req, res) {
             getCurrentMarket();
 
         // =====================================================
+        // V14.10 EDGE ANATOMY DIAGNOSTICS
+        // No strategy thresholds are changed here.
+        // This layer explains where evidence is being lost.
+        // =====================================================
+
+        function anatomyMetrics(records) {
+
+            const safe = safeArray(records);
+
+            const trades = safe.length;
+            const wins = safe.filter(x => x.resultR > 0).length;
+            const losses = safe.filter(x => x.resultR < 0).length;
+            const timeouts = safe.filter(x => x.resultR === 0).length;
+            const decisiveTrades = wins + losses;
+
+            const netR = safe.reduce(
+                (sum, x) => sum + (Number.isFinite(x.resultR) ? x.resultR : 0),
+                0
+            );
+
+            const totalWinR = safe
+                .filter(x => x.resultR > 0)
+                .reduce((sum, x) => sum + x.resultR, 0);
+
+            const totalLossR = Math.abs(
+                safe
+                    .filter(x => x.resultR < 0)
+                    .reduce((sum, x) => sum + x.resultR, 0)
+            );
+
+            const expectedValueR = trades ? netR / trades : 0;
+            const profitFactor = totalLossR > 0 ? totalWinR / totalLossR : 0;
+
+            const exits = {
+                STOP: safe.filter(x => x.exitType === "STOP").length,
+                TARGET: safe.filter(x => x.exitType === "TARGET").length,
+                TIMEOUT: safe.filter(x => x.exitType === "TIMEOUT").length,
+                BOUNDARY_TIMEOUT: safe.filter(x => x.exitType === "BOUNDARY_TIMEOUT").length
+            };
+
+            return {
+                trades,
+                wins,
+                losses,
+                timeouts,
+                decisiveTrades,
+                winRate: decisiveTrades ? round((wins / decisiveTrades) * 100, 2) : 0,
+                netR: round(netR, 4),
+                expectedValueR: round(expectedValueR, 4),
+                profitFactor: round(profitFactor, 4),
+                exits
+            };
+        }
+
+        function buildEdgeAnatomy(records, start, end) {
+
+            const safe = safeArray(records);
+            const recentStart = start + Math.floor((end - start) * 0.75);
+
+            function groupedBy(field) {
+                const map = new Map();
+
+                for (const record of safe) {
+                    const key = record[field] ?? "UNKNOWN";
+                    if (!map.has(key)) map.set(key, []);
+                    map.get(key).push(record);
+                }
+
+                return Array.from(map.entries())
+                    .map(([key, rows]) => ({
+                        key,
+                        ...anatomyMetrics(rows),
+                        recent: anatomyMetrics(rows.filter(x => x.index >= recentStart))
+                    }))
+                    .sort((a, b) => b.trades - a.trades);
+            }
+
+            const sectionWidth = Math.max(1, (end - start) / 4);
+            const sections = [[], [], [], []];
+
+            for (const record of safe) {
+                if (!Number.isFinite(record.index)) continue;
+                const relative = record.index - start;
+                const section = Math.min(3, Math.max(0, Math.floor(relative / sectionWidth)));
+                sections[section].push(record);
+            }
+
+            const familyMap = new Map();
+            for (const record of safe) {
+                if (!familyMap.has(record.family)) familyMap.set(record.family, []);
+                familyMap.get(record.family).push(record);
+            }
+
+            const familyAnatomy = Array.from(familyMap.entries())
+                .map(([family, familyRecords]) => ({
+                    family,
+                    overall: anatomyMetrics(familyRecords),
+                    bySection: sections.map(section => anatomyMetrics(
+                        section.filter(x => x.family === family)
+                    )),
+                    bySetup: groupedBy("setup").filter(x => familyRecords.some(r => r.setup === x.key)),
+                    bySide: groupedBy("side").filter(x => familyRecords.some(r => r.side === x.key)),
+                    byTrend: groupedBy("trend").filter(x => familyRecords.some(r => r.trend === x.key)),
+                    contextVariants: new Set(familyRecords.map(x => x.pattern)).size
+                }))
+                .sort((a, b) => b.overall.trades - a.overall.trades);
+
+            return {
+                rawLearningRecords: safe.length,
+                overall: anatomyMetrics(safe),
+                chronologicalSections: sections.map((section, index) => ({
+                    section: index + 1,
+                    ...anatomyMetrics(section)
+                })),
+                bySetup: groupedBy("setup"),
+                bySide: groupedBy("side"),
+                byTrend: groupedBy("trend"),
+                byRegime: groupedBy("regime"),
+                byTimeBucket: groupedBy("timeBucket"),
+                byVWAPDirection: groupedBy("vwapDirection"),
+                byFamily: familyAnatomy,
+                nearestStableFamilies: familyAnatomy
+                    .map(x => ({
+                        family: x.family,
+                        trades: x.overall.trades,
+                        decisiveTrades: x.overall.decisiveTrades,
+                        expectedValueR: x.overall.expectedValueR,
+                        profitFactor: x.overall.profitFactor,
+                        profitableSections: x.bySection.filter(
+                            m => m.decisiveTrades > 0 && m.expectedValueR > 0
+                        ).length,
+                        failingSections: x.bySection
+                            .map((m, i) => m.decisiveTrades > 0 && m.expectedValueR <= 0 ? i + 1 : null)
+                            .filter(Boolean),
+                        contextVariants: x.contextVariants
+                    }))
+                    .sort((a, b) => {
+                        if (b.profitableSections !== a.profitableSections) return b.profitableSections - a.profitableSections;
+                        return b.expectedValueR - a.expectedValueR;
+                    })
+            };
+        }
+
+        function diagnoseSignalPipeline(candles, start, end) {
+
+            const counts = {
+                setupDetections: 0,
+                featureUnavailable: 0,
+                confirmationBlocked: 0,
+                antiChaseBlocked: 0,
+                vwapInteractionBlocked: 0,
+                boundaryBlocked: 0,
+                acceptedLearningRecords: 0
+            };
+
+            const reasons = {
+                confirmation: {},
+                antiChase: {},
+                vwapInteraction: {}
+            };
+
+            const stop = Math.max(start + 30, end - MAX_HOLD_CANDLES);
+
+            for (let i = start + 30; i < stop; i++) {
+                const setups = detectSetups(candles, i);
+
+                for (const setup of setups) {
+                    counts.setupDetections++;
+
+                    const f = features(candles, i);
+                    if (!f) {
+                        counts.featureUnavailable++;
+                        continue;
+                    }
+
+                    const confirmation = confirmationScore(candles, i, setup.side);
+                    if (!confirmation.passed) {
+                        counts.confirmationBlocked++;
+                        const key = confirmation.reasons?.join("+") || "CONFIRMATION_FAILED";
+                        reasons.confirmation[key] = (reasons.confirmation[key] || 0) + 1;
+                        continue;
+                    }
+
+                    if (setup.setup === "TREND_FOLLOW") {
+                        const chase = antiChaseCheck(f, setup.side);
+                        if (!chase.passed) {
+                            counts.antiChaseBlocked++;
+                            const key = chase.reason || chase.reasons?.join("+") || "ANTI_CHASE_FAILED";
+                            reasons.antiChase[key] = (reasons.antiChase[key] || 0) + 1;
+                            continue;
+                        }
+                    }
+
+                    if (setup.setup === "VWAP_PULLBACK") {
+                        const interaction = recentVWAPInteraction(candles, i, setup.side);
+                        if (!interaction) {
+                            counts.vwapInteractionBlocked++;
+                            reasons.vwapInteraction.VWAP_INTERACTION_NOT_FOUND =
+                                (reasons.vwapInteraction.VWAP_INTERACTION_NOT_FOUND || 0) + 1;
+                            continue;
+                        }
+                    }
+
+                    const record = createLearningRecord(
+                        candles,
+                        i,
+                        setup.side,
+                        setup.setup,
+                        end - 1
+                    );
+
+                    if (!record) continue;
+
+                    if (record.boundaryCapped) {
+                        counts.boundaryBlocked++;
+                        continue;
+                    }
+
+                    counts.acceptedLearningRecords++;
+                }
+            }
+
+            return { counts, reasons };
+        }
+
+        // =====================================================
         // FINAL LEARNING
         // =====================================================
 
         const finalDiscovery =
             discoverCandidates(
+                historicalCandles,
+                0,
+                historicalCandles.length
+            );
+
+        const edgeAnatomy =
+            buildEdgeAnatomy(
+                finalDiscovery.rawRecords,
+                0,
+                historicalCandles.length
+            );
+
+        const signalPipelineDiagnostics =
+            diagnoseSignalPipeline(
                 historicalCandles,
                 0,
                 historicalCandles.length
@@ -4804,7 +5044,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.9 edge has survived discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
+                "No V14.10 edge has survived discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -4990,7 +5230,7 @@ export default async function handler(req, res) {
                         currentMarket,
 
                     reason:
-                        "V14.9 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
+                        "V14.10 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
 
                     nextAction:
                         "PAPER_REVIEW_ONLY"
@@ -5305,7 +5545,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_9_CORE_EDGE_AGGREGATION_FAMILY_STABILITY_TRUE_WALK_FORWARD",
+                "V14_10_EDGE_ANATOMY_DIAGNOSTIC_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -5492,6 +5732,13 @@ export default async function handler(req, res) {
                         .patterns
                         .length,
 
+                rawLearningRecords:
+                    edgeAnatomy.rawLearningRecords,
+
+                signalPipelineDiagnostics,
+
+                edgeAnatomy,
+
                 qualifiedPatterns:
                     finalDiscovery
                         .patterns
@@ -5533,6 +5780,24 @@ export default async function handler(req, res) {
                         .independentFamilies,
 
                 candidateFlow
+            },
+
+            edgeAnatomyDiagnostics: {
+
+                purpose:
+                    "Explain where raw learning evidence is lost before candidate promotion without changing strategy thresholds.",
+
+                rawLearningRecords:
+                    edgeAnatomy.rawLearningRecords,
+
+                anatomy:
+                    edgeAnatomy,
+
+                signalPipeline:
+                    signalPipelineDiagnostics,
+
+                interpretationGuard:
+                    "Diagnostic only. These counts do not create trades, lower thresholds or enter validation/OOS."
             },
 
             internalValidation: {
