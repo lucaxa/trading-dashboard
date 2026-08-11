@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.15 — REGIME-GATED EDGE TEST + ROLLING EVIDENCE DECAY ENGINE
+ V15 — STRATEGY MECHANICS LAB + EXIT MODEL COMPARISON ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,7 +12,7 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.15 PURPOSE
+ V15 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.15";
+    const VERSION = "V15";
 
     try {
 
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
 
-        // V14.15 REGIME-CONTEXT DISCOVERY
+        // V15 REGIME-CONTEXT DISCOVERY
         // Only SELL-side detailed edges are eligible for this
         // additional discovery lane. The candidate must still
         // independently satisfy the existing PATTERN thresholds
@@ -121,7 +121,7 @@ export default async function handler(req, res) {
         const DIRECTIONAL_MIN_FAMILY_EV = FAMILY_MIN_EV;
         const DIRECTIONAL_MIN_FAMILY_PF = FAMILY_MIN_PF;
 
-        // V14.15 REGIME-CONTEXT DISCOVERY
+        // V15 REGIME-CONTEXT DISCOVERY
         // Aggregate SELL evidence across RSI buckets while keeping
         // setup + trend + VWAP direction + regime + time bucket.
         // The existing PATTERN evidence floor remains unchanged.
@@ -135,7 +135,7 @@ export default async function handler(req, res) {
         const CONTEXT_MIN_FAMILY_PF = FAMILY_MIN_PF;
 
         // =====================================================
-        // V14.15 ADAPTIVE REGIME GATE
+        // V15 ADAPTIVE REGIME GATE
         // -----------------------------------------------------
         // This lane does NOT promote an edge directly. It creates
         // a controlled SELL-side adaptive candidate from a regime
@@ -2155,7 +2155,7 @@ export default async function handler(req, res) {
         }
      
           // =====================================================
-        // V14.15 ROLLING / DECAY EVIDENCE
+        // V15 ROLLING / DECAY EVIDENCE
         // =====================================================
 
         function rollingEvidenceMetrics(records, endIndex) {
@@ -5496,7 +5496,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // V14.15 REGIME-SHIFT / EDGE-DECAY DIAGNOSTICS
+        // V15 REGIME-SHIFT / EDGE-DECAY DIAGNOSTICS
         // Diagnostic only. No promotion thresholds or validation
         // gates are changed by this layer.
         // =====================================================
@@ -5727,7 +5727,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // V14.15 REGIME-FINGERPRINT DIAGNOSTICS
+        // V15 REGIME-FINGERPRINT DIAGNOSTICS
         // Diagnostic only. This layer compares profitable and
         // losing SELL periods to identify recurring context
         // fingerprints. It NEVER creates candidates, changes
@@ -6023,6 +6023,414 @@ export default async function handler(req, res) {
             };
         }
 
+
+        // =====================================================
+        // V15 STRATEGY MECHANICS LAB
+        // -----------------------------------------------------
+        // Diagnostic-only exit-model comparison.
+        //
+        // The entry signal set is held constant using the raw
+        // learning records. Each exit model is then replayed
+        // independently from the same entry candle.
+        //
+        // This isolates trade-management mechanics from signal
+        // discovery. No model is promoted, selected, or allowed
+        // into validation/OOS by this diagnostic.
+        // =====================================================
+
+        const V15_EXIT_MODELS = [
+            {
+                key: "BASELINE_1R_2R_12",
+                label: "Baseline 1R stop / 2R target / 12 candles",
+                stopR: 1,
+                targetR: 2,
+                maxHoldCandles: 12
+            },
+            {
+                key: "FAST_1R_1_5R_8",
+                label: "Fast 1R stop / 1.5R target / 8 candles",
+                stopR: 1,
+                targetR: 1.5,
+                maxHoldCandles: 8
+            },
+            {
+                key: "BALANCED_1R_2R_8",
+                label: "Balanced 1R stop / 2R target / 8 candles",
+                stopR: 1,
+                targetR: 2,
+                maxHoldCandles: 8
+            },
+            {
+                key: "EXTENDED_1R_2_5R_16",
+                label: "Extended 1R stop / 2.5R target / 16 candles",
+                stopR: 1,
+                targetR: 2.5,
+                maxHoldCandles: 16
+            },
+            {
+                key: "WIDE_1_25R_2_5R_16",
+                label: "Wide 1.25R stop / 2.5R target / 16 candles",
+                stopR: 1.25,
+                targetR: 2.5,
+                maxHoldCandles: 16
+            }
+        ];
+
+        function evaluateExitModel(
+            candles,
+            entryIndex,
+            side,
+            entry,
+            atrValue,
+            model,
+            boundaryEnd = null
+        ) {
+
+            const stopDistance =
+                model.stopR * atrValue;
+
+            const targetDistance =
+                model.targetR * atrValue;
+
+            const stop =
+                side === "BUY"
+                    ? entry - stopDistance
+                    : entry + stopDistance;
+
+            const target =
+                side === "BUY"
+                    ? entry + targetDistance
+                    : entry - targetDistance;
+
+            const naturalEnd =
+                Math.min(
+                    candles.length - 1,
+                    entryIndex +
+                    model.maxHoldCandles
+                );
+
+            const end =
+                boundaryEnd === null
+                    ? naturalEnd
+                    : Math.min(
+                        naturalEnd,
+                        boundaryEnd
+                    );
+
+            if (entryIndex + 1 > end) {
+                return {
+                    exitIndex: entryIndex,
+                    exitType: "BOUNDARY",
+                    resultR: null,
+                    boundaryCapped: true,
+                    stop,
+                    target
+                };
+            }
+
+            for (let i = entryIndex + 1; i <= end; i++) {
+
+                const candle = candles[i];
+
+                const hitStop =
+                    side === "BUY"
+                        ? candle.l <= stop
+                        : candle.h >= stop;
+
+                const hitTarget =
+                    side === "BUY"
+                        ? candle.h >= target
+                        : candle.l <= target;
+
+                // Preserve the engine's conservative STOP_FIRST rule.
+                if (hitStop) {
+                    return {
+                        exitIndex: i,
+                        exitType: "STOP",
+                        resultR: -model.stopR,
+                        boundaryCapped: false,
+                        stop,
+                        target
+                    };
+                }
+
+                if (hitTarget) {
+                    return {
+                        exitIndex: i,
+                        exitType: "TARGET",
+                        resultR: model.targetR,
+                        boundaryCapped: false,
+                        stop,
+                        target
+                    };
+                }
+            }
+
+            const boundaryCapped =
+                boundaryEnd !== null &&
+                end < naturalEnd;
+
+            return {
+                exitIndex: end,
+                exitType:
+                    boundaryCapped
+                        ? "BOUNDARY_TIMEOUT"
+                        : "TIMEOUT",
+                resultR: 0,
+                boundaryCapped,
+                stop,
+                target
+            };
+        }
+
+        function summarizeMechanics(records) {
+
+            const safe = safeArray(records)
+                .filter(
+                    x =>
+                        x &&
+                        Number.isFinite(x.resultR)
+                );
+
+            return calculateMetrics(safe);
+        }
+
+        function mechanicsSections(
+            records,
+            start,
+            end
+        ) {
+
+            const sectionCount = 4;
+            const width =
+                Math.max(
+                    1,
+                    (end - start) / sectionCount
+                );
+
+            const sections = [];
+
+            for (let s = 0; s < sectionCount; s++) {
+
+                const sectionStart =
+                    start + Math.floor(s * width);
+
+                const sectionEnd =
+                    s === sectionCount - 1
+                        ? end
+                        : start + Math.floor((s + 1) * width);
+
+                const sectionRecords =
+                    records.filter(
+                        x =>
+                            x.index >= sectionStart &&
+                            x.index < sectionEnd
+                    );
+
+                sections.push({
+                    section: s + 1,
+                    startIndex: sectionStart,
+                    endIndex: sectionEnd - 1,
+                    metrics: summarizeMechanics(sectionRecords)
+                });
+            }
+
+            return sections;
+        }
+
+        function buildV15ExitModelDiagnostics(
+            candles,
+            rawRecords,
+            start,
+            end
+        ) {
+
+            const records =
+                safeArray(rawRecords)
+                    .filter(
+                        x =>
+                            x &&
+                            Number.isFinite(x.index) &&
+                            (x.side === "BUY" || x.side === "SELL")
+                    );
+
+            const results = [];
+
+            for (const model of V15_EXIT_MODELS) {
+
+                const replay = [];
+
+                for (const record of records) {
+
+                    const f =
+                        features(
+                            candles,
+                            record.index
+                        );
+
+                    if (
+                        !f ||
+                        !Number.isFinite(f.atr14) ||
+                        f.atr14 <= 0
+                    ) {
+                        continue;
+                    }
+
+                    const entry =
+                        candles[record.index].c;
+
+                    const outcome =
+                        evaluateExitModel(
+                            candles,
+                            record.index,
+                            record.side,
+                            entry,
+                            f.atr14,
+                            model,
+                            end - 1
+                        );
+
+                    if (
+                        outcome.resultR === null ||
+                        outcome.boundaryCapped
+                    ) {
+                        continue;
+                    }
+
+                    replay.push({
+                        ...record,
+                        exitModel: model.key,
+                        resultR: outcome.resultR,
+                        exitType: outcome.exitType,
+                        exitIndex: outcome.exitIndex,
+                        stop: outcome.stop,
+                        target: outcome.target
+                    });
+                }
+
+                const metrics =
+                    summarizeMechanics(replay);
+
+                const recentStart =
+                    start +
+                    Math.floor(
+                        (end - start) * 0.75
+                    );
+
+                const recent =
+                    replay.filter(
+                        x =>
+                            x.index >= recentStart
+                    );
+
+                const bySide = {};
+
+                for (const side of ["BUY", "SELL"]) {
+                    bySide[side] =
+                        summarizeMechanics(
+                            replay.filter(
+                                x => x.side === side
+                            )
+                        );
+                }
+
+                const sections =
+                    mechanicsSections(
+                        replay,
+                        start,
+                        end
+                    );
+
+                const profitableSections =
+                    sections.filter(
+                        x =>
+                            x.metrics.trades > 0 &&
+                            x.metrics.expectedValueR > 0
+                    ).length;
+
+                results.push({
+                    model: model.key,
+                    label: model.label,
+                    parameters: {
+                        stopR: model.stopR,
+                        targetR: model.targetR,
+                        maxHoldCandles: model.maxHoldCandles
+                    },
+                    signalSetSize: records.length,
+                    replayedTrades: replay.length,
+                    overall: metrics,
+                    recent: summarizeMechanics(recent),
+                    bySide,
+                    sections,
+                    profitableSections,
+                    diagnosticOnly: true
+                });
+            }
+
+            const ranked =
+                [...results]
+                    .sort(
+                        (a, b) => {
+                            const aRecent =
+                                a.recent.expectedValueR;
+
+                            const bRecent =
+                                b.recent.expectedValueR;
+
+                            const aScore =
+                                aRecent * 100 +
+                                Math.min(
+                                    a.recent.profitFactor,
+                                    5
+                                ) * 5 +
+                                Math.min(
+                                    a.profitableSections,
+                                    3
+                                ) * 2;
+
+                            const bScore =
+                                bRecent * 100 +
+                                Math.min(
+                                    b.recent.profitFactor,
+                                    5
+                                ) * 5 +
+                                Math.min(
+                                    b.profitableSections,
+                                    3
+                                ) * 2;
+
+                            return bScore - aScore;
+                        }
+                    )
+                    .map(
+                        (x, index) => ({
+                            diagnosticRank: index + 1,
+                            model: x.model,
+                            recentEV: x.recent.expectedValueR,
+                            recentPF: x.recent.profitFactor,
+                            overallEV: x.overall.expectedValueR,
+                            overallPF: x.overall.profitFactor,
+                            profitableSections:
+                                x.profitableSections
+                        })
+                    );
+
+            return {
+                purpose:
+                    "Compare exit mechanics on the same historical entry signals before changing the strategy's trade-management rules.",
+                signalSetSize:
+                    records.length,
+                modelsTested:
+                    V15_EXIT_MODELS.length,
+                models:
+                    results,
+                diagnosticRanking:
+                    ranked,
+                guard:
+                    "Diagnostic only. Exit-model ranking does not select a model, alter discovery thresholds, enter validation, enter true OOS, or place orders."
+            };
+        }
+
         // =====================================================
         // FINAL LEARNING
         // =====================================================
@@ -6036,6 +6444,14 @@ export default async function handler(req, res) {
 
         const edgeAnatomy =
             buildEdgeAnatomy(
+                finalDiscovery.rawRecords,
+                0,
+                historicalCandles.length
+            );
+
+        const strategyMechanicsDiagnostics =
+            buildV15ExitModelDiagnostics(
+                historicalCandles,
                 finalDiscovery.rawRecords,
                 0,
                 historicalCandles.length
@@ -6094,7 +6510,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.15 edge has survived regime-context discovery, isolated validation, regime-fingerprint diagnostics and anti-overfitting filters.",
+                "No V15 edge has survived regime-context discovery, isolated validation, regime-fingerprint diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -6634,7 +7050,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_15_REGIME_GATED_EDGE_TEST_ROLLING_EVIDENCE_DECAY_TRUE_WALK_FORWARD",
+                "V15_STRATEGY_MECHANICS_LAB_EXIT_MODEL_COMPARISON_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -6753,7 +7169,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification.",
+                    "Every qualified candidate is traceable through pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; exit mechanics are compared diagnostically on a fixed entry set.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -6771,7 +7187,7 @@ export default async function handler(req, res) {
                     "Trade outcomes cannot cross fold boundaries.",
 
                 objective:
-                    "Prefer NO_TRADE over weak or unstable evidence; test only regime-active SELL edges."
+                    "Prefer NO_TRADE over weak or unstable evidence; test strategy mechanics without selecting exit models from the same evidence."
             },
 
             robustness: {
@@ -6919,6 +7335,8 @@ export default async function handler(req, res) {
             edgeDecayDiagnostics,
 
             regimeFingerprintDiagnostics,
+
+            strategyMechanicsDiagnostics,
 
             adaptiveRegimeGate: {
                 enabled: true,
