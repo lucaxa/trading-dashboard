@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.8 — CORE EDGE EVIDENCE ENGINE
+ V14.9 — CORE EDGE AGGREGATION + FAMILY STABILITY ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,12 +12,12 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.8 PURPOSE
+ V14.9 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
 
- V14.8 DOES NOT loosen profitability thresholds.
+ V14.9 DOES NOT loosen profitability thresholds.
 
  Instead it makes the complete candidate pipeline visible:
 
@@ -39,7 +39,7 @@
       ↓
    TRUE OOS
 
- Main V14.8 changes:
+ Main V14.9 changes:
  1. Explicit candidate-flow diagnostics
  2. Every qualified candidate gets a diagnostic status
  3. Exact reason for family/pattern rejection
@@ -59,13 +59,13 @@
 17. Paper only
 
  IMPORTANT:
- V14.8 is an evidence-grouping version, NOT a strategy-loosening version.
+ V14.9 is a core-edge aggregation version, NOT a strategy-loosening version.
 ===========================================================
 */
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.8";
+    const VERSION = "V14.9";
 
     try {
 
@@ -112,6 +112,14 @@ export default async function handler(req, res) {
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
 
+        // V14.9 CORE EDGE THRESHOLDS
+        // Core edges aggregate detailed context variants and
+        // must meet the existing FAMILY evidence floor.
+        const CORE_MIN_SAMPLES = FAMILY_MIN_SAMPLES;
+        const CORE_MIN_DECISIVE = FAMILY_MIN_DECISIVE;
+        const CORE_MIN_EV = FAMILY_MIN_EV;
+        const CORE_MIN_PF = FAMILY_MIN_PF;
+
         // =====================================================
         // INTERNAL VALIDATION
         // UNCHANGED FROM V14.6
@@ -141,7 +149,7 @@ export default async function handler(req, res) {
         const MAX_PATTERN_CONCENTRATION = 0.70;
 
         // =====================================================
-        // V14.8 DIVERSIFICATION LIMITS
+        // V14.9 DIVERSIFICATION LIMITS
         // Explicitly defined.
         // =====================================================
 
@@ -1495,7 +1503,7 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
-        // V14.8 CORE PATTERN
+        // V14.9 CORE PATTERN
         // Primary evidence groups by the underlying edge:
         // side + setup + trend + VWAP direction.
         // Regime, time bucket and RSI remain in the detailed
@@ -2279,22 +2287,30 @@ export default async function handler(req, res) {
                 const minSamples =
                     level === "FAMILY"
                         ? FAMILY_MIN_SAMPLES
-                        : PATTERN_MIN_SAMPLES;
+                        : level === "CORE"
+                            ? CORE_MIN_SAMPLES
+                            : PATTERN_MIN_SAMPLES;
 
                 const minDecisive =
                     level === "FAMILY"
                         ? FAMILY_MIN_DECISIVE
-                        : PATTERN_MIN_DECISIVE;
+                        : level === "CORE"
+                            ? CORE_MIN_DECISIVE
+                            : PATTERN_MIN_DECISIVE;
 
                 const minEV =
                     level === "FAMILY"
                         ? FAMILY_MIN_EV
-                        : PATTERN_MIN_EV;
+                        : level === "CORE"
+                            ? CORE_MIN_EV
+                            : PATTERN_MIN_EV;
 
                 const minPF =
                     level === "FAMILY"
                         ? FAMILY_MIN_PF
-                        : PATTERN_MIN_PF;
+                        : level === "CORE"
+                            ? CORE_MIN_PF
+                            : PATTERN_MIN_PF;
 
                 const rejectionReasons = [];
 
@@ -2468,7 +2484,7 @@ export default async function handler(req, res) {
                     summarize(
                         key,
                         records,
-                        "PATTERN"
+                        "CORE"
                     );
 
                 summary.contextVariants =
@@ -2973,7 +2989,7 @@ export default async function handler(req, res) {
 
             const validationResults = [];
 
-            // V14.8: validation survivors promoted from the
+            // V14.9: validation survivors promoted from the
             // candidate pipeline are collected here.
             const candidates = [];
 
@@ -2982,9 +2998,16 @@ export default async function handler(req, res) {
                     x => x.qualified
                 );
 
-            const qualifiedPatterns =
+            const qualifiedCoreEdges =
                 safeArray(
                     discovery.corePatterns
+                ).filter(
+                    x => x.qualified
+                );
+
+            const qualifiedPatterns =
+                safeArray(
+                    discovery.patterns
                 ).filter(
                     x => x.qualified
                 );
@@ -2992,7 +3015,7 @@ export default async function handler(req, res) {
             const qualified =
                 [
                     ...qualifiedFamilies,
-                    ...qualifiedPatterns
+                    ...qualifiedCoreEdges
                 ];
 
             for (const candidate of qualified) {
@@ -3113,11 +3136,33 @@ export default async function handler(req, res) {
                 }
 
                 /*
-                 * This is the important V14.8 distinction:
+                 * This is the important V14.9 distinction:
                  *
                  * A candidate reaching this point is explicitly
                  * counted as a VALIDATION CANDIDATE.
                  */
+
+                if (
+                    candidate.level === "CORE" &&
+                    (!family ||
+                        family.stableSections <
+                        MIN_STABLE_SECTIONS)
+                ) {
+
+                    candidatesRejectedBeforeValidation.push({
+                        key: candidate.key,
+                        level: candidate.level,
+                        stage: "PRE_VALIDATION",
+                        reason: "FAMILY_STABILITY_GATE",
+                        familyKey: familyKeyValue,
+                        familyStableSections:
+                            family?.stableSections ?? 0,
+                        requiredStableSections:
+                            MIN_STABLE_SECTIONS
+                    });
+
+                    continue;
+                }
 
                 validationCandidates.push(candidate);
 
@@ -3305,6 +3350,9 @@ export default async function handler(req, res) {
 
                     qualifiedFamilies:
                         qualifiedFamilies.length,
+
+                    qualifiedCoreEdges:
+                        qualifiedCoreEdges.length,
 
                     qualifiedPatterns:
                         qualifiedPatterns.length,
@@ -4756,7 +4804,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.8 edge has survived discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
+                "No V14.9 edge has survived discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -4814,7 +4862,9 @@ export default async function handler(req, res) {
 
                             if (
                                 candidate.level ===
-                                "PATTERN"
+                                "PATTERN" ||
+                            candidate.level ===
+                                "CORE"
                             ) {
 
                                 return (
@@ -4940,7 +4990,7 @@ export default async function handler(req, res) {
                         currentMarket,
 
                     reason:
-                        "V14.8 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
+                        "V14.9 edge survived historical discovery, isolated validation and anti-overfitting filters. PAPER REVIEW ONLY.",
 
                     nextAction:
                         "PAPER_REVIEW_ONLY"
@@ -4963,6 +5013,16 @@ export default async function handler(req, res) {
                 insufficientStability: 0,
                 edgeBelowThreshold: 0,
                 recentNegative: 0
+            },
+
+            core: {
+
+                insufficientSamples: 0,
+                insufficientDecisive: 0,
+                insufficientStability: 0,
+                edgeBelowThreshold: 0,
+                recentNegative: 0,
+                familyStabilityGate: 0
             },
 
             pattern: {
@@ -5075,56 +5135,69 @@ export default async function handler(req, res) {
         }
 
         for (
-            const pattern of
-            safeArray(
-                finalDiscovery.corePatterns
-            )
+            const core of
+            safeArray(finalDiscovery.corePatterns)
         ) {
 
-            if (
-                pattern.samples <
-                PATTERN_MIN_SAMPLES
-            ) {
-                rejectionDiagnostics
-                    .pattern
-                    .insufficientSamples++;
+            if (core.samples < CORE_MIN_SAMPLES) {
+                rejectionDiagnostics.core.insufficientSamples++;
+            }
+
+            if (core.decisiveTrades < CORE_MIN_DECISIVE) {
+                rejectionDiagnostics.core.insufficientDecisive++;
+            }
+
+            if (core.stableSections < MIN_STABLE_SECTIONS) {
+                rejectionDiagnostics.core.insufficientStability++;
             }
 
             if (
-                pattern.decisiveTrades <
-                PATTERN_MIN_DECISIVE
+                core.expectedValueR < CORE_MIN_EV ||
+                core.profitFactor < CORE_MIN_PF
             ) {
-                rejectionDiagnostics
-                    .pattern
-                    .insufficientDecisive++;
+                rejectionDiagnostics.core.edgeBelowThreshold++;
+            }
+
+            if (core.recentEV < 0) {
+                rejectionDiagnostics.core.recentNegative++;
+            }
+        }
+
+        for (
+            const rejected of
+            safeArray(finalPromoted.candidatesRejectedBeforeValidation)
+        ) {
+            if (rejected.reason === "FAMILY_STABILITY_GATE") {
+                rejectionDiagnostics.core.familyStabilityGate++;
+            }
+        }
+
+        for (
+            const pattern of
+            finalDiscovery.patterns
+        ) {
+
+            if (pattern.samples < PATTERN_MIN_SAMPLES) {
+                rejectionDiagnostics.pattern.insufficientSamples++;
+            }
+
+            if (pattern.decisiveTrades < PATTERN_MIN_DECISIVE) {
+                rejectionDiagnostics.pattern.insufficientDecisive++;
+            }
+
+            if (pattern.stableSections < MIN_STABLE_SECTIONS) {
+                rejectionDiagnostics.pattern.insufficientStability++;
             }
 
             if (
-                pattern.stableSections <
-                MIN_STABLE_SECTIONS
+                pattern.expectedValueR < PATTERN_MIN_EV ||
+                pattern.profitFactor < PATTERN_MIN_PF
             ) {
-                rejectionDiagnostics
-                    .pattern
-                    .insufficientStability++;
+                rejectionDiagnostics.pattern.edgeBelowThreshold++;
             }
 
-            if (
-                pattern.expectedValueR <
-                    PATTERN_MIN_EV ||
-                pattern.profitFactor <
-                    PATTERN_MIN_PF
-            ) {
-                rejectionDiagnostics
-                    .pattern
-                    .edgeBelowThreshold++;
-            }
-
-            if (
-                pattern.recentEV < 0
-            ) {
-                rejectionDiagnostics
-                    .pattern
-                    .recentNegative++;
+            if (pattern.recentEV < 0) {
+                rejectionDiagnostics.pattern.recentNegative++;
             }
         }
 
@@ -5149,17 +5222,20 @@ export default async function handler(req, res) {
                         )
                         .length,
 
-                discoveredPatterns:
-                    safeArray(
-                        finalDiscovery.corePatterns
+                discoveredCoreEdges:
+                    safeArray(finalDiscovery.corePatterns).length,
+
+                qualifiedCoreEdges:
+                    safeArray(finalDiscovery.corePatterns).filter(
+                        x => x.qualified
                     ).length,
 
+                discoveredPatterns:
+                    finalDiscovery.patterns.length,
+
                 qualifiedPatterns:
-                    safeArray(
-                        finalDiscovery.corePatterns
-                    ).filter(
-                        x =>
-                            x.qualified
+                    finalDiscovery.patterns.filter(
+                        x => x.qualified
                     ).length,
 
                 detailedPatterns:
@@ -5229,7 +5305,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V14_8_CORE_EDGE_EVIDENCE_GROUPING_TRUE_WALK_FORWARD",
+                "V14_9_CORE_EDGE_AGGREGATION_FAMILY_STABILITY_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -5833,7 +5909,7 @@ export default async function handler(req, res) {
     } catch (error) {
 
         console.error(
-            "TradeMind Pro V14.8 ERROR:",
+            "TradeMind Pro V14.9 ERROR:",
             error
         );
 
