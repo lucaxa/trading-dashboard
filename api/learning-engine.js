@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V14.13 — REGIME CONTEXT EDGE DIAGNOSTIC ENGINE
+ V14.14 — REGIME FINGERPRINT DIAGNOSTIC ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -12,7 +12,7 @@
  PAPER ONLY
  NO REAL ORDERS
 
- V14.13 PURPOSE
+ V14.14 PURPOSE
  ----------------------------------------------------------
  V14.6 proved that apparently strong discovery patterns
  were not surviving untouched validation.
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V14.13";
+    const VERSION = "V14.14";
 
     try {
 
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
         const PATTERN_MIN_EV = 0.10;
         const PATTERN_MIN_PF = 1.15;
 
-        // V14.13 REGIME-CONTEXT DISCOVERY
+        // V14.14 REGIME-CONTEXT DISCOVERY
         // Only SELL-side detailed edges are eligible for this
         // additional discovery lane. The candidate must still
         // independently satisfy the existing PATTERN thresholds
@@ -121,7 +121,7 @@ export default async function handler(req, res) {
         const DIRECTIONAL_MIN_FAMILY_EV = FAMILY_MIN_EV;
         const DIRECTIONAL_MIN_FAMILY_PF = FAMILY_MIN_PF;
 
-        // V14.13 REGIME-CONTEXT DISCOVERY
+        // V14.14 REGIME-CONTEXT DISCOVERY
         // Aggregate SELL evidence across RSI buckets while keeping
         // setup + trend + VWAP direction + regime + time bucket.
         // The existing PATTERN evidence floor remains unchanged.
@@ -1545,7 +1545,7 @@ export default async function handler(req, res) {
             ].join("|");
         }
 
-        // V14.13 REGIME-CONTEXT KEY
+        // V14.14 REGIME-CONTEXT KEY
         // RSI is intentionally excluded so nearby RSI buckets do not
         // fragment the same time/regime edge into tiny samples.
         function regimeContextKey(
@@ -5245,7 +5245,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // V14.13 REGIME-SHIFT / EDGE-DECAY DIAGNOSTICS
+        // V14.14 REGIME-SHIFT / EDGE-DECAY DIAGNOSTICS
         // Diagnostic only. No promotion thresholds or validation
         // gates are changed by this layer.
         // =====================================================
@@ -5476,6 +5476,303 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // V14.14 REGIME-FINGERPRINT DIAGNOSTICS
+        // Diagnostic only. This layer compares profitable and
+        // losing SELL periods to identify recurring context
+        // fingerprints. It NEVER creates candidates, changes
+        // thresholds, enters validation or enters OOS.
+        // =====================================================
+
+        function buildRegimeFingerprintDiagnostics(records, start, end) {
+
+            const safe = safeArray(records)
+                .filter(x => x && x.side === "SELL" && Number.isFinite(x.resultR));
+
+            const sectionWidth = Math.max(1, (end - start) / 8);
+            const windows = Array.from({ length: 8 }, (_, i) => []);
+
+            for (const record of safe) {
+                if (!Number.isFinite(record.index)) continue;
+                const relative = record.index - start;
+                const window = Math.min(
+                    7,
+                    Math.max(0, Math.floor(relative / sectionWidth))
+                );
+                windows[window].push(record);
+            }
+
+            function metrics(rows) {
+                const trades = rows.length;
+                const wins = rows.filter(x => x.resultR > 0).length;
+                const losses = rows.filter(x => x.resultR < 0).length;
+                const timeouts = rows.filter(x => x.resultR === 0).length;
+                const decisive = wins + losses;
+                const netR = rows.reduce(
+                    (sum, x) => sum + (Number.isFinite(x.resultR) ? x.resultR : 0),
+                    0
+                );
+                const winR = rows
+                    .filter(x => x.resultR > 0)
+                    .reduce((sum, x) => sum + x.resultR, 0);
+                const lossR = Math.abs(
+                    rows
+                        .filter(x => x.resultR < 0)
+                        .reduce((sum, x) => sum + x.resultR, 0)
+                );
+                return {
+                    trades,
+                    wins,
+                    losses,
+                    timeouts,
+                    decisiveTrades: decisive,
+                    winRate: decisive ? round((wins / decisive) * 100, 2) : 0,
+                    netR: round(netR, 4),
+                    expectedValueR: trades ? round(netR / trades, 4) : 0,
+                    profitFactor: lossR > 0 ? round(winR / lossR, 4) : 0
+                };
+            }
+
+            const windowMetrics = windows.map((rows, i) => ({
+                window: i + 1,
+                ...metrics(rows),
+                classification: rows.length === 0
+                    ? "NO_DATA"
+                    : metrics(rows).expectedValueR > 0
+                        ? "POSITIVE"
+                        : "NEGATIVE_OR_FLAT"
+            }));
+
+            const positiveWindowIndexes = new Set(
+                windowMetrics
+                    .filter(x => x.classification === "POSITIVE")
+                    .map(x => x.window - 1)
+            );
+
+            const negativeWindowIndexes = new Set(
+                windowMetrics
+                    .filter(x => x.classification === "NEGATIVE_OR_FLAT")
+                    .map(x => x.window - 1)
+            );
+
+            const fields = [
+                "setup",
+                "trend",
+                "regime",
+                "timeBucket",
+                "vwapDirection",
+                "rsiBucket",
+                "volatility"
+            ];
+
+            function distribution(field) {
+                const values = new Set(
+                    safe.map(x => x[field] ?? "UNKNOWN")
+                );
+
+                return Array.from(values)
+                    .map(value => {
+                        const positiveRows = [];
+                        const negativeRows = [];
+
+                        windows.forEach((rows, index) => {
+                            const matching = rows.filter(
+                                x => (x[field] ?? "UNKNOWN") === value
+                            );
+                            if (positiveWindowIndexes.has(index)) {
+                                positiveRows.push(...matching);
+                            } else if (negativeWindowIndexes.has(index)) {
+                                negativeRows.push(...matching);
+                            }
+                        });
+
+                        const positiveTotal = windows
+                            .filter((_, index) => positiveWindowIndexes.has(index))
+                            .reduce((sum, rows) => sum + rows.length, 0);
+                        const negativeTotal = windows
+                            .filter((_, index) => negativeWindowIndexes.has(index))
+                            .reduce((sum, rows) => sum + rows.length, 0);
+
+                        const positiveShare = positiveTotal
+                            ? positiveRows.length / positiveTotal
+                            : 0;
+                        const negativeShare = negativeTotal
+                            ? negativeRows.length / negativeTotal
+                            : 0;
+
+                        const presentPositiveWindows = windows.filter(
+                            (rows, index) =>
+                                positiveWindowIndexes.has(index) &&
+                                rows.some(x => (x[field] ?? "UNKNOWN") === value)
+                        ).length;
+
+                        const presentNegativeWindows = windows.filter(
+                            (rows, index) =>
+                                negativeWindowIndexes.has(index) &&
+                                rows.some(x => (x[field] ?? "UNKNOWN") === value)
+                        ).length;
+
+                        return {
+                            field,
+                            value,
+                            positiveRecords: positiveRows.length,
+                            negativeRecords: negativeRows.length,
+                            positiveSharePct: round(positiveShare * 100, 2),
+                            negativeSharePct: round(negativeShare * 100, 2),
+                            shareLiftPct: round((positiveShare - negativeShare) * 100, 2),
+                            positiveWindowCoverage: presentPositiveWindows,
+                            negativeWindowCoverage: presentNegativeWindows,
+                            positiveMetrics: metrics(positiveRows),
+                            negativeMetrics: metrics(negativeRows)
+                        };
+                    })
+                    .sort((a, b) => {
+                        if (b.shareLiftPct !== a.shareLiftPct) {
+                            return b.shareLiftPct - a.shareLiftPct;
+                        }
+                        return b.positiveRecords - a.positiveRecords;
+                    });
+            }
+
+            const distributions = {};
+            for (const field of fields) {
+                distributions[field] = distribution(field);
+            }
+
+            // Composite fingerprints are deliberately diagnostic only.
+            // They are not passed to discoverCandidates/promoteCandidates.
+            const fingerprintFields = [
+                "setup",
+                "regime",
+                "timeBucket",
+                "vwapDirection",
+                "rsiBucket",
+                "volatility"
+            ];
+
+            const fingerprintMap = new Map();
+
+            for (const record of safe) {
+                const key = fingerprintFields
+                    .map(field => `${field}=${record[field] ?? "UNKNOWN"}`)
+                    .join("|");
+
+                if (!fingerprintMap.has(key)) {
+                    fingerprintMap.set(key, {
+                        key,
+                        values: Object.fromEntries(
+                            fingerprintFields.map(field => [field, record[field] ?? "UNKNOWN"])
+                        ),
+                        records: [],
+                        positiveWindowSet: new Set(),
+                        negativeWindowSet: new Set()
+                    });
+                }
+
+                const item = fingerprintMap.get(key);
+                item.records.push(record);
+
+                const relative = record.index - start;
+                const window = Math.min(
+                    7,
+                    Math.max(0, Math.floor(relative / sectionWidth))
+                );
+
+                if (positiveWindowIndexes.has(window)) {
+                    item.positiveWindowSet.add(window);
+                } else if (negativeWindowIndexes.has(window)) {
+                    item.negativeWindowSet.add(window);
+                }
+            }
+
+            const fingerprints = Array.from(fingerprintMap.values())
+                .map(item => {
+                    const positiveRows = item.records.filter(record => {
+                        const relative = record.index - start;
+                        const window = Math.min(
+                            7,
+                            Math.max(0, Math.floor(relative / sectionWidth))
+                        );
+                        return positiveWindowIndexes.has(window);
+                    });
+
+                    const negativeRows = item.records.filter(record => {
+                        const relative = record.index - start;
+                        const window = Math.min(
+                            7,
+                            Math.max(0, Math.floor(relative / sectionWidth))
+                        );
+                        return negativeWindowIndexes.has(window);
+                    });
+
+                    const positiveMetrics = metrics(positiveRows);
+                    const negativeMetrics = metrics(negativeRows);
+
+                    return {
+                        key: item.key,
+                        values: item.values,
+                        totalRecords: item.records.length,
+                        positiveWindowCoverage: item.positiveWindowSet.size,
+                        negativeWindowCoverage: item.negativeWindowSet.size,
+                        positiveRecords: positiveRows.length,
+                        negativeRecords: negativeRows.length,
+                        positiveMetrics,
+                        negativeMetrics,
+                        diagnosticLiftR: round(
+                            positiveMetrics.expectedValueR - negativeMetrics.expectedValueR,
+                            4
+                        )
+                    };
+                })
+                .filter(x => x.totalRecords >= 4)
+                .sort((a, b) => {
+                    if (b.positiveWindowCoverage !== a.positiveWindowCoverage) {
+                        return b.positiveWindowCoverage - a.positiveWindowCoverage;
+                    }
+                    if (a.negativeWindowCoverage !== b.negativeWindowCoverage) {
+                        return a.negativeWindowCoverage - b.negativeWindowCoverage;
+                    }
+                    return b.totalRecords - a.totalRecords;
+                });
+
+            const positiveWindows = windowMetrics.filter(
+                x => x.classification === "POSITIVE"
+            );
+            const negativeWindows = windowMetrics.filter(
+                x => x.classification === "NEGATIVE_OR_FLAT"
+            );
+
+            let classification = "INSUFFICIENT_DATA";
+            if (positiveWindows.length >= 2 && negativeWindows.length >= 2) {
+                classification = "REGIME_FINGERPRINTS_PRESENT";
+            } else if (positiveWindows.length >= 2) {
+                classification = "MOSTLY_POSITIVE_SELL_WINDOWS";
+            } else if (negativeWindows.length >= 2) {
+                classification = "MOSTLY_NEGATIVE_SELL_WINDOWS";
+            } else {
+                classification = "NO_CLEAR_REGIME_SPLIT";
+            }
+
+            return {
+                purpose:
+                    "Compare profitable and losing chronological SELL periods to identify recurring regime fingerprints without creating a trading rule.",
+                classification,
+                sample: {
+                    sellRecords: safe.length,
+                    positiveWindows: positiveWindows.length,
+                    negativeOrFlatWindows: negativeWindows.length
+                },
+                chronologicalWindows: windowMetrics,
+                featureDistributions: distributions,
+                compositeFingerprints: fingerprints.slice(0, 30),
+                strongestPositiveContrast: fingerprints
+                    .filter(x => x.positiveWindowCoverage > 0)
+                    .slice(0, 10),
+                guard:
+                    "Diagnostic only. Fingerprints are retrospective descriptions and cannot create candidates, lower thresholds, enter validation or enter true OOS."
+            };
+        }
+
+        // =====================================================
         // FINAL LEARNING
         // =====================================================
 
@@ -5502,6 +5799,13 @@ export default async function handler(req, res) {
 
         const edgeDecayDiagnostics =
             buildEdgeDecayDiagnostics(
+                finalDiscovery.rawRecords,
+                0,
+                historicalCandles.length
+            );
+
+        const regimeFingerprintDiagnostics =
+            buildRegimeFingerprintDiagnostics(
                 finalDiscovery.rawRecords,
                 0,
                 historicalCandles.length
@@ -5539,7 +5843,7 @@ export default async function handler(req, res) {
                 null,
 
             reason:
-                "No V14.13 edge has survived regime-context discovery, isolated validation, candidate-flow diagnostics and anti-overfitting filters.",
+                "No V14.14 edge has survived regime-context discovery, isolated validation, regime-fingerprint diagnostics and anti-overfitting filters.",
 
             nextAction:
                 "WAIT"
@@ -6339,6 +6643,8 @@ export default async function handler(req, res) {
             },
 
             edgeDecayDiagnostics,
+
+            regimeFingerprintDiagnostics,
 
             internalValidation: {
 
