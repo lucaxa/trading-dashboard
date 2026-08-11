@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V19";
+    const VERSION = "V20";
 
     try {
 
@@ -6089,6 +6089,15 @@ export default async function handler(req, res) {
                     trades
                 );
 
+            const v20FoldCandidateStabilityAudit =
+                buildV20FoldCandidateStabilityAudit(
+                    discovery,
+                    promoted,
+                    diversified,
+                    selected,
+                    trades
+                );
+
             const metrics =
                 calculateMetrics(
                     trades
@@ -6226,7 +6235,10 @@ export default async function handler(req, res) {
                             .diversityRejections,
 
                     v19SelectedCandidateOOSAudit:
-                        v19OOSCandidateAudit
+                        v19OOSCandidateAudit,
+
+                    v20FoldCandidateStabilityAudit:
+                        v20FoldCandidateStabilityAudit
                 },
 
                 trades
@@ -6413,6 +6425,226 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // V20 — FOLD CANDIDATE STABILITY AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. Does NOT alter discovery, validation,
+        // diversification, selection, or OOS execution.
+        //
+        // Purpose: explain why a fold produces no selected edge
+        // and whether the same exact candidate key survives the
+        // expanding walk-forward pipeline across multiple folds.
+        // It tracks: discovered -> qualified -> validation pool ->
+        // validation survivor -> selected -> OOS executed.
+        // =====================================================
+
+        function buildV20FoldCandidateStabilityAudit(
+            discovery,
+            promoted,
+            diversified,
+            selected,
+            trades
+        ) {
+
+            const safeDiscovery = discovery || {};
+            const core = safeArray(safeDiscovery.corePatterns);
+            const patterns = safeArray(safeDiscovery.patterns);
+            const families = safeArray(safeDiscovery.families);
+            const validationCandidates = safeArray(promoted?.validationCandidates);
+            const validationResults = safeArray(promoted?.validationResults);
+            const survivors = safeArray(promoted?.candidates);
+            const selectedSafe = safeArray(selected);
+            const tradesSafe = safeArray(trades);
+
+            const all = new Map();
+
+            function ensure(key, level) {
+                if (!key) return null;
+                if (!all.has(key)) {
+                    all.set(key, {
+                        key,
+                        levels: [],
+                        discovered: false,
+                        qualified: false,
+                        validationCandidate: false,
+                        validationSurvivor: false,
+                        selected: false,
+                        rawOOSOccurrences: 0,
+                        executedOOSTrades: 0,
+                        oosNetR: 0,
+                        validationStage: null,
+                        validationReason: null
+                    });
+                }
+                const row = all.get(key);
+                if (level && !row.levels.includes(level)) row.levels.push(level);
+                return row;
+            }
+
+            for (const x of families) {
+                const key = x.key || x.family;
+                const row = ensure(key, 'FAMILY');
+                if (row) { row.discovered = true; row.qualified ||= !!x.qualified; }
+            }
+
+            for (const x of core) {
+                const row = ensure(x.key, x.level || 'CORE');
+                if (row) { row.discovered = true; row.qualified ||= !!x.qualified; }
+            }
+
+            for (const x of patterns) {
+                const row = ensure(x.key, x.level || 'PATTERN');
+                if (row) { row.discovered = true; row.qualified ||= !!x.qualified; }
+            }
+
+            for (const x of validationCandidates) {
+                const row = ensure(x.key, x.level);
+                if (row) row.validationCandidate = true;
+            }
+
+            for (const x of survivors) {
+                const row = ensure(x.key, x.level);
+                if (row) row.validationSurvivor = true;
+            }
+
+            for (const x of selectedSafe) {
+                const row = ensure(x.key, x.level);
+                if (row) row.selected = true;
+            }
+
+            for (const result of validationResults) {
+                const row = ensure(result.key, result.level);
+                if (!row) continue;
+                row.validationStage = result.stage || null;
+                row.validationReason = result.primaryReason || null;
+            }
+
+            // Fold-local OOS execution is already annotated with the exact
+            // matched candidate key by executeOOS.
+            for (const trade of tradesSafe) {
+                const row = ensure(
+                    trade.matchedCandidateKey,
+                    trade.matchedCandidateLevel
+                );
+                if (!row) continue;
+                row.executedOOSTrades++;
+                row.oosNetR += Number(trade.resultR || 0);
+            }
+
+            const selectedSet = new Set(selectedSafe.map(x => x.key));
+            const validationSet = new Set(validationCandidates.map(x => x.key));
+            const survivorSet = new Set(survivors.map(x => x.key));
+
+            // Count raw OOS opportunities for selected candidates without
+            // changing execution. This deliberately mirrors the exact key
+            // identities used by executeOOS.
+            const selectedOOSAudit = {};
+            for (const candidate of selectedSafe) {
+                selectedOOSAudit[candidate.key] = {
+                    rawMatchedOccurrences: 0,
+                    executedTrades: tradesSafe.filter(t =>
+                        t.matchedCandidateKey === candidate.key &&
+                        t.matchedCandidateLevel === candidate.level
+                    ).length
+                };
+            }
+
+            const candidateRows = [...all.values()].map(row => ({
+                ...row,
+                oosNetR: round(row.oosNetR, 4),
+                status: row.selected
+                    ? (row.executedOOSTrades > 0 ? 'SELECTED_AND_EXECUTED' : 'SELECTED_NO_EXECUTED_OOS')
+                    : row.validationSurvivor
+                        ? 'VALIDATION_SURVIVOR_NOT_SELECTED'
+                        : row.validationCandidate
+                            ? 'VALIDATION_CANDIDATE'
+                            : row.qualified
+                                ? 'QUALIFIED_NOT_PROMOTED'
+                                : row.discovered
+                                    ? 'DISCOVERED_NOT_QUALIFIED'
+                                    : 'OOS_ONLY'
+            }));
+
+            return {
+                stageCounts: {
+                    discoveredFamilies: families.length,
+                    qualifiedFamilies: families.filter(x => !!x.qualified).length,
+                    discoveredCoreEdges: core.length,
+                    qualifiedCoreEdges: core.filter(x => !!x.qualified).length,
+                    discoveredPatterns: patterns.length,
+                    qualifiedPatterns: patterns.filter(x => !!x.qualified).length,
+                    validationCandidates: validationCandidates.length,
+                    validationSurvivors: survivors.length,
+                    selectedEdges: selectedSafe.length,
+                    executedOOSTrades: tradesSafe.length
+                },
+                selectedKeys: [...selectedSet],
+                validationCandidateKeys: [...validationSet],
+                validationSurvivorKeys: [...survivorSet],
+                candidateRows
+            };
+        }
+
+        // =====================================================
+        // V20 — CROSS-FOLD CANDIDATE STABILITY SUMMARY
+        // =====================================================
+
+        function buildV20CrossFoldCandidateStabilityAudit(foldResults) {
+
+            const byKey = new Map();
+
+            for (const fold of safeArray(foldResults)) {
+                const audit = fold.diagnostics?.v20FoldCandidateStabilityAudit || {};
+                for (const row of safeArray(audit.candidateRows)) {
+                    if (!byKey.has(row.key)) {
+                        byKey.set(row.key, {
+                            key: row.key,
+                            levels: [],
+                            foldsDiscovered: [],
+                            foldsQualified: [],
+                            foldsValidationCandidate: [],
+                            foldsValidationSurvivor: [],
+                            foldsSelected: [],
+                            foldsOOSExecuted: [],
+                            totalOOSTrades: 0,
+                            totalOOSNetR: 0
+                        });
+                    }
+                    const x = byKey.get(row.key);
+                    for (const level of safeArray(row.levels)) {
+                        if (!x.levels.includes(level)) x.levels.push(level);
+                    }
+                    if (row.discovered) x.foldsDiscovered.push(fold.fold);
+                    if (row.qualified) x.foldsQualified.push(fold.fold);
+                    if (row.validationCandidate) x.foldsValidationCandidate.push(fold.fold);
+                    if (row.validationSurvivor) x.foldsValidationSurvivor.push(fold.fold);
+                    if (row.selected) x.foldsSelected.push(fold.fold);
+                    if (row.executedOOSTrades > 0) x.foldsOOSExecuted.push(fold.fold);
+                    x.totalOOSTrades += row.executedOOSTrades || 0;
+                    x.totalOOSNetR += row.oosNetR || 0;
+                }
+            }
+
+            return [...byKey.values()].map(x => ({
+                ...x,
+                totalOOSNetR: round(x.totalOOSNetR, 4),
+                foldPresenceCount: x.foldsDiscovered.length,
+                selectionRateAcrossPresentFolds: x.foldsDiscovered.length
+                    ? round((x.foldsSelected.length / x.foldsDiscovered.length) * 100, 2)
+                    : 0,
+                stabilityClassification:
+                    x.foldsSelected.length >= 2
+                        ? 'RECURRING_SELECTED_EDGE'
+                        : x.foldsSelected.length === 1
+                            ? 'SINGLE_FOLD_SELECTED_EDGE'
+                            : x.foldsValidationSurvivor.length > 0
+                                ? 'VALIDATED_BUT_NOT_SELECTED'
+                                : x.foldsQualified.length > 0
+                                    ? 'QUALIFIED_BUT_NOT_VALIDATED'
+                                    : 'NOT_QUALIFIED'
+            }));
+        }
+
+        // =====================================================
         // GLOBAL TRUE OOS METRICS
         // =====================================================
 
@@ -6440,6 +6672,31 @@ export default async function handler(req, res) {
                 foldQualityReason:
                     x.foldQualityReason
             }));
+
+        const v20FoldCandidateStabilityAudit =
+            foldResults.map(x => ({
+                fold: x.fold,
+                trainingRows: x.trainingRows,
+                discoveryRows: x.discoveryRows,
+                validationRows: x.validationRows,
+                testRows: x.testRows,
+                stageCounts:
+                    x.diagnostics?.v20FoldCandidateStabilityAudit?.stageCounts || {},
+                selectedKeys:
+                    x.diagnostics?.v20FoldCandidateStabilityAudit?.selectedKeys || [],
+                validationCandidateKeys:
+                    x.diagnostics?.v20FoldCandidateStabilityAudit?.validationCandidateKeys || [],
+                validationSurvivorKeys:
+                    x.diagnostics?.v20FoldCandidateStabilityAudit?.validationSurvivorKeys || [],
+                candidateRows:
+                    x.diagnostics?.v20FoldCandidateStabilityAudit?.candidateRows || [],
+                foldNetR: x.metrics?.netR ?? 0,
+                foldProfitable: !!x.profitableFold,
+                foldQualityReason: x.foldQualityReason
+            }));
+
+        const v20CrossFoldCandidateStability =
+            buildV20CrossFoldCandidateStabilityAudit(foldResults);
 
         // =====================================================
         // PATTERN CONCENTRATION
@@ -8471,7 +8728,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V19_REGIME_SETUP_OOS_LINEAGE_AUDIT_TRUE_WALK_FORWARD",
+                "V20_FOLD_CANDIDATE_STABILITY_AUDIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -8590,7 +8847,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; exit mechanics are compared diagnostically on a fixed entry set.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -8970,6 +9227,10 @@ export default async function handler(req, res) {
             },
 
             v19CandidateLineageAudit,
+
+            v20FoldCandidateStabilityAudit,
+
+            v20CrossFoldCandidateStability,
 
             trueOOS: {
                 metrics:
