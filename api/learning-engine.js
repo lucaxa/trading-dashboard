@@ -239,6 +239,19 @@ export default async function handler(req, res) {
         const VWAP_MAX_CANDLES_AFTER_TOUCH = 3;
 
         // =====================================================
+        // V15.1 ACTIVE EXIT MODEL
+        // -----------------------------------------------------
+        // FAST mechanics selected from the V15 diagnostic comparison.
+        // Fixed experiment; not an OOS promotion.
+        // =====================================================
+        const ACTIVE_EXIT_STOP_R = 1;
+        const ACTIVE_EXIT_TARGET_R = 1.5;
+        const ACTIVE_EXIT_MAX_HOLD_CANDLES = 8;
+
+        const ACTIVE_EXIT_MODEL_KEY =
+            "FAST_1R_1_5R_8";
+
+        // =====================================================
         // RISK
         // =====================================================
 
@@ -256,26 +269,6 @@ export default async function handler(req, res) {
         const ENTRY_COOLDOWN = 3;
         const SAME_PATTERN_COOLDOWN = 5;
         const SAME_SIDE_COOLDOWN = 2;
-
-        // =====================================================
-        // V15.1 ACTIVE EXIT MODEL
-        // -----------------------------------------------------
-        // V15 showed that the FAST model was materially less
-        // damaging than the baseline on the identical signal set.
-        // V15.1 therefore tests that model as the ACTIVE mechanics
-        // while keeping all discovery, validation and OOS quality
-        // thresholds unchanged.
-        //
-        // IMPORTANT: this is an experiment, not a promotion based
-        // on future/OOS results. The same fixed mechanics are used
-        // inside discovery, validation and true OOS.
-        // =====================================================
-        const ACTIVE_EXIT_STOP_R = 1;
-        const ACTIVE_EXIT_TARGET_R = 1.5;
-        const ACTIVE_EXIT_MAX_HOLD_CANDLES = 8;
-
-        const ACTIVE_EXIT_MODEL_KEY =
-            "FAST_1R_1_5R_8";
 
         // =====================================================
         // RESPONSE HELPERS
