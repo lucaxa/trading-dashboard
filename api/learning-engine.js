@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V15 — STRATEGY MECHANICS LAB + EXIT MODEL COMPARISON ENGINE
+ V15.1 — SELL REGIME EDGE + FAST EXIT VALIDATION ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V15";
+    const VERSION = "V15.1";
 
     try {
 
@@ -242,10 +242,10 @@ export default async function handler(req, res) {
         // RISK
         // =====================================================
 
-        const STOP_R = 1;
-        const TARGET_R = 2;
-        const PREFERRED_TARGET_R = 2.5;
-        const MAX_HOLD_CANDLES = 12;
+        const STOP_R = ACTIVE_EXIT_STOP_R;
+        const TARGET_R = ACTIVE_EXIT_TARGET_R;
+        const PREFERRED_TARGET_R = 2;
+        const MAX_HOLD_CANDLES = ACTIVE_EXIT_MAX_HOLD_CANDLES;
         const MAX_OOS_DRAWDOWN = 12;
         const MAX_LOSS_STREAK = 6;
 
@@ -256,6 +256,26 @@ export default async function handler(req, res) {
         const ENTRY_COOLDOWN = 3;
         const SAME_PATTERN_COOLDOWN = 5;
         const SAME_SIDE_COOLDOWN = 2;
+
+        // =====================================================
+        // V15.1 ACTIVE EXIT MODEL
+        // -----------------------------------------------------
+        // V15 showed that the FAST model was materially less
+        // damaging than the baseline on the identical signal set.
+        // V15.1 therefore tests that model as the ACTIVE mechanics
+        // while keeping all discovery, validation and OOS quality
+        // thresholds unchanged.
+        //
+        // IMPORTANT: this is an experiment, not a promotion based
+        // on future/OOS results. The same fixed mechanics are used
+        // inside discovery, validation and true OOS.
+        // =====================================================
+        const ACTIVE_EXIT_STOP_R = 1;
+        const ACTIVE_EXIT_TARGET_R = 1.5;
+        const ACTIVE_EXIT_MAX_HOLD_CANDLES = 8;
+
+        const ACTIVE_EXIT_MODEL_KEY =
+            "FAST_1R_1_5R_8";
 
         // =====================================================
         // RESPONSE HELPERS
@@ -1795,26 +1815,21 @@ export default async function handler(req, res) {
             const atrValue =
                 f.atr14;
 
-            const stop =
-                side === "BUY"
-                    ? entry - atrValue
-                    : entry + atrValue;
-
-            const target =
-                side === "BUY"
-                    ? entry +
-                      TARGET_R * atrValue
-                    : entry -
-                      TARGET_R * atrValue;
+            const activeModel = {
+                key: ACTIVE_EXIT_MODEL_KEY,
+                stopR: ACTIVE_EXIT_STOP_R,
+                targetR: ACTIVE_EXIT_TARGET_R,
+                maxHoldCandles: ACTIVE_EXIT_MAX_HOLD_CANDLES
+            };
 
             const outcome =
-                evaluateTrade(
+                evaluateExitModel(
                     candles,
                     index,
                     side,
                     entry,
-                    stop,
-                    target,
+                    atrValue,
+                    activeModel,
                     boundaryEnd
                 );
 
@@ -2348,6 +2363,13 @@ export default async function handler(req, res) {
                     );
 
                 for (const setup of setups) {
+
+                    // V15.1 is deliberately SELL-only. BUY evidence
+                    // was persistently destructive across the tested
+                    // history and is excluded rather than reweighted.
+                    if (setup.side !== DIRECTIONAL_SIDE) {
+                        continue;
+                    }
 
                     const record =
                         createLearningRecord(
@@ -3044,6 +3066,10 @@ export default async function handler(req, res) {
 
                 for (const setup of setups) {
 
+                    if (setup.side !== DIRECTIONAL_SIDE) {
+                        continue;
+                    }
+
                     const key =
                         corePatternKey(
                             setup.side,
@@ -3135,26 +3161,21 @@ export default async function handler(req, res) {
                     const a =
                         f.atr14;
 
-                    const stop =
-                        setup.side === "BUY"
-                            ? entry - a
-                            : entry + a;
-
-                    const target =
-                        setup.side === "BUY"
-                            ? entry +
-                              TARGET_R * a
-                            : entry -
-                              TARGET_R * a;
+                    const activeModel = {
+                        key: ACTIVE_EXIT_MODEL_KEY,
+                        stopR: ACTIVE_EXIT_STOP_R,
+                        targetR: ACTIVE_EXIT_TARGET_R,
+                        maxHoldCandles: ACTIVE_EXIT_MAX_HOLD_CANDLES
+                    };
 
                     const outcome =
-                        evaluateTrade(
+                        evaluateExitModel(
                             candles,
                             i,
                             setup.side,
                             entry,
-                            stop,
-                            target,
+                            a,
+                            activeModel,
                             validationEnd - 1
                         );
 
@@ -3381,14 +3402,17 @@ export default async function handler(req, res) {
                     discovery.adaptiveContextPatterns
                 );
 
+            // V15.1 regime qualification: only SELL regime-context
+            // candidates are allowed into validation. Family/core/plain
+            // pattern candidates remain diagnostic evidence but cannot
+            // become trading candidates in this experiment.
             const qualified =
                 [
-                    ...qualifiedFamilies,
-                    ...qualifiedCoreEdges,
-                    ...qualifiedDirectional,
                     ...qualifiedContext,
                     ...adaptiveContext
-                ];
+                ].filter(
+                    x => x && x.key && x.key.startsWith("SELL|")
+                );
 
             for (const candidate of qualified) {
 
@@ -4037,6 +4061,10 @@ export default async function handler(req, res) {
                     const setup of setups
                 ) {
 
+                    if (setup.side !== DIRECTIONAL_SIDE) {
+                        continue;
+                    }
+
                     const key =
                         corePatternKey(
                             setup.side,
@@ -4188,33 +4216,36 @@ export default async function handler(req, res) {
                     const a =
                         f.atr14;
 
+                    const activeModel = {
+                        key: ACTIVE_EXIT_MODEL_KEY,
+                        stopR: ACTIVE_EXIT_STOP_R,
+                        targetR: ACTIVE_EXIT_TARGET_R,
+                        maxHoldCandles: ACTIVE_EXIT_MAX_HOLD_CANDLES
+                    };
+
                     const stop =
                         setup.side === "BUY"
-                            ? entry - a
-                            : entry + a;
+                            ? entry - ACTIVE_EXIT_STOP_R * a
+                            : entry + ACTIVE_EXIT_STOP_R * a;
 
                     const target =
                         setup.side === "BUY"
-                            ? entry +
-                              TARGET_R * a
-                            : entry -
-                              TARGET_R * a;
+                            ? entry + ACTIVE_EXIT_TARGET_R * a
+                            : entry - ACTIVE_EXIT_TARGET_R * a;
 
                     const preferredTarget =
                         setup.side === "BUY"
-                            ? entry +
-                              PREFERRED_TARGET_R * a
-                            : entry -
-                              PREFERRED_TARGET_R * a;
+                            ? entry + PREFERRED_TARGET_R * a
+                            : entry - PREFERRED_TARGET_R * a;
 
                     const outcome =
-                        evaluateTrade(
+                        evaluateExitModel(
                             candles,
                             i,
                             setup.side,
                             entry,
-                            stop,
-                            target,
+                            a,
+                            activeModel,
                             testEnd - 1
                         );
 
@@ -4395,7 +4426,7 @@ export default async function handler(req, res) {
                             ),
 
                         riskReward:
-                            "1:2",
+                            "1:1.5",
 
                         exitType:
                             outcome.exitType,
@@ -7050,7 +7081,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V15_STRATEGY_MECHANICS_LAB_EXIT_MODEL_COMPARISON_TRUE_WALK_FORWARD",
+                "V15_1_SELL_REGIME_FAST_EXIT_TRUE_WALK_FORWARD",
 
             paperOnly:
                 true,
@@ -7685,6 +7716,14 @@ export default async function handler(req, res) {
 
             currentSignal,
 
+            activeExitModel: {
+                key: ACTIVE_EXIT_MODEL_KEY,
+                stopR: ACTIVE_EXIT_STOP_R,
+                targetR: ACTIVE_EXIT_TARGET_R,
+                maxHoldCandles: ACTIVE_EXIT_MAX_HOLD_CANDLES,
+                purpose: "V15.1 active mechanics: SELL-only regime-context experiment using the V15 FAST exit model."
+            },
+
             riskPlan: {
 
                 stopR:
@@ -7697,10 +7736,10 @@ export default async function handler(req, res) {
                     PREFERRED_TARGET_R,
 
                 riskReward:
-                    "1:2",
+                    "1:1.5",
 
                 preferredRiskReward:
-                    "1:2.5",
+                    "1:2",
 
                 maxHoldCandles:
                     MAX_HOLD_CANDLES,
