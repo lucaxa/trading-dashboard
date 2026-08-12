@@ -70,6 +70,15 @@ export default async function handler(req, res) {
     try {
 
         // =====================================================
+        // V24.4 PERFORMANCE-SAFE CONFIRMATION CONFIG
+        // -----------------------------------------------------
+        // Diagnostic/performance change only.
+        // Does not alter strategy thresholds or trade mechanics.
+        // =====================================================
+        const V24_FETCH_CONCURRENCY = 5;
+        const v24PerformanceStartMs = Date.now();
+
+        // =====================================================
         // CONFIG
         // =====================================================
 
@@ -5791,6 +5800,145 @@ export default async function handler(req, res) {
         // LOAD HISTORICAL DATA
         // =====================================================
 
+        // =====================================================
+        // CONTROLLED HISTORICAL CHUNK FETCH
+        // -----------------------------------------------------
+        // Previous V24.4 fetched 7-day chunks strictly serially.
+        // V24.4 performance-safe mode fetches a maximum of
+        // V24_FETCH_CONCURRENCY chunks concurrently.
+        //
+        // This changes execution speed only. Chunk boundaries,
+        // source data, ordering and normalization remain unchanged.
+        // =====================================================
+        async function fetchHistoricalChunksControlled(
+            accessToken,
+            chunks
+        ) {
+
+            const all = [];
+
+            for (
+                let offset = 0;
+                offset < chunks.length;
+                offset += V24_FETCH_CONCURRENCY
+            ) {
+
+                const batch =
+                    chunks.slice(
+                        offset,
+                        offset +
+                            V24_FETCH_CONCURRENCY
+                    );
+
+                const payloads =
+                    await Promise.all(
+                        batch.map(
+                            chunk =>
+                                fetchHistoricalChunk(
+                                    accessToken,
+                                    chunk.start,
+                                    chunk.end
+                                )
+                        )
+                    );
+
+                for (
+                    const payload of payloads
+                ) {
+
+                    all.push(
+                        ...extractRows(payload)
+                    );
+                }
+            }
+
+            return all;
+        }
+
+        // =====================================================
+        // LEARNING-RECORD-ONLY CONFIRMATION GENERATOR
+        // -----------------------------------------------------
+        // V24.4 previously ran the complete discoverCandidates()
+        // pipeline over the 720-day confirmation slice. That also
+        // built family/pattern/context maps and candidate summaries,
+        // none of which are needed for independent confirmation.
+        //
+        // This generator preserves the exact learning-record path:
+        //   detectSetups()
+        //   -> SELL-only gate
+        //   -> createLearningRecord()
+        //   -> boundary-capped rejection
+        //
+        // It deliberately does NOT build candidate maps or promote
+        // candidates. Confirmation receives the same raw learning
+        // records without the unnecessary discovery bookkeeping.
+        // =====================================================
+        function generateV24ConfirmationLearningRecords(
+            candles,
+            start,
+            end
+        ) {
+
+            const rawRecords = [];
+
+            const stop =
+                Math.max(
+                    start + 30,
+                    end -
+                        MAX_HOLD_CANDLES
+                );
+
+            for (
+                let i = start + 30;
+                i < stop;
+                i++
+            ) {
+
+                const setups =
+                    detectSetups(
+                        candles,
+                        i
+                    );
+
+                for (
+                    const setup of setups
+                ) {
+
+                    if (
+                        setup.side !==
+                        DIRECTIONAL_SIDE
+                    ) {
+                        continue;
+                    }
+
+                    const record =
+                        createLearningRecord(
+                            candles,
+                            i,
+                            setup.side,
+                            setup.setup,
+                            end - 1
+                        );
+
+                    if (!record) {
+                        continue;
+                    }
+
+                    if (
+                        record.boundaryCapped
+                    ) {
+                        continue;
+                    }
+
+                    rawRecords.push(
+                        record
+                    );
+                }
+            }
+
+            return rawRecords;
+        }
+
         async function loadHistoricalData() {
 
             const accessToken =
@@ -5854,26 +6002,11 @@ export default async function handler(req, res) {
                     chunkEnd + 1000;
             }
 
-            const all = [];
-
-            for (
-                const chunk of chunks
-            ) {
-
-                const payload =
-                    await fetchHistoricalChunk(
-                        accessToken,
-                        chunk.start,
-                        chunk.end
-                    );
-
-                const extracted =
-                    extractRows(payload);
-
-                all.push(
-                    ...extracted
+            const all =
+                await fetchHistoricalChunksControlled(
+                    accessToken,
+                    chunks
                 );
-            }
 
             const prepared =
                 prepareData(all);
@@ -5950,21 +6083,11 @@ export default async function handler(req, res) {
                 cursor = chunkEnd + 1000;
             }
 
-            const all = [];
-
-            for (const chunk of chunks) {
-
-                const payload =
-                    await fetchHistoricalChunk(
-                        accessToken,
-                        chunk.start,
-                        chunk.end
-                    );
-
-                all.push(
-                    ...extractRows(payload)
+            const all =
+                await fetchHistoricalChunksControlled(
+                    accessToken,
+                    chunks
                 );
-            }
 
             const prepared =
                 prepareData(all);
@@ -5987,6 +6110,9 @@ export default async function handler(req, res) {
 
         const historicalData =
             await loadHistoricalData();
+
+        const v24PrimaryFetchEndMs =
+            Date.now();
 
         const rows =
             historicalData.candles;
@@ -6054,6 +6180,9 @@ export default async function handler(req, res) {
                 v24ConfirmationEndMs
             );
 
+        const v24ConfirmationFetchEndMs =
+            Date.now();
+
         const v24ConfirmationRows =
             v24ConfirmationData.candles;
 
@@ -6067,12 +6196,14 @@ export default async function handler(req, res) {
 
         if (v24ConfirmationCandles.length >= 500) {
 
-            v24ConfirmationDiscovery =
-                discoverCandidates(
-                    v24ConfirmationCandles,
-                    0,
-                    v24ConfirmationCandles.length
-                );
+            v24ConfirmationDiscovery = {
+                rawRecords:
+                    generateV24ConfirmationLearningRecords(
+                        v24ConfirmationCandles,
+                        0,
+                        v24ConfirmationCandles.length
+                    )
+            };
 
             v24IndependentEdgeHealthConfirmation =
                 buildV244IndependentEdgeHealthConfirmation({
@@ -6122,6 +6253,9 @@ export default async function handler(req, res) {
                 }
             };
         }
+
+        const v24ConfirmationProcessingEndMs =
+            Date.now();
 
         // =====================================================
         // WALK-FORWARD CONFIGURATION
@@ -17055,7 +17189,16 @@ function buildV227EVPersistenceFailureAnatomy(
                     -0.10,
 
                 noTradingPromotion:
-                    true
+                    true,
+
+                performanceSafeMode:
+                    true,
+
+                confirmationFetchConcurrency:
+                    V24_FETCH_CONCURRENCY,
+
+                fullCandidateDiscoveryForConfirmation:
+                    false
             },
 
             robustness: {
@@ -17246,6 +17389,62 @@ function buildV227EVPersistenceFailureAnatomy(
 
             v24IndependentEdgeHealthConfirmation:
                 v24IndependentEdgeHealthConfirmation,
+
+            v24PerformanceDiagnostics: {
+
+                mode:
+                    "V24.4_PERFORMANCE_SAFE_CONFIRMATION",
+
+                confirmationDays:
+                    V24_CONFIRMATION_DAYS,
+
+                fetchConcurrency:
+                    V24_FETCH_CONCURRENCY,
+
+                primaryHistoricalFetchMs:
+                    Math.max(
+                        0,
+                        v24PrimaryFetchEndMs -
+                        v24PerformanceStartMs
+                    ),
+
+                confirmationHistoricalFetchMs:
+                    Math.max(
+                        0,
+                        v24ConfirmationFetchEndMs -
+                        v24PrimaryFetchEndMs
+                    ),
+
+                confirmationProcessingMs:
+                    Math.max(
+                        0,
+                        v24ConfirmationProcessingEndMs -
+                        v24ConfirmationFetchEndMs
+                    ),
+
+                confirmationTotalMs:
+                    Math.max(
+                        0,
+                        v24ConfirmationProcessingEndMs -
+                        v24PrimaryFetchEndMs
+                    ),
+
+                totalElapsedBeforeResponseMs:
+                    Math.max(
+                        0,
+                        Date.now() -
+                        v24PerformanceStartMs
+                    ),
+
+                fullDiscoveryUsedForConfirmation:
+                    false,
+
+                confirmationLearningRecordGenerator:
+                    "EXACT_CREATE_LEARNING_RECORD_PATH_WITHOUT_CANDIDATE_MAP_BUILDING",
+
+                strategyMechanicsChanged:
+                    false
+            },
 
             regimeFingerprintDiagnostics,
 
