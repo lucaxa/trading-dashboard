@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V22.2";
+    const VERSION = "V22.3";
 
     try {
 
@@ -8052,6 +8052,486 @@ export default async function handler(req, res) {
 
 
         // =====================================================
+
+        // =====================================================
+        // V22.3 REGIME-CONDITIONAL EDGE SURVIVAL AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only.
+        //
+        // Tests whether the existing SELL edge survives inside
+        // observable pre-entry context combinations across the
+        // same chronological learning windows.
+        //
+        // This function DOES NOT:
+        //   - create candidates
+        //   - change thresholds
+        //   - promote candidates
+        //   - change validation
+        //   - change OOS execution
+        //   - change exits or risk
+        //   - use future outcomes to alter earlier decisions
+        //
+        // Outcomes are used only to measure each diagnostic cell.
+        // =====================================================
+
+        function buildV223RegimeConditionalSurvivalAudit(
+            candles,
+            records
+        ) {
+
+            const safe =
+                safeArray(records)
+                    .filter(
+                        x =>
+                            x &&
+                            x.side === "SELL" &&
+                            Number.isFinite(x.index) &&
+                            Number.isFinite(x.resultR)
+                    )
+                    .sort(
+                        (a, b) =>
+                            a.index - b.index
+                    );
+
+            const windowCount = 4;
+            const windows =
+                Array.from(
+                    { length: windowCount },
+                    () => []
+                );
+
+            if (safe.length) {
+                const minIndex = safe[0].index;
+                const maxIndex = safe[safe.length - 1].index;
+                const span =
+                    Math.max(
+                        1,
+                        maxIndex - minIndex + 1
+                    );
+
+                for (const r of safe) {
+                    const w =
+                        Math.min(
+                            windowCount - 1,
+                            Math.max(
+                                0,
+                                Math.floor(
+                                    (
+                                        r.index -
+                                        minIndex
+                                    ) /
+                                    span *
+                                    windowCount
+                                )
+                            )
+                        );
+
+                    windows[w].push(r);
+                }
+            }
+
+            function metrics(rows) {
+                const m = calculateMetrics(rows);
+
+                return {
+                    samples: m.trades,
+                    decisiveTrades: m.decisiveTrades,
+                    wins: m.wins,
+                    losses: m.losses,
+                    timeouts: m.timeouts,
+                    netR: round(m.netR, 4),
+                    EV: round(m.expectedValueR, 4),
+                    PF: round(m.profitFactor, 4),
+                    winRate: round(m.winRate, 2)
+                };
+            }
+
+            function featureAt(r) {
+                return features(
+                    candles,
+                    r.index
+                );
+            }
+
+            function valueAt(r, field) {
+                const f = featureAt(r);
+                return f ? f[field] : null;
+            }
+
+            // Fixed, pre-existing observable dimensions.
+            // We intentionally do not invent new thresholds.
+            const dimensions = [
+                "setup",
+                "trend",
+                "regime",
+                "volatility",
+                "timeBucket",
+                "vwapDirection",
+                "rsiBucket"
+            ];
+
+            const cells = new Map();
+
+            for (const r of safe) {
+                const f = featureAt(r);
+                if (!f) continue;
+
+                const context = {
+                    setup: r.setup ?? "UNKNOWN",
+                    trend: f.trend ?? r.trend ?? "UNKNOWN",
+                    regime: f.regime ?? r.regime ?? "UNKNOWN",
+                    volatility: f.volatility ?? "UNKNOWN",
+                    timeBucket: f.timeBucket ?? "UNKNOWN",
+                    vwapDirection: f.vwapDirection ?? "UNKNOWN",
+                    rsiBucket: f.rsiBucket ?? "UNKNOWN"
+                };
+
+                // Keep the primary cells manageable:
+                // setup × regime × volatility.
+                const key =
+                    [
+                        context.setup,
+                        context.regime,
+                        context.volatility
+                    ].join("|");
+
+                if (!cells.has(key)) {
+                    cells.set(key, {
+                        key,
+                        setup: context.setup,
+                        regime: context.regime,
+                        volatility: context.volatility,
+                        records: Array.from(
+                            { length: windowCount },
+                            () => []
+                        )
+                    });
+                }
+
+                const relative =
+                    safe.indexOf(r);
+
+                const w =
+                    Math.min(
+                        windowCount - 1,
+                        Math.floor(
+                            relative *
+                            windowCount /
+                            Math.max(
+                                1,
+                                safe.length
+                            )
+                        )
+                    );
+
+                cells.get(key).records[w].push({
+                    ...r,
+                    _context: context
+                });
+            }
+
+            function classify(byWindow) {
+                const active =
+                    byWindow.filter(
+                        x => x.samples > 0
+                    );
+
+                const positive =
+                    active.filter(
+                        x => x.EV > 0
+                    );
+
+                const negative =
+                    active.filter(
+                        x => x.EV < 0
+                    );
+
+                const latest =
+                    byWindow[
+                        byWindow.length - 1
+                    ];
+
+                const earlier =
+                    active.filter(
+                        x =>
+                            x.window <
+                            latest.window
+                    );
+
+                const earlierEV =
+                    earlier.length
+                        ? earlier.reduce(
+                            (sum, x) =>
+                                sum + x.EV,
+                            0
+                        ) / earlier.length
+                        : 0;
+
+                const delta =
+                    latest.EV -
+                    earlierEV;
+
+                // Require repeated chronological evidence before
+                // calling a cell persistent.
+                if (
+                    active.length >= 3 &&
+                    positive.length >= 3 &&
+                    latest.EV > 0
+                ) {
+                    return {
+                        classification:
+                            "PERSISTENT_CONDITIONAL_EDGE",
+                        earlierEV:
+                            round(earlierEV, 4),
+                        latestEV:
+                            round(latest.EV, 4),
+                        delta:
+                            round(delta, 4)
+                    };
+                }
+
+                if (
+                    active.length >= 3 &&
+                    positive.length >= 2 &&
+                    latest.EV < 0 &&
+                    delta < -0.05
+                ) {
+                    return {
+                        classification:
+                            "CONDITIONAL_EDGE_DECAY",
+                        earlierEV:
+                            round(earlierEV, 4),
+                        latestEV:
+                            round(latest.EV, 4),
+                        delta:
+                            round(delta, 4)
+                    };
+                }
+
+                if (
+                    active.length >= 3 &&
+                    positive.length >= 2 &&
+                    negative.length >= 1
+                ) {
+                    return {
+                        classification:
+                            "CONDITIONAL_EDGE_INCONSISTENCY",
+                        earlierEV:
+                            round(earlierEV, 4),
+                        latestEV:
+                            round(latest.EV, 4),
+                        delta:
+                            round(delta, 4)
+                    };
+                }
+
+                if (
+                    active.length >= 2 &&
+                    positive.length === active.length
+                ) {
+                    return {
+                        classification:
+                            "RECURRING_CONDITIONAL_EDGE",
+                        earlierEV:
+                            round(earlierEV, 4),
+                        latestEV:
+                            round(latest.EV, 4),
+                        delta:
+                            round(delta, 4)
+                    };
+                }
+
+                return {
+                    classification:
+                        active.length >= 2
+                            ? "INSUFFICIENT_CONDITIONAL_PERSISTENCE"
+                            : "INSUFFICIENT_EVIDENCE",
+                    earlierEV:
+                        round(earlierEV, 4),
+                    latestEV:
+                        round(latest.EV, 4),
+                    delta:
+                        round(delta, 4)
+                };
+            }
+
+            const outputCells = [];
+
+            for (const cell of cells.values()) {
+
+                const byWindow =
+                    cell.records.map(
+                        (rows, i) => ({
+                            window: i + 1,
+                            ...metrics(rows)
+                        })
+                    );
+
+                const classification =
+                    classify(byWindow);
+
+                outputCells.push({
+                    key: cell.key,
+                    setup: cell.setup,
+                    regime: cell.regime,
+                    volatility: cell.volatility,
+                    windows: byWindow,
+                    ...classification,
+                    diagnosticOnly: true
+                });
+            }
+
+            outputCells.sort(
+                (a, b) => {
+
+                    const order = {
+                        PERSISTENT_CONDITIONAL_EDGE: 1,
+                        RECURRING_CONDITIONAL_EDGE: 2,
+                        CONDITIONAL_EDGE_DECAY: 3,
+                        CONDITIONAL_EDGE_INCONSISTENCY: 4,
+                        INSUFFICIENT_CONDITIONAL_PERSISTENCE: 5,
+                        INSUFFICIENT_EVIDENCE: 6
+                    };
+
+                    return (
+                        (order[a.classification] || 99) -
+                        (order[b.classification] || 99)
+                    );
+                }
+            );
+
+            // Secondary time/regime breakdowns are descriptive only.
+            function dimensionBreakdown(field) {
+
+                const map = new Map();
+
+                for (const r of safe) {
+                    const f = featureAt(r);
+                    if (!f) continue;
+
+                    const value =
+                        field === "setup"
+                            ? (r.setup ?? "UNKNOWN")
+                            : (
+                                f[field] ??
+                                r[field] ??
+                                "UNKNOWN"
+                            );
+
+                    if (!map.has(value)) {
+                        map.set(
+                            value,
+                            Array.from(
+                                { length: windowCount },
+                                () => []
+                            )
+                        );
+                    }
+
+                    const relative =
+                        safe.indexOf(r);
+
+                    const w =
+                        Math.min(
+                            windowCount - 1,
+                            Math.floor(
+                                relative *
+                                windowCount /
+                                Math.max(
+                                    1,
+                                    safe.length
+                                )
+                            )
+                        );
+
+                    map.get(value)[w].push(r);
+                }
+
+                return Array.from(
+                    map.entries()
+                ).map(
+                    ([value, grouped]) => ({
+                        value,
+                        windows:
+                            grouped.map(
+                                (rows, i) => ({
+                                    window: i + 1,
+                                    ...metrics(rows)
+                                })
+                            )
+                    })
+                );
+            }
+
+            const summary = {
+                persistentConditionalEdges:
+                    outputCells.filter(
+                        x =>
+                            x.classification ===
+                            "PERSISTENT_CONDITIONAL_EDGE"
+                    ).length,
+                recurringConditionalEdges:
+                    outputCells.filter(
+                        x =>
+                            x.classification ===
+                            "RECURRING_CONDITIONAL_EDGE"
+                    ).length,
+                conditionalDecayCells:
+                    outputCells.filter(
+                        x =>
+                            x.classification ===
+                            "CONDITIONAL_EDGE_DECAY"
+                    ).length,
+                inconsistentCells:
+                    outputCells.filter(
+                        x =>
+                            x.classification ===
+                            "CONDITIONAL_EDGE_INCONSISTENCY"
+                    ).length,
+                stableConditionalEdgeDetected:
+                    outputCells.some(
+                        x =>
+                            x.classification ===
+                            "PERSISTENT_CONDITIONAL_EDGE"
+                    )
+            };
+
+            return {
+                purpose:
+                    "Test whether the existing SELL evidence survives inside observable regime/volatility contexts across chronological learning windows.",
+                sample: {
+                    sellRecords: safe.length,
+                    chronologicalWindows: windowCount,
+                    dimensions,
+                    primaryCellDefinition:
+                        "SETUP × REGIME × VOLATILITY"
+                },
+                cells: outputCells,
+                descriptiveBreakdowns: {
+                    trend:
+                        dimensionBreakdown(
+                            "trend"
+                        ),
+                    timeBucket:
+                        dimensionBreakdown(
+                            "timeBucket"
+                        ),
+                    vwapDirection:
+                        dimensionBreakdown(
+                            "vwapDirection"
+                        ),
+                    rsiBucket:
+                        dimensionBreakdown(
+                            "rsiBucket"
+                        )
+                },
+                summary,
+                guard:
+                    "Diagnostic only. V22.3 does not create candidates, change thresholds, promote conditions, alter validation/OOS, or use future outcomes to modify earlier decisions."
+            };
+        }
+
+
         // V22.2 EDGE-DECAY DIAGNOSIS
         // -----------------------------------------------------
         // Diagnostic only.
@@ -9296,6 +9776,12 @@ export default async function handler(req, res) {
                 historicalCandles.length
             );
 
+        const v223RegimeConditionalSurvivalAudit =
+            buildV223RegimeConditionalSurvivalAudit(
+                historicalCandles,
+                finalDiscovery.rawRecords
+            );
+
         const edgeAnatomy =
             buildEdgeAnatomy(
                 finalDiscovery.rawRecords,
@@ -10037,7 +10523,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics; V22.2 diagnoses Window-3 to Window-4 edge decay using entry-time feature shifts and separate outcome/mechanics evidence without changing strategy mechanics.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics; V22.2 diagnoses Window-3 to Window-4 edge decay using entry-time feature shifts and separate outcome/mechanics evidence; V22.3 audits conditional edge survival across setup, regime and volatility without changing strategy mechanics.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -10227,6 +10713,8 @@ export default async function handler(req, res) {
             edgeDecayDiagnostics,
 
             v222EdgeDecayDiagnosis,
+
+            v223RegimeConditionalSurvivalAudit,
 
             regimeFingerprintDiagnostics,
 
