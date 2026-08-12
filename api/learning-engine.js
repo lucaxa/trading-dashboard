@@ -13600,14 +13600,31 @@ function buildV227EVPersistenceFailureAnatomy(
                         "BROKEN";
                 }
         
+                const foldTestStart =
+                    Number(
+                        fold?.testStart ??
+                        fold?.start ??
+                        fold?.validationStart ??
+                        0
+                    );
+
+                const foldTestEnd =
+                    Number(
+                        fold?.testEnd ??
+                        fold?.end ??
+                        Infinity
+                    );
+
                 transitions.push({
                     fold:
                         fold.fold ??
                         fold.id ??
                         null,
         
-                    testStart,
-                    testEnd,
+                    testStart:
+                        foldTestStart,
+                    testEnd:
+                        foldTestEnd,
         
                     healthState,
         
@@ -13853,6 +13870,9 @@ function buildV227EVPersistenceFailureAnatomy(
         
                 hypothesis:
                     "A positive prior-EV context whose internal evidence is deteriorating should have weaker forward persistence than a positive prior-EV context whose late-half evidence remains healthy.",
+
+                implementationIntegrity:
+                    "V22.8 uses each fold's explicit testStart/testEnd boundaries for forward outcomes. These boundaries are copied into local foldTestStart/foldTestEnd variables before transition records are created.",
         
                 diagnosticOnly:
                     true,
