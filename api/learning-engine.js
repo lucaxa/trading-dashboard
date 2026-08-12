@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V22.5";
+    const VERSION = "V22.6";
 
     try {
 
@@ -10270,7 +10270,7 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
-        // V22.5 — ACTIVATION QUALITY / PERSISTENCE FILTER AUDIT
+        // V22.6 — ACTIVATION QUALITY / PERSISTENCE FILTER AUDIT
         // -----------------------------------------------------
         // Diagnostic only. Uses only completed prior-window data
         // to label the next chronological window.
@@ -11043,6 +11043,731 @@ export default async function handler(req, res) {
             };
         }
         
+
+        // =====================================================
+        // V22.6 — CONTROLLED EV-MOMENTUM VALIDATION
+        // -----------------------------------------------------
+        // Diagnostic validation experiment only.
+        //
+        // V22.5 identified prior-window EV momentum as the
+        // strongest diagnostic dimension. V22.6 tests that
+        // hypothesis across the EXISTING chronological
+        // expanding-fold boundaries.
+        //
+        // Arms are fixed BEFORE forward outcomes are examined:
+        //
+        //   BASELINE:
+        //     prior EV > 0
+        //
+        //   MOMENTUM:
+        //     prior EV > 0
+        //     AND prior EV momentum >= +0.10R
+        //
+        //   STRONG_MOMENTUM:
+        //     prior EV >= +0.10R
+        //     AND prior EV momentum >= +0.10R
+        //
+        // Each fold uses ONLY records available before that
+        // fold's testStart to construct the prior context.
+        // The following fold/test segment is used only as the
+        // forward outcome.
+        //
+        // This does NOT:
+        //   - modify candidate discovery
+        //   - modify qualification
+        //   - modify validation
+        //   - modify diversification
+        //   - modify true OOS execution
+        //   - modify exits
+        //   - modify risk
+        //   - promote an arm into trading
+        //
+        // The experiment is deliberately parallel to the real
+        // pipeline so the current V22.5 strategy remains intact.
+        // =====================================================
+
+        function buildV226ControlledEVMomentumValidation(
+            candles,
+            records,
+            foldDefinitions
+        ) {
+
+            const safe =
+                safeArray(records)
+                    .filter(
+                        x =>
+                            x &&
+                            x.side === "SELL" &&
+                            Number.isFinite(x.index) &&
+                            Number.isFinite(x.resultR)
+                    )
+                    .sort(
+                        (a, b) =>
+                            a.index - b.index
+                    );
+
+            const ARM_DEFINITIONS = [
+                {
+                    key:
+                        "BASELINE_PRIOR_EV_GT_0",
+                    label:
+                        "Prior EV > 0",
+                    test:
+                        context =>
+                            context.priorEV > 0
+                },
+                {
+                    key:
+                        "MOMENTUM_PRIOR_EV_GT_0_MOM_GE_0_10",
+                    label:
+                        "Prior EV > 0 AND EV momentum >= +0.10R",
+                    test:
+                        context =>
+                            context.priorEV > 0 &&
+                            context.evMomentum >= 0.10
+                },
+                {
+                    key:
+                        "STRONG_MOMENTUM_PRIOR_EV_GE_0_10_MOM_GE_0_10",
+                    label:
+                        "Prior EV >= +0.10R AND EV momentum >= +0.10R",
+                    test:
+                        context =>
+                            context.priorEV >= 0.10 &&
+                            context.evMomentum >= 0.10
+                }
+            ];
+
+            const MIN_PRIOR_SAMPLES = 4;
+            const MIN_FORWARD_SAMPLES = 1;
+
+            function metrics(rows) {
+
+                if (!rows.length) {
+                    return {
+                        trades: 0,
+                        decisiveTrades: 0,
+                        wins: 0,
+                        losses: 0,
+                        timeouts: 0,
+                        netR: 0,
+                        EV: 0,
+                        PF: 0,
+                        winRate: 0
+                    };
+                }
+
+                const m =
+                    calculateMetrics(rows);
+
+                return {
+                    trades:
+                        m.trades ?? rows.length,
+                    decisiveTrades:
+                        m.decisiveTrades ?? 0,
+                    wins:
+                        m.wins ?? 0,
+                    losses:
+                        m.losses ?? 0,
+                    timeouts:
+                        m.timeouts ?? 0,
+                    netR:
+                        round(m.netR ?? 0, 4),
+                    EV:
+                        round(
+                            m.expectedValueR ?? 0,
+                            4
+                        ),
+                    PF:
+                        round(
+                            m.profitFactor ?? 0,
+                            4
+                        ),
+                    winRate:
+                        round(
+                            m.winRate ?? 0,
+                            2
+                        )
+                };
+            }
+
+            function contextKey(record) {
+
+                return [
+                    record.setup ??
+                        "UNKNOWN",
+                    record.trend ??
+                        "UNKNOWN",
+                    record.regime ??
+                        "UNKNOWN",
+                    record.volatility ??
+                        "UNKNOWN"
+                ].join("|");
+            }
+
+            function rowsBefore(
+                source,
+                endExclusive
+            ) {
+                return source.filter(
+                    x =>
+                        x.index <
+                        endExclusive
+                );
+            }
+
+            function splitLatestTraining(
+                trainingRows
+            ) {
+
+                if (
+                    trainingRows.length <
+                    MIN_PRIOR_SAMPLES * 2
+                ) {
+                    return {
+                        previous: [],
+                        prior: []
+                    };
+                }
+
+                const midpoint =
+                    Math.floor(
+                        trainingRows.length / 2
+                    );
+
+                return {
+                    previous:
+                        trainingRows.slice(
+                            0,
+                            midpoint
+                        ),
+                    prior:
+                        trainingRows.slice(
+                            midpoint
+                        )
+                };
+            }
+
+            function aggregateByContext(rows) {
+
+                const map = new Map();
+
+                for (const row of rows) {
+
+                    const key =
+                        contextKey(row);
+
+                    if (!map.has(key)) {
+                        map.set(
+                            key,
+                            []
+                        );
+                    }
+
+                    map.get(key).push(row);
+                }
+
+                return map;
+            }
+
+            const armRows =
+                new Map();
+
+            for (const arm of ARM_DEFINITIONS) {
+                armRows.set(
+                    arm.key,
+                    []
+                );
+            }
+
+            const foldResults =
+                [];
+
+            for (
+                const fold
+                of safeArray(foldDefinitions)
+            ) {
+
+                const trainingRows =
+                    rowsBefore(
+                        safe,
+                        fold.testStart
+                    );
+
+                const forwardRows =
+                    safe.filter(
+                        x =>
+                            x.index >=
+                                fold.testStart &&
+                            x.index <
+                                fold.testEnd
+                    );
+
+                const split =
+                    splitLatestTraining(
+                        trainingRows
+                    );
+
+                const previousByContext =
+                    aggregateByContext(
+                        split.previous
+                    );
+
+                const priorByContext =
+                    aggregateByContext(
+                        split.prior
+                    );
+
+                const forwardByContext =
+                    aggregateByContext(
+                        forwardRows
+                    );
+
+                const contexts =
+                    new Set([
+                        ...priorByContext.keys(),
+                        ...forwardByContext.keys()
+                    ]);
+
+                const foldTransitions =
+                    [];
+
+                for (
+                    const key
+                    of contexts
+                ) {
+
+                    const previous =
+                        previousByContext.get(
+                            key
+                        ) || [];
+
+                    const prior =
+                        priorByContext.get(
+                            key
+                        ) || [];
+
+                    const forward =
+                        forwardByContext.get(
+                            key
+                        ) || [];
+
+                    if (
+                        prior.length <
+                        MIN_PRIOR_SAMPLES
+                    ) {
+                        continue;
+                    }
+
+                    if (
+                        forward.length <
+                        MIN_FORWARD_SAMPLES
+                    ) {
+                        continue;
+                    }
+
+                    const previousMetrics =
+                        metrics(
+                            previous
+                        );
+
+                    const priorMetrics =
+                        metrics(
+                            prior
+                        );
+
+                    const forwardMetrics =
+                        metrics(
+                            forward
+                        );
+
+                    const evMomentum =
+                        round(
+                            priorMetrics.EV -
+                            previousMetrics.EV,
+                            4
+                        );
+
+                    const context = {
+                        key,
+                        priorEV:
+                            priorMetrics.EV,
+                        priorPF:
+                            priorMetrics.PF,
+                        priorSamples:
+                            priorMetrics.trades,
+                        priorDecisive:
+                            priorMetrics.decisiveTrades,
+                        priorWinRate:
+                            priorMetrics.winRate,
+                        previousEV:
+                            previousMetrics.EV,
+                        evMomentum,
+                        forward:
+                            forwardMetrics
+                    };
+
+                    for (
+                        const arm
+                        of ARM_DEFINITIONS
+                    ) {
+
+                        if (
+                            !arm.test(
+                                context
+                            )
+                        ) {
+                            continue;
+                        }
+
+                        const row = {
+                            fold:
+                                fold.fold,
+                            contextKey:
+                                key,
+                            priorSamples:
+                                context.priorSamples,
+                            priorDecisive:
+                                context.priorDecisive,
+                            previousEV:
+                                context.previousEV,
+                            priorEV:
+                                context.priorEV,
+                            evMomentum:
+                                context.evMomentum,
+                            priorPF:
+                                context.priorPF,
+                            priorWinRate:
+                                context.priorWinRate,
+                            forward:
+                                context.forward
+                        };
+
+                        armRows
+                            .get(arm.key)
+                            .push(row);
+
+                        foldTransitions.push({
+                            arm:
+                                arm.key,
+                            ...row
+                        });
+                    }
+                }
+
+                foldResults.push({
+                    fold:
+                        fold.fold,
+                    trainingRows:
+                        trainingRows.length,
+                    forwardRows:
+                        forwardRows.length,
+                    eligibleContexts:
+                        foldTransitions.length,
+                    transitions:
+                        foldTransitions
+                });
+            }
+
+            function aggregate(rows) {
+
+                const forwardTrades =
+                    rows.reduce(
+                        (sum, x) =>
+                            sum +
+                            x.forward.trades,
+                        0
+                    );
+
+                const forwardDecisive =
+                    rows.reduce(
+                        (sum, x) =>
+                            sum +
+                            x.forward.decisiveTrades,
+                        0
+                    );
+
+                const forwardNetR =
+                    rows.reduce(
+                        (sum, x) =>
+                            sum +
+                            x.forward.netR,
+                        0
+                    );
+
+                const successes =
+                    rows.filter(
+                        x =>
+                            x.forward.EV > 0
+                    ).length;
+
+                const failures =
+                    rows.filter(
+                        x =>
+                            x.forward.EV <= 0
+                    ).length;
+
+                const forwardEV =
+                    forwardTrades
+                        ? forwardNetR /
+                          forwardTrades
+                        : 0;
+
+                const forwardProfitFactor =
+                    (() => {
+
+                        const grossProfit =
+                            rows.reduce(
+                                (sum, x) =>
+                                    sum +
+                                    (
+                                        x.forward.wins *
+                                        TARGET_R
+                                    ),
+                                0
+                            );
+
+                        const grossLoss =
+                            rows.reduce(
+                                (sum, x) =>
+                                    sum +
+                                    (
+                                        x.forward.losses *
+                                        STOP_R
+                                    ),
+                                0
+                            );
+
+                        return grossLoss > 0
+                            ? grossProfit /
+                              grossLoss
+                            : 0;
+                    })();
+
+                return {
+                    activations:
+                        rows.length,
+                    successfulForwardContexts:
+                        successes,
+                    failedForwardContexts:
+                        failures,
+                    forwardContextSuccessRatePct:
+                        rows.length
+                            ? round(
+                                successes /
+                                rows.length *
+                                100,
+                                2
+                            )
+                            : 0,
+                    forwardTrades,
+                    forwardDecisiveTrades:
+                        forwardDecisive,
+                    forwardNetR:
+                        round(
+                            forwardNetR,
+                            4
+                        ),
+                    forwardEV:
+                        round(
+                            forwardEV,
+                            4
+                        ),
+                    forwardPF:
+                        round(
+                            forwardProfitFactor,
+                            4
+                        )
+                };
+            }
+
+            const arms =
+                ARM_DEFINITIONS.map(
+                    arm => {
+
+                        const rows =
+                            armRows.get(
+                                arm.key
+                            ) || [];
+
+                        const byFold =
+                            foldDefinitions
+                                .map(
+                                    fold => {
+
+                                        const foldRows =
+                                            rows.filter(
+                                                x =>
+                                                    x.fold ===
+                                                    fold.fold
+                                            );
+
+                                        const a =
+                                            aggregate(
+                                                foldRows
+                                            );
+
+                                        return {
+                                            fold:
+                                                fold.fold,
+                                            ...a
+                                        };
+                                    }
+                                );
+
+                        const aggregateAll =
+                            aggregate(rows);
+
+                        const profitableFolds =
+                            byFold.filter(
+                                x =>
+                                    x.activations >
+                                        0 &&
+                                    x.forwardEV >
+                                        0
+                            ).length;
+
+                        const foldsWithEvidence =
+                            byFold.filter(
+                                x =>
+                                    x.activations >
+                                    0
+                            ).length;
+
+                        return {
+                            key:
+                                arm.key,
+                            label:
+                                arm.label,
+                            ...aggregateAll,
+                            chronologicalFolds:
+                                byFold,
+                            profitableForwardFolds:
+                                profitableFolds,
+                            foldsWithForwardEvidence:
+                                foldsWithEvidence,
+                            passesControlledValidation:
+                                foldsWithEvidence >= 3 &&
+                                profitableFolds >= 3 &&
+                                aggregateAll.forwardEV >=
+                                    0.05 &&
+                                aggregateAll.forwardPF >=
+                                    1.05
+                        };
+                    }
+                );
+
+            // Relative comparison is descriptive only.
+            // The engine never selects an arm automatically.
+            const baseline =
+                arms.find(
+                    x =>
+                        x.key ===
+                        "BASELINE_PRIOR_EV_GT_0"
+                );
+
+            const momentum =
+                arms.find(
+                    x =>
+                        x.key ===
+                        "MOMENTUM_PRIOR_EV_GT_0_MOM_GE_0_10"
+                );
+
+            const strongMomentum =
+                arms.find(
+                    x =>
+                        x.key ===
+                        "STRONG_MOMENTUM_PRIOR_EV_GE_0_10_MOM_GE_0_10"
+                );
+
+            return {
+                version:
+                    "V22.6",
+                purpose:
+                    "Controlled chronological validation of the V22.5 EV-momentum hypothesis. The experiment is parallel to the existing trading pipeline and cannot modify candidate selection or true OOS.",
+                hypothesis:
+                    "Improving prior-window EV, specifically momentum >= +0.10R, may improve forward edge persistence.",
+                antiLeakage: {
+                    chronological:
+                        true,
+                    expandingTraining:
+                        true,
+                    priorWindowOnly:
+                        true,
+                    nextWindowUsedOnlyAsOutcome:
+                        true,
+                    futureOutcomeUsedForActivation:
+                        false,
+                    existingStrategyPipelineModified:
+                        false
+                },
+                design: {
+                    foldCount:
+                        safeArray(
+                            foldDefinitions
+                        ).length,
+                    priorTrainingSplit:
+                        "Within each expanding fold training segment, the earlier half is the comparison window and the immediately later half is the prior window.",
+                    minimumPriorSamples:
+                        MIN_PRIOR_SAMPLES,
+                    minimumForwardSamples:
+                        MIN_FORWARD_SAMPLES,
+                    arms:
+                        ARM_DEFINITIONS.map(
+                            x => ({
+                                key:
+                                    x.key,
+                                label:
+                                    x.label
+                            })
+                        )
+                },
+                arms,
+                comparison: {
+                    baselineForwardEV:
+                        baseline?.forwardEV ??
+                        null,
+                    momentumForwardEV:
+                        momentum?.forwardEV ??
+                        null,
+                    strongMomentumForwardEV:
+                        strongMomentum
+                            ?.forwardEV ??
+                        null,
+                    momentumLiftVsBaseline:
+                        baseline &&
+                        momentum
+                            ? round(
+                                momentum.forwardEV -
+                                baseline.forwardEV,
+                                4
+                            )
+                            : null,
+                    strongMomentumLiftVsBaseline:
+                        baseline &&
+                        strongMomentum
+                            ? round(
+                                strongMomentum.forwardEV -
+                                baseline.forwardEV,
+                                4
+                            )
+                            : null,
+                    momentumPassesControlledValidation:
+                        !!momentum
+                            ?.passesControlledValidation,
+                    strongMomentumPassesControlledValidation:
+                        !!strongMomentum
+                            ?.passesControlledValidation
+                },
+                foldResults,
+                decision:
+                    "DIAGNOSTIC_ONLY",
+                guard:
+                    "V22.6 does not promote the EV-momentum hypothesis, alter thresholds, modify validation/OOS execution, change exits/risk, or place orders. Any positive arm must be independently re-tested before becoming a strategy rule."
+            };
+        }
+
+
         // =====================================================
         // FINAL LEARNING
         // =====================================================
@@ -11052,6 +11777,13 @@ export default async function handler(req, res) {
                 historicalCandles,
                 0,
                 historicalCandles.length
+            );
+
+        const v226ControlledEVMomentumValidation =
+            buildV226ControlledEVMomentumValidation(
+                historicalCandles,
+                finalDiscovery.rawRecords,
+                folds
             );
 
         // V22.1 FIX: finalDiscovery must exist before its raw records
@@ -11825,7 +12557,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics; V22.2 diagnoses Window-3 to Window-4 edge decay using entry-time feature shifts and separate outcome/mechanics evidence; V22.3 audits conditional edge survival across setup, regime and volatility; V22.4 tests whether positive prior-window evidence can activate the same context for the next window without changing strategy mechanics.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics; V22.2 diagnoses Window-3 to Window-4 edge decay using entry-time feature shifts and separate outcome/mechanics evidence; V22.3 audits conditional edge survival across setup, regime and volatility; V22.4 tests whether positive prior-window evidence can activate the same context for the next window; V22.5 audits activation quality and EV momentum; V22.6 performs a controlled chronological validation of the EV-momentum hypothesis without changing strategy mechanics.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -12021,6 +12753,8 @@ export default async function handler(req, res) {
             v224EdgeActivationAudit,
 
             v225ActivationQualityPersistenceAudit,
+
+            v226ControlledEVMomentumValidation,
 
             regimeFingerprintDiagnostics,
 
