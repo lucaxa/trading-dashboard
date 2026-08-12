@@ -1,67 +1,69 @@
 /*
 ===========================================================
 TradeMind Pro
-V25.7-RD — V25.7 RANGE DIAGNOSTIC
+V25.7-RD v2 — NESTED CANDLE RESPONSE DIAGNOSTIC
 ===========================================================
 
 PURPOSE
 -------
-Diagnose the ACTUAL historical-data fetch path used by the
-deployed V25.7 engine.
+This is a DATA-LAYER diagnostic for the actual INDstocks
+historical response structure observed in V25.7-RD.
 
-This endpoint is diagnostic only.
+ROOT CAUSE FOUND IN V25.7-RD:
+-----------------------------
+The API returns:
 
-It does NOT:
-- create candidates
+{
+  "success": true,
+  "data": {
+    "NIDX_40000001": {
+      "candles": [ ... ]
+    }
+  }
+}
+
+The previous diagnostic looked for data.candles / data.rows
+and therefore reported zero rows even though candles existed.
+
+V25.7-RD v2 explicitly reads:
+
+  payload.data[SCRIP_CODE].candles
+
+and reports the response shape.
+
+THIS DOES NOT:
+- run learning logic
+- generate candidates
 - create learning records
-- classify HEALTHY / DECAYING
+- classify health states
 - validate trades
 - run OOS
-- modify thresholds
-- modify strategy mechanics
+- modify strategy
+- tune thresholds
 - place orders
 
-WHY THIS EXISTS
----------------
-V25.7 Segment 1 successfully reported historical candles,
-while Segments 2 and 3 reported zero candles.
-
-Separate HDA endpoints failed to reproduce Segment 1, so
-we must inspect the actual request/response path directly.
-
-This diagnostic exposes, for every historical chunk:
-- requested start/end
-- HTTP status
-- response content type
-- top-level response keys
-- whether the response is JSON
-- extracted row count
-- first/last extracted timestamp
-- response preview when no rows are extracted
-
-It does NOT replace V25.7 learning-engine.js.
-
-DEPLOY
-------
+DEPLOY AS:
+-----------
 api/v25_7-range-diagnostic.js
 
-RUN
----
+RUN FIRST:
+----------
 /api/v25_7-range-diagnostic?segment=1
 
-Then, only after inspecting Segment 1:
-segment=2
-segment=3
+Do NOT run segment 2 or 3 until segment 1 is inspected.
 
-The segment ranges below are the exact ranges reported by
-the V25.7 S1/S2/S3 results supplied in this project.
+SEGMENTS:
+---------
+1 = exact V25.7 S1 range
+2 = exact V25.7 S2 range
+3 = exact V25.7 S3 range
 
 ===========================================================
 */
 
 export default async function handler(req, res) {
 
-    const VERSION = "V25.7-RD";
+    const VERSION = "V25.7-RD-v2";
 
     const INSTRUMENT = "NIFTY 50";
     const SCRIP_CODE = "NIDX_40000001";
@@ -71,17 +73,24 @@ export default async function handler(req, res) {
         process.env.INDSTOCKS_API_BASE ||
         "https://api.indstocks.com";
 
-    const CHUNK_MS =
-        7 *
+    const DAY_MS =
         24 *
         60 *
         60 *
         1000;
 
+    const CHUNK_MS =
+        7 *
+        DAY_MS;
+
     const INTER_CHUNK_DELAY_MS = 250;
     const MAX_429_RETRIES = 5;
     const BASE_429_DELAY_MS = 2000;
 
+    /*
+     * Exact ranges reported by the V25.7 S1/S2/S3
+     * results supplied in this project.
+     */
     const SEGMENTS = {
 
         "1": {
@@ -92,7 +101,16 @@ export default async function handler(req, res) {
                 1703605271190,
 
             endMs:
-                1719157271190
+                1719157271190,
+
+            expected:
+                {
+                    rawCandles:
+                        8778,
+
+                    usableCandles:
+                        8777
+                }
         },
 
         "2": {
@@ -103,7 +121,16 @@ export default async function handler(req, res) {
                 1688053691134,
 
             endMs:
-                1703605691134
+                1703605691134,
+
+            expected:
+                {
+                    rawCandles:
+                        0,
+
+                    usableCandles:
+                        0
+                }
         },
 
         "3": {
@@ -114,11 +141,21 @@ export default async function handler(req, res) {
                 1672501861964,
 
             endMs:
-                1688053861964
+                1688053861964,
+
+            expected:
+                {
+                    rawCandles:
+                        0,
+
+                    usableCandles:
+                        0
+                }
         }
     };
 
     function sleep(ms) {
+
         return new Promise(
             resolve =>
                 setTimeout(
@@ -128,12 +165,70 @@ export default async function handler(req, res) {
         );
     }
 
-    function getTimestamp(row) {
+    function normalizeRows(
+        rows
+    ) {
+
+        if (
+            !Array.isArray(rows)
+        ) {
+            return [];
+        }
+
+        return rows;
+    }
+
+    /*
+     * IMPORTANT:
+     * This is the actual response path discovered in
+     * V25.7-RD:
+     *
+     * payload.data[SCRIP_CODE].candles
+     */
+    function extractNestedCandles(
+        payload
+    ) {
+
+        const instrumentData =
+            payload?.data?.[
+                SCRIP_CODE
+            ];
+
+        const candles =
+            instrumentData?.candles;
+
+        if (
+            Array.isArray(candles)
+        ) {
+
+            return {
+                rows:
+                    normalizeRows(
+                        candles
+                    ),
+
+                shape:
+                    `data.${SCRIP_CODE}.candles`
+            };
+        }
+
+        return {
+            rows: [],
+            shape: null
+        };
+    }
+
+    function timestampOf(
+        row
+    ) {
 
         if (
             Array.isArray(row)
         ) {
-            return Number(row[0]);
+
+            return Number(
+                row[0]
+            );
         }
 
         if (
@@ -152,113 +247,66 @@ export default async function handler(req, res) {
         return NaN;
     }
 
-    /*
-     * This extractor deliberately reports which response
-     * shape was used instead of silently assuming one shape.
-     */
-    function extractRowsWithShape(payload) {
+    function auditRows(
+        rows
+    ) {
 
-        const paths = [
-            ["data", payload?.data],
-            ["data.data", payload?.data?.data],
-            ["data.candles", payload?.data?.candles],
-            ["data.rows", payload?.data?.rows],
-            ["data.result", payload?.data?.result],
-            ["candles", payload?.candles],
-            ["rows", payload?.rows],
-            ["result", payload?.result],
-            ["result.data", payload?.result?.data],
-            ["result.candles", payload?.result?.candles],
-            ["result.rows", payload?.result?.rows]
-        ];
-
-        for (
-            const [path, value]
-            of paths
-        ) {
-
-            if (
-                Array.isArray(value)
-            ) {
-
-                return {
-                    rows: value,
-                    shape: path
-                };
-            }
-        }
-
-        /*
-         * Conservative fallback: inspect direct object values.
-         */
-        if (
-            payload &&
-            typeof payload === "object"
-        ) {
-
-            for (
-                const [
-                    key,
-                    value
-                ]
-                of Object.entries(
-                    payload
+        const timestamps =
+            rows
+                .map(
+                    timestampOf
                 )
-            ) {
+                .filter(
+                    Number.isFinite
+                )
+                .sort(
+                    (a, b) =>
+                        a - b
+                );
 
-                if (
-                    !Array.isArray(value) ||
-                    value.length === 0
-                ) {
-                    continue;
-                }
-
-                const first =
-                    value[0];
-
-                if (
-                    Array.isArray(first) &&
-                    first.length >= 5
-                ) {
-
-                    return {
-                        rows: value,
-                        shape:
-                            `fallback.${key}`
-                    };
-                }
-
-                if (
-                    first &&
-                    typeof first === "object" &&
-                    (
-                        "ts" in first ||
-                        "timestamp" in first ||
-                        "time" in first ||
-                        "t" in first
-                    )
-                ) {
-
-                    return {
-                        rows: value,
-                        shape:
-                            `fallback.${key}`
-                    };
-                }
-            }
-        }
+        const unique =
+            [
+                ...new Set(
+                    timestamps
+                )
+            ];
 
         return {
-            rows: [],
-            shape: null
+
+            extractedRows:
+                rows.length,
+
+            timestampedRows:
+                timestamps.length,
+
+            uniqueTimestampedRows:
+                unique.length,
+
+            duplicateTimestampRows:
+                timestamps.length -
+                unique.length,
+
+            firstTimestamp:
+                unique[0] ??
+                null,
+
+            lastTimestamp:
+                unique[
+                    unique.length - 1
+                ] ??
+                null
         };
     }
 
-    function safePreview(text) {
+    function safePreview(
+        text
+    ) {
 
         if (
-            typeof text !== "string"
+            typeof text !==
+            "string"
         ) {
+
             return null;
         }
 
@@ -271,8 +319,10 @@ export default async function handler(req, res) {
                 .trim();
 
         if (
-            compact.length <= 500
+            compact.length <=
+            500
         ) {
+
             return compact;
         }
 
@@ -285,7 +335,7 @@ export default async function handler(req, res) {
         );
     }
 
-    async function fetchDiagnosticChunk(
+    async function fetchChunk(
         accessToken,
         startMs,
         endMs
@@ -304,6 +354,7 @@ export default async function handler(req, res) {
                 url,
                 {
                     method: "GET",
+
                     headers: {
                         Authorization:
                             accessToken,
@@ -314,22 +365,20 @@ export default async function handler(req, res) {
                 }
             );
 
-        const contentType =
-            response.headers.get(
-                "content-type"
-            );
-
         const text =
             await response.text();
 
         let payload = null;
+
         let parseStatus =
             "NOT_JSON";
 
         try {
 
             payload =
-                JSON.parse(text);
+                JSON.parse(
+                    text
+                );
 
             parseStatus =
                 "JSON";
@@ -340,16 +389,31 @@ export default async function handler(req, res) {
 
         const payloadKeys =
             payload &&
-            typeof payload === "object" &&
-            !Array.isArray(payload)
+            typeof payload ===
+                "object" &&
+            !Array.isArray(
+                payload
+            )
                 ? Object.keys(
                     payload
                 )
                 : [];
 
+        const instrumentKeys =
+            payload?.data &&
+            typeof payload.data ===
+                "object" &&
+            !Array.isArray(
+                payload.data
+            )
+                ? Object.keys(
+                    payload.data
+                )
+                : [];
+
         const extracted =
             payload
-                ? extractRowsWithShape(
+                ? extractNestedCandles(
                     payload
                 )
                 : {
@@ -357,33 +421,17 @@ export default async function handler(req, res) {
                     shape: null
                 };
 
-        const rows =
-            extracted.rows;
-
-        const timestamps =
-            rows
-                .map(
-                    getTimestamp
-                )
-                .filter(
-                    Number.isFinite
-                )
-                .sort(
-                    (a, b) =>
-                        a - b
-                );
-
-        const uniqueTimestamps =
-            [
-                ...new Set(
-                    timestamps
-                )
-            ];
+        const rowAudit =
+            auditRows(
+                extracted.rows
+            );
 
         return {
 
             request: {
+
                 startMs,
+
                 endMs
             },
 
@@ -395,7 +443,10 @@ export default async function handler(req, res) {
                 ok:
                     response.ok,
 
-                contentType,
+                contentType:
+                    response.headers.get(
+                        "content-type"
+                    ),
 
                 parseStatus
             },
@@ -404,42 +455,30 @@ export default async function handler(req, res) {
 
                 payloadKeys,
 
-                payloadIsArray:
-                    Array.isArray(
-                        payload
+                instrumentKeys,
+
+                expectedInstrumentPresent:
+                    instrumentKeys.includes(
+                        SCRIP_CODE
                     ),
 
                 extractedShape:
                     extracted.shape,
 
-                extractedRows:
-                    rows.length,
-
-                timestampedRows:
-                    timestamps.length,
-
-                uniqueTimestampedRows:
-                    uniqueTimestamps.length,
-
-                firstTimestamp:
-                    uniqueTimestamps[0] ??
-                    null,
-
-                lastTimestamp:
-                    uniqueTimestamps[
-                        uniqueTimestamps.length - 1
-                    ] ??
-                    null,
+                ...rowAudit,
 
                 previewWhenNoRows:
-                    rows.length === 0
-                        ? safePreview(text)
+                    extracted.rows.length ===
+                    0
+                        ? safePreview(
+                            text
+                        )
                         : null
             }
         };
     }
 
-    async function fetchWith429Retry(
+    async function fetchChunkRateLimitSafe(
         accessToken,
         startMs,
         endMs
@@ -447,10 +486,12 @@ export default async function handler(req, res) {
 
         let attempt = 0;
 
-        while (true) {
+        while (
+            true
+        ) {
 
             const result =
-                await fetchDiagnosticChunk(
+                await fetchChunk(
                     accessToken,
                     startMs,
                     endMs
@@ -463,6 +504,7 @@ export default async function handler(req, res) {
 
                 return {
                     result,
+
                     retryAttempts:
                         attempt
                 };
@@ -475,6 +517,7 @@ export default async function handler(req, res) {
 
                 return {
                     result,
+
                     retryAttempts:
                         attempt
                 };
@@ -511,7 +554,7 @@ export default async function handler(req, res) {
                     "METHOD_NOT_ALLOWED",
 
                 error:
-                    "V25.7-RD uses GET only."
+                    "V25.7-RD v2 uses GET only."
             });
         }
 
@@ -593,6 +636,7 @@ export default async function handler(req, res) {
                 );
 
             chunks.push({
+
                 startMs:
                     cursor,
 
@@ -618,7 +662,7 @@ export default async function handler(req, res) {
 
             const fetched =
                 await
-                    fetchWith429Retry(
+                    fetchChunkRateLimitSafe(
                         accessToken,
                         chunk.startMs,
                         chunk.endMs
@@ -646,16 +690,31 @@ export default async function handler(req, res) {
             }
         }
 
-        const totalRows =
+        const totalExtractedRows =
             chunkResults.reduce(
                 (
-                    sum,
-                    item
+                    total,
+                    chunk
                 ) =>
-                    sum +
+                    total +
                     (
-                        item.response
+                        chunk.response
                             ?.extractedRows ||
+                        0
+                    ),
+                0
+            );
+
+        const totalUniqueTimestampedRows =
+            chunkResults.reduce(
+                (
+                    total,
+                    chunk
+                ) =>
+                    total +
+                    (
+                        chunk.response
+                            ?.uniqueTimestampedRows ||
                         0
                     ),
                 0
@@ -663,23 +722,68 @@ export default async function handler(req, res) {
 
         const chunksWithData =
             chunkResults.filter(
-                item =>
+                chunk =>
                     (
-                        item.response
+                        chunk.response
                             ?.extractedRows ||
                         0
                     ) > 0
             ).length;
 
+        const chunksEmpty =
+            chunks.length -
+            chunksWithData;
+
         const httpStatuses =
             [
                 ...new Set(
                     chunkResults.map(
-                        item =>
-                            item.http.status
+                        chunk =>
+                            chunk.http
+                                .status
                     )
                 )
             ];
+
+        const shapes =
+            [
+                ...new Set(
+                    chunkResults
+                        .map(
+                            chunk =>
+                                chunk.response
+                                    ?.extractedShape
+                        )
+                        .filter(
+                            Boolean
+                        )
+                )
+            ];
+
+        const expected =
+            segment.expected;
+
+        let controlAssessment =
+            "UNASSESSED";
+
+        if (
+            segmentId === "1"
+        ) {
+
+            if (
+                totalExtractedRows >
+                0
+            ) {
+
+                controlAssessment =
+                    "CONTROL_DATA_REPRODUCED";
+
+            } else {
+
+                controlAssessment =
+                    "CONTROL_DATA_NOT_EXTRACTED";
+            }
+        }
 
         return res.status(200).json({
 
@@ -691,7 +795,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V25_7_RANGE_DIAGNOSTIC",
+                "V25_7_RD_NESTED_CANDLE_RESPONSE",
 
             paperOnly: true,
 
@@ -702,7 +806,7 @@ export default async function handler(req, res) {
             brokerOrderSent: false,
 
             purpose:
-                "Inspect the actual historical request/response path for the V25.7 S1/S2/S3 ranges without invoking learning or trading logic.",
+                "Validate the nested INDstocks candle response parser before interpreting V25.7 Segment 2 or Segment 3.",
 
             instrument:
                 INSTRUMENT,
@@ -731,54 +835,40 @@ export default async function handler(req, res) {
                     chunks.length
             },
 
+            responseSchema:
+
+                "data." +
+                SCRIP_CODE +
+                ".candles",
+
             aggregate: {
 
-                totalExtractedRows:
-                    totalRows,
+                totalExtractedRows,
+
+                totalUniqueTimestampedRows,
 
                 chunksWithData,
 
-                chunksEmpty:
-                    chunks.length -
-                    chunksWithData,
+                chunksEmpty,
 
-                httpStatuses
+                httpStatuses,
+
+                extractedShapes:
+                    shapes
             },
+
+            controlAssessment,
+
+            expectedFromPriorV25_7:
+                expected,
 
             chunks:
                 chunkResults,
 
-            comparisonTarget:
-                segmentId === "1"
-                    ? {
-                        expectedFromV25_7:
-                            {
-                                rawCandles:
-                                    8778,
-                                usableCandles:
-                                    8777
-                            },
-
-                        instruction:
-                            "Segment 1 is the known-good control. If this diagnostic does not reproduce data, compare its request/response details with the V25.7 engine before testing S2/S3."
-                    }
-                    : {
-                        expectedFromV25_7:
-                            {
-                                rawCandles:
-                                    0,
-                                usableCandles:
-                                    0
-                            },
-
-                        instruction:
-                            "Do not interpret zero rows as strategy failure. This diagnostic only establishes the API response path."
-                    },
-
             interpretation: {
 
-                tradingTest:
-                    false,
+                thisIsNotATradingTest:
+                    true,
 
                 learningRecordsGenerated:
                     false,
@@ -792,11 +882,22 @@ export default async function handler(req, res) {
                 thresholdTuning:
                     false,
 
+                parserRecognizedNestedCandles:
+                    shapes.includes(
+                        `data.${SCRIP_CODE}.candles`
+                    ),
+
                 conclusion:
-                    totalRows > 0
-                        ? "HISTORICAL_ROWS_RETURNED"
-                        : "NO_ROWS_EXTRACTED"
+                    totalExtractedRows >
+                    0
+                        ? "NESTED_CANDLES_EXTRACTED"
+                        : "NO_NESTED_CANDLES_EXTRACTED"
             },
+
+            nextStep:
+                segmentId === "1"
+                    ? "Inspect Segment 1 control. Only after the control reproduces candles should Segment 2 and Segment 3 be run."
+                    : "Compare this result with the V25.7 control and do not interpret it as a trading result.",
 
             guardrails: {
 
@@ -826,7 +927,9 @@ export default async function handler(req, res) {
             }
         });
 
-    } catch (error) {
+    } catch (
+        error
+    ) {
 
         return res.status(500).json({
 
