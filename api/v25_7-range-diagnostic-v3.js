@@ -115,20 +115,22 @@ export default async function handler(req, res) {
     const S2_END_MS   = 1703605691134;
 
     /*
-     * A stable center around the earliest known S1 data.
-     * This is deliberately derived from the actual supplied
-     * S1/S2 timestamps rather than from current time.
+     * The supplied V25.7 S1 start and S2 end differ by only
+     * about 4.4 seconds. Treat their midpoint as the practical
+     * transition reference for this diagnostic only.
      *
-     * Probe 1: 7-day S1-side control, ending before S1 end.
-     * Probe 2: 3-day transition window straddling the
-     *          S1/S2 timestamp boundary.
-     * Probe 3: 7-day S2-side control immediately before S2 end.
-     * Probe 4: 30-day deeper S2 control.
+     * IMPORTANT:
+     * Probe geometry is intentionally on opposite sides of
+     * this reference:
      *
-     * Because S1 and S2 were generated in separate calls,
-     * the few-second timestamp discrepancy is treated as
-     * insignificant; the probe deliberately uses windows
-     * measured in days.
+     * Probe 1 = 7 days AFTER the boundary (S1-side control)
+     * Probe 2 = 3 days STRADDLING the boundary
+     * Probe 3 = 7 days BEFORE the boundary (S2-side control)
+     * Probe 4 = 30 days BEFORE the boundary (deep S2 control)
+     *
+     * This corrects the previous v3 geometry, where Probe 1
+     * was valid data but was not actually adjacent to the
+     * S1/S2 transition as its label claimed.
      */
 
     const S1_S2_BOUNDARY_MS =
@@ -139,15 +141,12 @@ export default async function handler(req, res) {
             ) / 2
         );
 
-    /*
-     * IMPORTANT:
-     * The above midpoint is NOT used as a historical
-     * availability cutoff. It is only a neutral reference
-     * for constructing a short diagnostic window.
-     *
-     * The actual probes are placed using the supplied S2 end
-     * and the S1 start so we can observe the API directly.
-     */
+    const TRANSITION_HALF_WINDOW_MS =
+        Math.floor(
+            1.5 *
+            DAY_MS
+        );
+
     const PROBES = {
 
         "1": {
@@ -155,13 +154,13 @@ export default async function handler(req, res) {
                 "S1_SIDE_CONTROL",
 
             description:
-                "7-day control fully inside the known-good V25.7 S1 period, immediately before the S1/S2 timestamp transition.",
+                "7-day control fully AFTER the supplied S1/S2 boundary, on the known-good S1 side.",
 
             startMs:
-                S1_START_MS,
+                S1_S2_BOUNDARY_MS,
 
             endMs:
-                S1_START_MS +
+                S1_S2_BOUNDARY_MS +
                 7 *
                 DAY_MS,
 
@@ -174,17 +173,15 @@ export default async function handler(req, res) {
                 "S1_S2_TRANSITION_WINDOW",
 
             description:
-                "Short window centered on the supplied S1/S2 boundary timestamps.",
+                "3-day window centered on the supplied S1/S2 boundary, intentionally containing both sides.",
 
             startMs:
-                S1_START_MS +
-                6 *
-                DAY_MS,
+                S1_S2_BOUNDARY_MS -
+                TRANSITION_HALF_WINDOW_MS,
 
             endMs:
-                S1_START_MS +
-                9 *
-                DAY_MS,
+                S1_S2_BOUNDARY_MS +
+                TRANSITION_HALF_WINDOW_MS,
 
             expected:
                 "DIAGNOSTIC"
@@ -195,15 +192,15 @@ export default async function handler(req, res) {
                 "S2_SIDE_CONTROL",
 
             description:
-                "7-day control immediately before the supplied S2 end boundary.",
+                "7-day control fully BEFORE the supplied S1/S2 boundary, on the S2 side.",
 
             startMs:
-                S2_END_MS -
+                S1_S2_BOUNDARY_MS -
                 7 *
                 DAY_MS,
 
             endMs:
-                S2_END_MS,
+                S1_S2_BOUNDARY_MS,
 
             expected:
                 "NO_DATA_BASED_ON_V25_7_S2"
@@ -214,15 +211,15 @@ export default async function handler(req, res) {
                 "S2_DEEP_CONTROL",
 
             description:
-                "30-day control deeper inside the V25.7 S2 period.",
+                "30-day control fully BEFORE the supplied S1/S2 boundary, deeper inside S2.",
 
             startMs:
-                S2_END_MS -
+                S1_S2_BOUNDARY_MS -
                 30 *
                 DAY_MS,
 
             endMs:
-                S2_END_MS,
+                S1_S2_BOUNDARY_MS,
 
             expected:
                 "NO_DATA_BASED_ON_V25_7_S2"
