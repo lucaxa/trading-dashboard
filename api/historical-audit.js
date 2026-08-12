@@ -1,70 +1,65 @@
 /*
 ===========================================================
 TradeMind Pro
-V25.7-HDA v2 — HISTORICAL DATA AVAILABILITY AUDIT
+V25.7-HDA v3 — HISTORICAL RANGE COMPATIBILITY AUDIT
 ===========================================================
 
 PURPOSE
 -------
-Determine whether the zero-candle results seen in V25.7
-Segments 2 and 3 are a genuine historical-data boundary
-or a request-geometry/API issue.
+This is a DATA-LAYER diagnostic only.
 
-THIS IS A DATA AUDIT ONLY.
+It answers:
+
+"Can the current INDstocks historical request path return
+the same known-good V25.7 Segment 1 data when we vary only
+the requested historical range?"
 
 It does NOT:
 - generate learning records
 - discover candidates
-- classify HEALTHY/DECAYING
+- classify HEALTHY / DECAYING / BROKEN
 - validate trades
 - run OOS
-- modify strategy
 - tune thresholds
+- modify strategy mechanics
 - place orders
 
 IMPORTANT
 ---------
-The previous HDA probes used 14-day windows. That was not
-a valid control because the existing TradeMind historical
-loader enforces a minimum request window of 30 days.
+V25.7 Segment 1 already proved that this exact broad range
+returned 8778 raw candles / 8777 usable candles.
 
-V2 therefore uses 31-DAY probe windows.
+V3 therefore starts with that EXACT range as the control.
 
-It also mirrors the existing historical API request:
-- NIFTY 50
-- NIDX_40000001
-- 5minute
-- INDSTOCKS_API_BASE
-- INDSTOCKS_TOKEN / INDSTOCKS_ACCESS_TOKEN
-- 7-day chunks
-- serialized requests
-- 429 retry handling
+It then tests progressively smaller windows INSIDE the
+known-good S1 period.
 
 PROBES
 ------
-probe=1
-Known-good S1 interior control.
-
-probe=2
-S2 interior.
-
-probe=3
-S3 interior.
-
-probe=4
-S1/S2 boundary control.
-
-probe=5
-S3 older control.
+probe=1  EXACT V25.7 S1 range (~180 days)
+probe=2  120-day S1 interior
+probe=3   90-day S1 interior
+probe=4   60-day S1 interior
+probe=5   30-day S1 interior
 
 Run probe=1 first.
-Do not run all probes simultaneously.
+
+The fetch path intentionally mirrors the proven V24/V25
+historical loader:
+- INDSTOCKS_API_BASE
+- INDSTOCKS_TOKEN / INDSTOCKS_ACCESS_TOKEN
+- /market/historical/5minute
+- NIDX_40000001
+- 7-day serialized chunks
+- 429 retry handling
+
+No learning engine is called.
 ===========================================================
 */
 
 export default async function handler(req, res) {
 
-    const VERSION = "V25.7-HDA-v2";
+    const VERSION = "V25.7-HDA-v3";
 
     const INSTRUMENT = "NIFTY 50";
     const SCRIP_CODE = "NIDX_40000001";
@@ -73,8 +68,6 @@ export default async function handler(req, res) {
     const API_BASE =
         process.env.INDSTOCKS_API_BASE ||
         "https://api.indstocks.com";
-
-    const MIN_PROBE_DAYS = 31;
 
     const DAY_MS =
         24 *
@@ -91,17 +84,10 @@ export default async function handler(req, res) {
     const BASE_429_DELAY_MS = 2000;
 
     /*
-     * Exact chronological boundaries reported by the
-     * V25.7 S1/S2/S3 runs.
+     * EXACT V25.7 S1 boundaries from the successful S1 run.
      */
     const S1_START_MS = 1703605271190;
     const S1_END_MS   = 1719157271190;
-
-    const S2_START_MS = 1688053691134;
-    const S2_END_MS   = 1703605691134;
-
-    const S3_START_MS = 1672501861964;
-    const S3_END_MS   = 1688053861964;
 
     function sleep(ms) {
         return new Promise(
@@ -114,154 +100,121 @@ export default async function handler(req, res) {
     }
 
     /*
-     * Build a 31-day window ending safely inside a supplied
-     * segment. This avoids crossing the segment boundary.
+     * Build a centered interior window of the requested
+     * duration, fully inside the known-good S1 range.
      */
-    function interiorWindow(
-        segmentStart,
-        segmentEnd
-    ) {
+    function centeredWindow(days) {
 
         const span =
-            segmentEnd -
-            segmentStart;
-
-        const minimumSpan =
-            MIN_PROBE_DAYS *
+            days *
             DAY_MS;
 
+        const totalSpan =
+            S1_END_MS -
+            S1_START_MS;
+
         if (
-            span <=
-            minimumSpan
+            span >=
+            totalSpan
         ) {
-            throw new Error(
-                "Segment is too short for a 31-day interior probe."
-            );
+            return {
+                startMs:
+                    S1_START_MS,
+
+                endMs:
+                    S1_END_MS
+            };
         }
 
         const margin =
             Math.floor(
-                (span -
-                    minimumSpan) /
-                2
+                (
+                    totalSpan -
+                    span
+                ) / 2
             );
 
-        const start =
-            segmentStart +
-            margin;
-
-        const end =
-            start +
-            minimumSpan;
-
         return {
-            startMs: start,
-            endMs: end
+            startMs:
+                S1_START_MS +
+                margin,
+
+            endMs:
+                S1_START_MS +
+                margin +
+                span
         };
     }
-
-    const S1_CONTROL =
-        interiorWindow(
-            S1_START_MS,
-            S1_END_MS
-        );
-
-    const S2_CONTROL =
-        interiorWindow(
-            S2_START_MS,
-            S2_END_MS
-        );
-
-    const S3_CONTROL =
-        interiorWindow(
-            S3_START_MS,
-            S3_END_MS
-        );
-
-    /*
-     * A boundary probe must also be >=31 days.
-     * It is centered around the S1/S2 boundary while staying
-     * entirely within the combined S2+S1 range.
-     */
-    const boundaryCenter =
-        S2_END_MS;
-
-    const BOUNDARY_PROBE = {
-        startMs:
-            boundaryCenter -
-            Math.floor(
-                (MIN_PROBE_DAYS *
-                    DAY_MS) /
-                2
-            ),
-
-        endMs:
-            boundaryCenter +
-            Math.floor(
-                (MIN_PROBE_DAYS *
-                    DAY_MS) /
-                2
-            )
-    };
 
     const PROBES = {
 
         "1": {
             label:
-                "S1_INTERIOR_CONTROL_31D",
+                "EXACT_V25_7_S1_RANGE",
 
             description:
-                "31-day control fully inside the V25.7 Segment 1 period that returned 8778 candles.",
+                "Exact historical range used by the successful V25.7 Segment 1 run.",
 
-            ...S1_CONTROL
+            startMs:
+                S1_START_MS,
+
+            endMs:
+                S1_END_MS,
+
+            expectedReference:
+                "V25.7 S1 reported 8778 raw candles and 8777 usable candles."
         },
 
         "2": {
             label:
-                "S2_INTERIOR_31D",
+                "S1_INTERIOR_120D",
 
             description:
-                "31-day probe fully inside V25.7 Segment 2, which previously returned zero candles.",
+                "120-day centered window entirely inside the known-good S1 period.",
 
-            ...S2_CONTROL
+            ...centeredWindow(120),
+
+            expectedReference:
+                "No prior result; this is a range-compatibility test."
         },
 
         "3": {
             label:
-                "S3_INTERIOR_31D",
+                "S1_INTERIOR_90D",
 
             description:
-                "31-day probe fully inside V25.7 Segment 3, which previously returned zero candles.",
+                "90-day centered window entirely inside the known-good S1 period.",
 
-            ...S3_CONTROL
+            ...centeredWindow(90),
+
+            expectedReference:
+                "No prior result; this is a range-compatibility test."
         },
 
         "4": {
             label:
-                "S1_S2_BOUNDARY_31D",
+                "S1_INTERIOR_60D",
 
             description:
-                "31-day probe centered around the S1/S2 chronological boundary.",
+                "60-day centered window entirely inside the known-good S1 period.",
 
-            ...BOUNDARY_PROBE
+            ...centeredWindow(60),
+
+            expectedReference:
+                "No prior result; this is a range-compatibility test."
         },
 
         "5": {
             label:
-                "S3_OLDER_CONTROL_31D",
+                "S1_INTERIOR_30D",
 
             description:
-                "31-day probe inside the older S3 historical period.",
+                "30-day centered window entirely inside the known-good S1 period.",
 
-            startMs:
-                S3_START_MS +
-                20 *
-                DAY_MS,
+            ...centeredWindow(30),
 
-            endMs:
-                S3_START_MS +
-                51 *
-                DAY_MS
+            expectedReference:
+                "No prior result; this is a range-compatibility test."
         }
     };
 
@@ -293,6 +246,51 @@ export default async function handler(req, res) {
             }
         }
 
+        /*
+         * Conservative fallback for object-shaped API responses.
+         */
+        if (
+            payload &&
+            typeof payload === "object"
+        ) {
+
+            for (
+                const value
+                of Object.values(payload)
+            ) {
+
+                if (
+                    !Array.isArray(value) ||
+                    value.length === 0
+                ) {
+                    continue;
+                }
+
+                const first =
+                    value[0];
+
+                if (
+                    Array.isArray(first) &&
+                    first.length >= 5
+                ) {
+                    return value;
+                }
+
+                if (
+                    first &&
+                    typeof first === "object" &&
+                    (
+                        "ts" in first ||
+                        "timestamp" in first ||
+                        "time" in first ||
+                        "t" in first
+                    )
+                ) {
+                    return value;
+                }
+            }
+        }
+
         return [];
     }
 
@@ -301,7 +299,9 @@ export default async function handler(req, res) {
         if (
             Array.isArray(row)
         ) {
-            return Number(row[0]);
+            return Number(
+                row[0]
+            );
         }
 
         if (
@@ -639,7 +639,7 @@ export default async function handler(req, res) {
                 brokerOrderSent: false,
 
                 error:
-                    "V25.7-HDA-v2 uses GET only."
+                    "V25.7-HDA-v3 uses GET only."
             });
         }
 
@@ -717,27 +717,6 @@ export default async function handler(req, res) {
             ) /
             DAY_MS;
 
-        if (
-            requestedDays <
-            MIN_PROBE_DAYS
-        ) {
-
-            return res.status(500).json({
-
-                success: false,
-
-                version: VERSION,
-
-                status:
-                    "INTERNAL_PROBE_CONFIGURATION_ERROR",
-
-                requestedDays,
-
-                minimumProbeDays:
-                    MIN_PROBE_DAYS
-            });
-        }
-
         const audit =
             await auditRange(
                 accessToken,
@@ -755,7 +734,7 @@ export default async function handler(req, res) {
                 "COMPLETED",
 
             mode:
-                "V25_7_HDA_31_DAY_CONTROL_AUDIT",
+                "V25_7_HDA_HISTORICAL_RANGE_COMPATIBILITY",
 
             paperOnly: true,
 
@@ -766,7 +745,7 @@ export default async function handler(req, res) {
             brokerOrderSent: false,
 
             purpose:
-                "Determine whether the V25.7 S2/S3 zero-candle results represent a genuine historical-data boundary or an invalid request geometry.",
+                "Determine whether the INDstocks request path returns the known-good V25.7 S1 historical data across progressively smaller ranges.",
 
             instrument:
                 INSTRUMENT,
@@ -776,21 +755,6 @@ export default async function handler(req, res) {
 
             interval:
                 INTERVAL,
-
-            requestGeometry: {
-
-                minimumProbeDays:
-                    MIN_PROBE_DAYS,
-
-                actualProbeDays:
-                    requestedDays,
-
-                chunkDays:
-                    7,
-
-                serialized:
-                    true
-            },
 
             probe: {
 
@@ -807,7 +771,24 @@ export default async function handler(req, res) {
                     probe.startMs,
 
                 rangeEndMs:
-                    probe.endMs
+                    probe.endMs,
+
+                requestedDays,
+
+                expectedReference:
+                    probe.expectedReference
+            },
+
+            requestGeometry: {
+
+                chunkDays:
+                    7,
+
+                serialized:
+                    true,
+
+                retries429:
+                    MAX_429_RETRIES
             },
 
             audit,
@@ -831,12 +812,12 @@ export default async function handler(req, res) {
 
                 conclusion:
                     audit.rawRows > 0
-                        ? "HISTORICAL_DATA_PRESENT"
-                        : "HISTORICAL_DATA_NOT_RETURNED"
+                        ? "HISTORICAL_DATA_RETURNED"
+                        : "NO_HISTORICAL_DATA_RETURNED"
             },
 
             nextStep:
-                "Run probe 1 first. If the known-good S1 control returns candles, run probe 2 and probe 3 to test S2/S3 availability.",
+                "Run probe 1 first. Only after probe 1 is verified should probes 2 through 5 be run sequentially.",
 
             guardrails: {
 
