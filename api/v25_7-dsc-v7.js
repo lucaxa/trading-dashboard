@@ -1,14 +1,14 @@
 /*
 ===========================================================
  TradeMind Pro
- V25.7-DSC-v6 — Dhan S3 Exact Boundary Audit
+ V25.7-DSC-v7 — Dhan S4 Three-Window Historical Coverage Audit
 ===========================================================
 
 PURPOSE
 -------
-Verify the two small historical boundary areas surrounding
-the exact V25.7 Segment 3 range before S3 is marked fully
-data-source cleared.
+Verify historical candle availability for V25.7 Segment 4
+using DhanHQ, with three requests safely below the intraday
+request-window limit.
 
 THIS IS A DATA-SOURCE AUDIT ONLY.
 
@@ -22,32 +22,35 @@ It does NOT:
 - tune thresholds
 - place orders
 
-WHY THIS AUDIT
---------------
-V25.7-DSC-v5 established strong S3 coverage for:
+S4 RANGE
+--------
+The V25.7 Segment 4 historical period is approximately:
 
-  2023-01-01 -> 2023-06-28
+  2022-06-30 -> 2022-12-27
 
-The original V25.7 S3 invocation used timestamps approximately
-covering:
+Three windows are used:
 
-  2022-12-31 -> 2023-06-29
+  A: 2022-06-30 -> 2022-08-29
+  B: 2022-08-29 -> 2022-10-28
+  C: 2022-10-28 -> 2022-12-27
 
-Therefore this audit checks the two small edge areas that were
-not explicitly covered by v5:
+Each request is below Dhan's intraday request-window limit.
 
-  EDGE A:
-    2022-12-31 -> 2023-01-01
+IMPORTANT
+---------
+These windows are deliberately adjacent. Actual timestamps are
+retained internally so cross-window duplicate timestamps can be
+detected.
 
-  EDGE B:
-    2023-06-28 -> 2023-06-29
-
-These are deliberately short controls, not a new trading test.
+If an edge begins/ends on a weekend or market holiday, a lack
+of candles at that exact boundary is not automatically treated
+as a data-source failure. The audit evaluates actual returned
+trading-session candles.
 
 RUN
 ---
 GET:
-  /api/v25_7-dsc-v6?probe=1
+  /api/v25_7-dsc-v7?probe=1
 
 ENVIRONMENT
 -----------
@@ -55,31 +58,12 @@ DHAN_ACCESS_TOKEN
 
 The token must be configured in Vercel. Never put it in source.
 
-AUDIT GOALS
------------
-1. HTTP status and JSON validity per edge.
-2. Dhan response shape.
-3. Candle counts.
-4. Timestamp integrity.
-5. OHLC validity.
-6. 5-minute spacing.
-7. First/last actual candle.
-8. Session/calendar-day presence.
-9. Zero-volume preservation.
-10. Whether both exact S3 boundary edges are available.
-
-IMPORTANT
----------
-This does not import anything into V25.7.
-A positive result only clears the data-source boundary.
-It does not authorize learning confirmation.
-
 ===========================================================
 */
 
 export default async function handler(req, res) {
 
-    const VERSION = "V25.7-DSC-v6";
+    const VERSION = "V25.7-DSC-v7";
 
     const ENDPOINT =
         "https://api.dhan.co/v2/charts/intraday";
@@ -87,21 +71,24 @@ export default async function handler(req, res) {
     const PROBES = {
         "1": {
             id: "1",
-            label: "S3_EXACT_BOUNDARY_EDGES",
+            label: "S4_180D_THREE_WINDOW",
             description:
-                "Small Dhan controls immediately outside the v5 S3 coverage window to verify the original V25.7 S3 boundary.",
-            edges: [
+                "Three-window Dhan coverage audit for the V25.7 Segment 4 historical period.",
+            windows: [
                 {
                     id: "A",
-                    label: "S3_PRE_START_EDGE",
-                    fromDate: "2022-12-31 00:00:00",
-                    toDate: "2023-01-01 00:00:00"
+                    fromDate: "2022-06-30 00:00:00",
+                    toDate: "2022-08-29 00:00:00"
                 },
                 {
                     id: "B",
-                    label: "S3_POST_END_EDGE",
-                    fromDate: "2023-06-28 00:00:00",
-                    toDate: "2023-06-29 00:00:00"
+                    fromDate: "2022-08-29 00:00:00",
+                    toDate: "2022-10-28 00:00:00"
+                },
+                {
+                    id: "C",
+                    fromDate: "2022-10-28 00:00:00",
+                    toDate: "2022-12-27 00:00:00"
                 }
             ]
         }
@@ -234,6 +221,8 @@ export default async function handler(req, res) {
                 volumeRows: volume.length
             },
 
+            timestamps: unique,
+
             timestampAudit: {
                 numericTimestampRows:
                     timestamp.length,
@@ -308,9 +297,9 @@ export default async function handler(req, res) {
         };
     }
 
-    async function fetchEdge(
+    async function fetchWindow(
         accessToken,
-        edge
+        window
     ) {
 
         const body = {
@@ -319,8 +308,8 @@ export default async function handler(req, res) {
             instrument: "INDEX",
             interval: "5",
             oi: false,
-            fromDate: edge.fromDate,
-            toDate: edge.toDate
+            fromDate: window.fromDate,
+            toDate: window.toDate
         };
 
         const response = await fetch(
@@ -351,12 +340,14 @@ export default async function handler(req, res) {
         let parseStatus = "NOT_JSON";
 
         try {
+
             payload =
                 JSON.parse(rawText);
 
             parseStatus = "JSON";
 
         } catch {
+
             payload = null;
         }
 
@@ -368,11 +359,13 @@ export default async function handler(req, res) {
 
         return {
 
-            edge,
+            window,
 
-            request: body,
+            request:
+                body,
 
             http: {
+
                 status:
                     response.status,
 
@@ -406,17 +399,20 @@ export default async function handler(req, res) {
 
                 success: false,
 
-                version: VERSION,
+                version:
+                    VERSION,
 
                 status:
                     "METHOD_NOT_ALLOWED",
 
-                paperOnly: true,
+                paperOnly:
+                    true,
 
-                realOrders: false,
+                realOrders:
+                    false,
 
                 error:
-                    "V25.7-DSC-v6 uses GET only."
+                    "V25.7-DSC-v7 uses GET only."
             });
         }
 
@@ -433,14 +429,17 @@ export default async function handler(req, res) {
 
                 success: false,
 
-                version: VERSION,
+                version:
+                    VERSION,
 
                 status:
                     "CONFIG_ERROR",
 
-                paperOnly: true,
+                paperOnly:
+                    true,
 
-                realOrders: false,
+                realOrders:
+                    false,
 
                 error:
                     "DHAN_ACCESS_TOKEN is not configured."
@@ -462,7 +461,8 @@ export default async function handler(req, res) {
 
                 success: false,
 
-                version: VERSION,
+                version:
+                    VERSION,
 
                 status:
                     "INVALID_PROBE",
@@ -478,18 +478,128 @@ export default async function handler(req, res) {
         const results = [];
 
         for (
-            const edge of probe.edges
+            const window of probe.windows
         ) {
 
             results.push(
-                await fetchEdge(
+                await fetchWindow(
                     token,
-                    edge
+                    window
                 )
             );
         }
 
-        const dataBearingEdges =
+        const allTimestampEntries = [];
+
+        for (
+            const result of results
+        ) {
+
+            const timestamps =
+                result.audit?.timestamps ||
+                [];
+
+            for (
+                const ts of timestamps
+            ) {
+
+                allTimestampEntries.push({
+                    timestamp: ts,
+                    windowId:
+                        result.window.id
+                });
+            }
+        }
+
+        const timestampWindowMap =
+            new Map();
+
+        for (
+            const entry of allTimestampEntries
+        ) {
+
+            if (
+                !timestampWindowMap.has(
+                    entry.timestamp
+                )
+            ) {
+
+                timestampWindowMap.set(
+                    entry.timestamp,
+                    []
+                );
+            }
+
+            timestampWindowMap
+                .get(entry.timestamp)
+                .push(
+                    entry.windowId
+                );
+        }
+
+        const crossWindowDuplicateTimestamps =
+            [];
+
+        for (
+            const [
+                timestamp,
+                windowIds
+            ] of timestampWindowMap.entries()
+        ) {
+
+            const uniqueWindowIds =
+                [
+                    ...new Set(windowIds)
+                ];
+
+            if (
+                uniqueWindowIds.length > 1
+            ) {
+
+                crossWindowDuplicateTimestamps
+                    .push({
+
+                        timestamp,
+
+                        timestampISO:
+                            iso(timestamp),
+
+                        windows:
+                            uniqueWindowIds
+                    });
+            }
+        }
+
+        const combinedUniqueTimestamps =
+            [
+                ...timestampWindowMap.keys()
+            ].sort(
+                (a, b) => a - b
+            );
+
+        let combinedChronological =
+            true;
+
+        for (
+            let i = 1;
+            i <
+            combinedUniqueTimestamps.length;
+            i++
+        ) {
+
+            if (
+                combinedUniqueTimestamps[i] <=
+                combinedUniqueTimestamps[i - 1]
+            ) {
+
+                combinedChronological =
+                    false;
+
+                break;
+            }
+        }
+
+        const successfulWindows =
             results.filter(
                 result =>
                     result.http.ok &&
@@ -498,8 +608,8 @@ export default async function handler(req, res) {
                         ?.uniqueTimestampRows > 0
             );
 
-        const allEdgesDataBearing =
-            dataBearingEdges.length ===
+        const allWindowsDataBearing =
+            successfulWindows.length ===
             results.length;
 
         const allOHLCValid =
@@ -531,7 +641,7 @@ export default async function handler(req, res) {
                 0
             );
 
-        const totalUniqueRows =
+        const totalPerWindowUniqueRows =
             results.reduce(
                 (sum, result) =>
                     sum +
@@ -544,44 +654,102 @@ export default async function handler(req, res) {
                 0
             );
 
+        const combinedUniqueRows =
+            combinedUniqueTimestamps.length;
+
+        const crossWindowDuplicateCount =
+            crossWindowDuplicateTimestamps.length;
+
+        const combinedFirst =
+            combinedUniqueTimestamps[0] ??
+            null;
+
+        const combinedLast =
+            combinedUniqueTimestamps[
+                combinedUniqueTimestamps.length - 1
+            ] ??
+            null;
+
         const materiallyCovered =
-            allEdgesDataBearing &&
+            allWindowsDataBearing &&
             allOHLCValid &&
-            noSpacingProblems;
+            noSpacingProblems &&
+            combinedChronological &&
+            crossWindowDuplicateCount === 0 &&
+            combinedUniqueRows > 0;
+
+        const publicWindowResults =
+            results.map(
+                result => {
+
+                    const audit =
+                        result.audit;
+
+                    if (audit) {
+
+                        const {
+                            timestamps,
+                            ...publicAudit
+                        } = audit;
+
+                        return {
+
+                            ...result,
+
+                            audit:
+                                publicAudit
+                        };
+                    }
+
+                    return result;
+                }
+            );
 
         return res.status(200).json({
 
-            success: true,
+            success:
+                true,
 
-            version: VERSION,
+            version:
+                VERSION,
 
             status:
                 "COMPLETED",
 
             mode:
-                "V25_7_DHAN_S3_EXACT_BOUNDARY_AUDIT",
+                "V25_7_DHAN_S4_180D_THREE_WINDOW_COVERAGE",
 
-            paperOnly: true,
+            paperOnly:
+                true,
 
-            realOrders: false,
+            realOrders:
+                false,
 
-            brokerOrderEnabled: false,
+            brokerOrderEnabled:
+                false,
 
-            brokerOrderSent: false,
+            brokerOrderSent:
+                false,
 
             purpose:
-                "Verify the exact historical edge areas surrounding the original V25.7 Segment 3 period before clearing S3 data-source compatibility.",
+                "Verify the complete V25.7 Segment 4 historical period using three Dhan windows below the intraday request limit.",
 
-            thisIsNotATradingTest: true,
+            thisIsNotATradingTest:
+                true,
 
             probe: {
-                id: probe.id,
-                label: probe.label,
+
+                id:
+                    probe.id,
+
+                label:
+                    probe.label,
+
                 description:
                     probe.description,
 
-                edges:
-                    probe.edges
+                windows:
+                    probe.windows
             },
 
             request: {
@@ -608,46 +776,80 @@ export default async function handler(req, res) {
                     false
             },
 
-            edgeResults:
-                results,
+            windowResults:
+                publicWindowResults,
 
             combinedAudit: {
 
-                edgesRequested:
+                windowsRequested:
                     results.length,
 
-                edgesWithData:
-                    dataBearingEdges.length,
+                windowsWithData:
+                    successfulWindows.length,
 
-                totalRows:
+                totalRowsAcrossWindows:
                     totalRows,
 
-                totalUniqueRows:
-                    totalUniqueRows,
+                totalUniqueRowsAcrossIndividualWindows:
+                    totalPerWindowUniqueRows,
 
-                allEdgesDataBearing,
+                combinedUniqueRows:
 
-                allOHLCValid,
+                    combinedUniqueRows,
+
+                crossWindowDuplicateTimestamps:
+                    crossWindowDuplicateCount,
+
+                crossWindowDuplicatePreview:
+                    crossWindowDuplicateTimestamps
+                        .slice(0, 20),
+
+                combinedChronological:
+                    combinedChronological,
+
+                firstTimestamp:
+                    combinedFirst,
+
+                firstTimestampISO:
+                    iso(combinedFirst),
+
+                lastTimestamp:
+                    combinedLast,
+
+                lastTimestampISO:
+                    iso(combinedLast),
+
+                allWindowsDataBearing:
+                    allWindowsDataBearing,
+
+                allOHLCValid:
+                    allOHLCValid,
 
                 noShortSpacingViolations:
                     noSpacingProblems,
 
-                materiallyCovered
+                materiallyCovered:
+                    materiallyCovered
             },
 
             comparisonTarget: {
 
-                V25_7_S3:
-                    "ORIGINAL_APPROXIMATE_RANGE_2022_12_31_TO_2023_06_29",
+                INDSTOCKS_S4:
+                    "CANDLES_NULL",
 
-                DSC_V5:
-                    "MAIN_S3_COVERAGE_CONFIRMED",
+                DHAN_S2:
+                    "180D_COVERAGE_CONFIRMED",
+
+                DHAN_S3:
+                    "180D_COVERAGE_CONFIRMED",
 
                 requiredV25_7Protocol: {
 
-                    segments: 5,
+                    segments:
+                        5,
 
-                    segmentDays: 180,
+                    segmentDays:
+                        180,
 
                     totalResearchDays:
                         900,
@@ -673,19 +875,20 @@ export default async function handler(req, res) {
 
                 status:
                     materiallyCovered
-                        ? "S3_BOUNDARY_CONTROLS_CONFIRMED"
-                        : "S3_BOUNDARY_CONTROLS_REQUIRE_REVIEW",
+                        ? "S4_180D_COVERAGE_CONFIRMED"
+                        : "S4_180D_COVERAGE_REQUIRES_REVIEW",
 
                 historicalDataReturned:
-                    allEdgesDataBearing,
+                    allWindowsDataBearing,
 
-                materiallyCovered,
+                materiallyCovered:
+                    materiallyCovered,
 
                 enoughToProceed:
                     false,
 
                 reason:
-                    "This audit establishes boundary data availability only. It does not generate V25.7 learning records or authorize the V25.7 confirmation run."
+                    "This audit establishes historical candle coverage only. It does not generate V25.7 learning records or authorize the V25.7 confirmation run."
             },
 
             interpretation: {
@@ -713,12 +916,12 @@ export default async function handler(req, res) {
 
                 conclusion:
                     materiallyCovered
-                        ? "DHAN_S3_BOUNDARY_AVAILABILITY_CONFIRMED"
-                        : "DHAN_S3_BOUNDARY_AVAILABILITY_NOT_CONFIRMED"
+                        ? "DHAN_S4_180D_COVERAGE_CONFIRMED"
+                        : "DHAN_S4_180D_COVERAGE_NOT_YET_CONFIRMED"
             },
 
             nextStep:
-                "Inspect both S3 boundary controls. If both are usable, S3 can be marked data-source cleared and the project can proceed to S4 coverage auditing. Do not modify learning-engine.js.",
+                "Inspect all three S4 windows and the cross-window duplicate audit before building any importer. Do not modify learning-engine.js.",
 
             guardrails: {
 
@@ -752,9 +955,11 @@ export default async function handler(req, res) {
 
         return res.status(500).json({
 
-            success: false,
+            success:
+                false,
 
-            version: VERSION,
+            version:
+                VERSION,
 
             status:
                 "ERROR",
