@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V22.4";
+    const VERSION = "V22.5";
 
     try {
 
@@ -10270,6 +10270,780 @@ export default async function handler(req, res) {
         }
 
         // =====================================================
+        // V22.5 — ACTIVATION QUALITY / PERSISTENCE FILTER AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only. Uses only completed prior-window data
+        // to label the next chronological window.
+        // =====================================================
+
+        function buildV225ActivationQualityPersistenceAudit(records) {
+        
+            const WINDOW_COUNT = 4;
+        
+            // -------------------------------------------------------
+            // FILTER DIMENSIONS
+            // These are deliberately FIXED before looking at the
+            // forward outcome labels.
+            // -------------------------------------------------------
+        
+            const SAMPLE_TIERS = [
+                { key: "SAMPLE_1_PLUS", min: 1 },
+                { key: "SAMPLE_4_PLUS", min: 4 },
+                { key: "SAMPLE_8_PLUS", min: 8 },
+                { key: "SAMPLE_12_PLUS", min: 12 }
+            ];
+        
+            const DECISIVE_TIERS = [
+                { key: "DECISIVE_1_PLUS", min: 1 },
+                { key: "DECISIVE_3_PLUS", min: 3 },
+                { key: "DECISIVE_5_PLUS", min: 5 },
+                { key: "DECISIVE_8_PLUS", min: 8 }
+            ];
+        
+            const EV_TIERS = [
+                { key: "EV_GT_0", min: 0 },
+                { key: "EV_GE_0_05", min: 0.05 },
+                { key: "EV_GE_0_10", min: 0.10 },
+                { key: "EV_GE_0_25", min: 0.25 },
+                { key: "EV_GE_0_50", min: 0.50 }
+            ];
+        
+            const PF_TIERS = [
+                { key: "PF_GT_1", min: 1 },
+                { key: "PF_GE_1_05", min: 1.05 },
+                { key: "PF_GE_1_20", min: 1.20 },
+                { key: "PF_GE_1_50", min: 1.50 }
+            ];
+        
+            const WIN_RATE_TIERS = [
+                { key: "WR_GE_40", min: 40 },
+                { key: "WR_GE_50", min: 50 },
+                { key: "WR_GE_60", min: 60 },
+                { key: "WR_GE_70", min: 70 }
+            ];
+        
+            const EV_MOMENTUM_TIERS = [
+                { key: "MOM_NONNEGATIVE", min: 0 },
+                { key: "MOM_GE_0_05", min: 0.05 },
+                { key: "MOM_GE_0_10", min: 0.10 },
+                { key: "MOM_GE_0_25", min: 0.25 }
+            ];
+        
+            const safe = safeArray(records)
+                .filter(x =>
+                    x &&
+                    x.side === "SELL" &&
+                    Number.isFinite(x.resultR) &&
+                    Number.isFinite(x.index)
+                )
+                .sort((a, b) => a.index - b.index);
+        
+            // -------------------------------------------------------
+            // Same chronological 4-window construction as V22.4.
+            // -------------------------------------------------------
+        
+            const windows =
+                Array.from(
+                    { length: WINDOW_COUNT },
+                    () => []
+                );
+        
+            if (safe.length) {
+                for (let w = 0; w < WINDOW_COUNT; w++) {
+                    const start =
+                        Math.floor(
+                            safe.length * w / WINDOW_COUNT
+                        );
+        
+                    const end =
+                        w === WINDOW_COUNT - 1
+                            ? safe.length
+                            : Math.floor(
+                                safe.length * (w + 1) / WINDOW_COUNT
+                            );
+        
+                    windows[w] =
+                        safe.slice(start, end);
+                }
+            }
+        
+            function compactMetrics(rows) {
+                const m = calculateMetrics(rows);
+        
+                return {
+                    samples: m.trades ?? 0,
+                    decisiveTrades: m.decisiveTrades ?? 0,
+                    wins: m.wins ?? 0,
+                    losses: m.losses ?? 0,
+                    timeouts: m.timeouts ?? 0,
+                    netR: round(m.netR ?? 0, 4),
+                    EV: round(m.expectedValueR ?? 0, 4),
+                    PF: round(m.profitFactor ?? 0, 4),
+                    winRate: round(m.winRate ?? 0, 2)
+                };
+            }
+        
+            function bucketRows(items, keyFn) {
+        
+                const map = new Map();
+        
+                for (const item of items) {
+                    const key = keyFn(item);
+        
+                    if (!map.has(key)) {
+                        map.set(key, []);
+                    }
+        
+                    map.get(key).push(item);
+                }
+        
+                return Array.from(map.entries())
+                    .map(([key, rows]) => {
+        
+                        const m =
+                            compactMetrics(
+                                rows.map(
+                                    x => x.nextRows
+                                ).flat()
+                            );
+        
+                        const successes =
+                            rows.filter(
+                                x => x.activationWorked
+                            ).length;
+        
+                        const failures =
+                            rows.filter(
+                                x => x.activationFailure
+                            ).length;
+        
+                        return {
+                            bucket: key,
+                            activations: rows.length,
+                            successes,
+                            failures,
+                            successRatePct:
+                                rows.length
+                                    ? round(
+                                        successes /
+                                        rows.length *
+                                        100,
+                                        2
+                                    )
+                                    : 0,
+                            forwardEV: m.EV,
+                            forwardNetR: m.netR,
+                            forwardDecisiveTrades:
+                                m.decisiveTrades
+                        };
+                    })
+                    .sort(
+                        (a, b) =>
+                            b.forwardEV - a.forwardEV
+                    );
+            }
+        
+            // -------------------------------------------------------
+            // Build every eligible ACTIVE transition.
+            //
+            // Window N -> Window N+1
+            //
+            // Activation uses ONLY prior window.
+            // Forward label uses ONLY next window.
+            // -------------------------------------------------------
+        
+            const cells = new Map();
+        
+            for (let i = 0; i < safe.length; i++) {
+        
+                const r = safe[i];
+        
+                const relative =
+                    i;
+        
+                const window =
+                    Math.min(
+                        WINDOW_COUNT - 1,
+                        Math.max(
+                            0,
+                            Math.floor(
+                                relative *
+                                WINDOW_COUNT /
+                                safe.length
+                            )
+                        )
+                    );
+        
+                const key =
+                    `${r.setup}|${r.regime}|${r.volatility}`;
+        
+                if (!cells.has(key)) {
+                    cells.set(key, {
+                        key,
+                        setup: r.setup,
+                        regime: r.regime,
+                        volatility: r.volatility,
+                        windows:
+                            Array.from(
+                                { length: WINDOW_COUNT },
+                                () => []
+                            )
+                    });
+                }
+        
+                cells.get(key).windows[window].push(r);
+            }
+        
+            const transitions = [];
+        
+            for (const cell of cells.values()) {
+        
+                for (
+                    let w = 0;
+                    w < WINDOW_COUNT - 1;
+                    w++
+                ) {
+        
+                    const priorRows =
+                        cell.windows[w];
+        
+                    const nextRows =
+                        cell.windows[w + 1];
+        
+                    if (!priorRows.length || !nextRows.length) {
+                        continue;
+                    }
+        
+                    const prior =
+                        compactMetrics(priorRows);
+        
+                    const next =
+                        compactMetrics(nextRows);
+        
+                    // V22.4 activation definition retained.
+                    if (!(prior.EV > 0)) {
+                        continue;
+                    }
+        
+                    // -------------------------------------------------
+                    // Observable prior-window features.
+                    // -------------------------------------------------
+        
+                    let previousWindowEV = null;
+        
+                    if (w > 0 && cell.windows[w - 1].length) {
+                        previousWindowEV =
+                            compactMetrics(
+                                cell.windows[w - 1]
+                            ).EV;
+                    }
+        
+                    const evMomentum =
+                        previousWindowEV === null
+                            ? null
+                            : round(
+                                prior.EV -
+                                previousWindowEV,
+                                4
+                            );
+        
+                    // Number of consecutive completed positive windows
+                    // immediately ending at the prior window.
+                    let positiveRun = 1;
+        
+                    for (
+                        let p = w - 1;
+                        p >= 0;
+                        p--
+                    ) {
+        
+                        if (!cell.windows[p].length) {
+                            break;
+                        }
+        
+                        const pm =
+                            compactMetrics(
+                                cell.windows[p]
+                            );
+        
+                        if (!(pm.EV > 0)) {
+                            break;
+                        }
+        
+                        positiveRun++;
+                    }
+        
+                    const activationWorked =
+                        next.EV > 0;
+        
+                    const activationFailure =
+                        next.EV <= 0;
+        
+                    transitions.push({
+                        contextKey: cell.key,
+                        setup: cell.setup,
+                        regime: cell.regime,
+                        volatility: cell.volatility,
+                        fromWindow: w + 1,
+                        toWindow: w + 2,
+        
+                        prior: {
+                            samples: prior.samples,
+                            decisiveTrades: prior.decisiveTrades,
+                            EV: prior.EV,
+                            PF: prior.PF,
+                            winRate: prior.winRate,
+                            netR: prior.netR
+                        },
+        
+                        priorEVMomentum:
+                            evMomentum,
+        
+                        consecutivePositiveWindows:
+                            positiveRun,
+        
+                        next: {
+                            samples: next.samples,
+                            decisiveTrades: next.decisiveTrades,
+                            EV: next.EV,
+                            PF: next.PF,
+                            winRate: next.winRate,
+                            netR: next.netR
+                        },
+        
+                        activationWorked,
+                        activationFailure,
+        
+                        // Used by bucket analysis only.
+                        nextRows
+                    });
+                }
+            }
+        
+            // -------------------------------------------------------
+            // Aggregate helper.
+            // -------------------------------------------------------
+        
+            function activationAggregate(rows) {
+        
+                const successes =
+                    rows.filter(
+                        x => x.activationWorked
+                    ).length;
+        
+                const failures =
+                    rows.filter(
+                        x => x.activationFailure
+                    ).length;
+        
+                const nextRows =
+                    rows.flatMap(
+                        x => x.nextRows
+                    );
+        
+                const m =
+                    compactMetrics(
+                        nextRows
+                    );
+        
+                return {
+                    activations: rows.length,
+                    successes,
+                    failures,
+                    successRatePct:
+                        rows.length
+                            ? round(
+                                successes /
+                                rows.length *
+                                100,
+                                2
+                            )
+                            : 0,
+                    forwardEV: m.EV,
+                    forwardNetR: m.netR,
+                    forwardDecisiveTrades:
+                        m.decisiveTrades
+                };
+            }
+        
+            // -------------------------------------------------------
+            // Fixed bucket studies.
+            // -------------------------------------------------------
+        
+            const sampleBuckets =
+                SAMPLE_TIERS.map(tier => ({
+                    tier: tier.key,
+                    minimum: tier.min,
+                    ...activationAggregate(
+                        transitions.filter(
+                            x =>
+                                x.prior.samples >=
+                                tier.min
+                        )
+                    )
+                }));
+        
+            const decisiveBuckets =
+                DECISIVE_TIERS.map(tier => ({
+                    tier: tier.key,
+                    minimum: tier.min,
+                    ...activationAggregate(
+                        transitions.filter(
+                            x =>
+                                x.prior.decisiveTrades >=
+                                tier.min
+                        )
+                    )
+                }));
+        
+            const evBuckets =
+                EV_TIERS.map(tier => ({
+                    tier: tier.key,
+                    minimum: tier.min,
+                    ...activationAggregate(
+                        transitions.filter(
+                            x =>
+                                x.prior.EV >=
+                                tier.min
+                        )
+                    )
+                }));
+        
+            const pfBuckets =
+                PF_TIERS.map(tier => ({
+                    tier: tier.key,
+                    minimum: tier.min,
+                    ...activationAggregate(
+                        transitions.filter(
+                            x =>
+                                x.prior.PF >=
+                                tier.min
+                        )
+                    )
+                }));
+        
+            const winRateBuckets =
+                WIN_RATE_TIERS.map(tier => ({
+                    tier: tier.key,
+                    minimum: tier.min,
+                    ...activationAggregate(
+                        transitions.filter(
+                            x =>
+                                x.prior.winRate >=
+                                tier.min
+                        )
+                    )
+                }));
+        
+            const momentumBuckets =
+                EV_MOMENTUM_TIERS.map(tier => ({
+                    tier: tier.key,
+                    minimum: tier.min,
+                    ...activationAggregate(
+                        transitions.filter(
+                            x =>
+                                x.priorEVMomentum !== null &&
+                                x.priorEVMomentum >=
+                                tier.min
+                        )
+                    )
+                }));
+        
+            const persistenceBuckets =
+                [
+                    {
+                        tier: "ONE_POSITIVE_WINDOW",
+                        minimum: 1
+                    },
+                    {
+                        tier: "TWO_PLUS_POSITIVE_WINDOWS",
+                        minimum: 2
+                    },
+                    {
+                        tier: "THREE_PLUS_POSITIVE_WINDOWS",
+                        minimum: 3
+                    }
+                ].map(tier => ({
+                    ...tier,
+                    ...activationAggregate(
+                        transitions.filter(
+                            x =>
+                                x.consecutivePositiveWindows >=
+                                tier.minimum
+                        )
+                    )
+                }));
+        
+            // -------------------------------------------------------
+            // Combined fixed quality tiers.
+            //
+            // These are intentionally conservative diagnostic tiers.
+            // They are NOT trading rules.
+            // -------------------------------------------------------
+        
+            const combinedDefinitions = [
+                {
+                    key: "Q1_POSITIVE_ONLY",
+                    test: x =>
+                        x.prior.EV > 0
+                },
+                {
+                    key: "Q2_EV_05_SAMPLE_4",
+                    test: x =>
+                        x.prior.EV >= 0.05 &&
+                        x.prior.samples >= 4
+                },
+                {
+                    key: "Q3_EV_10_SAMPLE_8",
+                    test: x =>
+                        x.prior.EV >= 0.10 &&
+                        x.prior.samples >= 8
+                },
+                {
+                    key: "Q4_EV_10_SAMPLE_8_PF_120",
+                    test: x =>
+                        x.prior.EV >= 0.10 &&
+                        x.prior.samples >= 8 &&
+                        x.prior.PF >= 1.20
+                },
+                {
+                    key: "Q5_EV_10_SAMPLE_8_PF_120_TWO_POSITIVE",
+                    test: x =>
+                        x.prior.EV >= 0.10 &&
+                        x.prior.samples >= 8 &&
+                        x.prior.PF >= 1.20 &&
+                        x.consecutivePositiveWindows >= 2
+                },
+                {
+                    key: "Q6_EV_25_SAMPLE_8_PF_150_TWO_POSITIVE",
+                    test: x =>
+                        x.prior.EV >= 0.25 &&
+                        x.prior.samples >= 8 &&
+                        x.prior.PF >= 1.50 &&
+                        x.consecutivePositiveWindows >= 2
+                }
+            ];
+        
+            const combinedTiers =
+                combinedDefinitions.map(def => ({
+                    tier: def.key,
+                    ...activationAggregate(
+                        transitions.filter(
+                            def.test
+                        )
+                    )
+                }));
+        
+            // -------------------------------------------------------
+            // Context-level diagnosis.
+            // -------------------------------------------------------
+        
+            const contextResults =
+                Array.from(
+                    cells.values()
+                )
+                .map(cell => {
+        
+                    const rows =
+                        transitions.filter(
+                            x =>
+                                x.contextKey ===
+                                cell.key
+                        );
+        
+                    const aggregate =
+                        activationAggregate(
+                            rows
+                        );
+        
+                    return {
+                        key: cell.key,
+                        setup: cell.setup,
+                        regime: cell.regime,
+                        volatility: cell.volatility,
+                        ...aggregate,
+                        transitions:
+                            rows.map(
+                                x => ({
+                                    fromWindow:
+                                        x.fromWindow,
+                                    toWindow:
+                                        x.toWindow,
+                                    priorSamples:
+                                        x.prior.samples,
+                                    priorDecisiveTrades:
+                                        x.prior.decisiveTrades,
+                                    priorEV:
+                                        x.prior.EV,
+                                    priorPF:
+                                        x.prior.PF,
+                                    priorWinRate:
+                                        x.prior.winRate,
+                                    priorEVMomentum:
+                                        x.priorEVMomentum,
+                                    consecutivePositiveWindows:
+                                        x.consecutivePositiveWindows,
+                                    nextEV:
+                                        x.next.EV,
+                                    nextPF:
+                                        x.next.PF,
+                                    activationWorked:
+                                        x.activationWorked
+                                })
+                            )
+                    };
+                })
+                .filter(
+                    x =>
+                        x.activations > 0
+                )
+                .sort(
+                    (a, b) =>
+                        b.forwardEV -
+                        a.forwardEV
+                );
+        
+            const overall =
+                activationAggregate(
+                    transitions
+                );
+        
+            // -------------------------------------------------------
+            // Diagnostic interpretation flags.
+            //
+            // These are NOT promotions. They only tell us whether a
+            // fixed diagnostic dimension deserves further testing.
+            // -------------------------------------------------------
+        
+            function bestTier(rows) {
+        
+                return rows
+                    .filter(
+                        x =>
+                            x.activations >= 2
+                    )
+                    .sort(
+                        (a, b) =>
+                            b.forwardEV -
+                            a.forwardEV
+                    )[0] || null;
+            }
+        
+            const bestSampleTier =
+                bestTier(sampleBuckets);
+        
+            const bestEVTier =
+                bestTier(evBuckets);
+        
+            const bestPFTier =
+                bestTier(pfBuckets);
+        
+            const bestPersistenceTier =
+                bestTier(persistenceBuckets);
+        
+            const bestCombinedTier =
+                bestTier(combinedTiers);
+        
+            return {
+        
+                version: "V22.5",
+        
+                purpose:
+                    "Audit which observable prior-window quality characteristics distinguish successful forward activation from failed activation without creating a trading rule.",
+        
+                activationDefinition:
+                    "A transition is eligible only when the completed prior window has EV > 0. The next chronological window is used only as the forward outcome label.",
+        
+                contextDefinition:
+                    "SETUP × REGIME × VOLATILITY",
+        
+                chronologicalWindows:
+                    WINDOW_COUNT,
+        
+                sample: {
+                    sellRecords:
+                        safe.length,
+                    eligibleForwardActivations:
+                        transitions.length,
+                    overall
+                },
+        
+                filterStudies: {
+        
+                    priorSampleSize:
+                        sampleBuckets,
+        
+                    priorDecisiveSampleSize:
+                        decisiveBuckets,
+        
+                    priorEVStrength:
+                        evBuckets,
+        
+                    priorProfitFactor:
+                        pfBuckets,
+        
+                    priorWinRate:
+                        winRateBuckets,
+        
+                    priorEVMomentum:
+                        momentumBuckets,
+        
+                    consecutivePositivePersistence:
+                        persistenceBuckets,
+        
+                    combinedFixedQualityTiers:
+                        combinedTiers
+                },
+        
+                strongestDiagnosticTiers: {
+                    bestSampleTier,
+                    bestEVTier,
+                    bestPFTier,
+                    bestPersistenceTier,
+                    bestCombinedTier
+                },
+        
+                contextResults,
+        
+                transitionDetail:
+                    transitions.map(
+                        x => ({
+                            contextKey:
+                                x.contextKey,
+                            setup:
+                                x.setup,
+                            regime:
+                                x.regime,
+                            volatility:
+                                x.volatility,
+                            fromWindow:
+                                x.fromWindow,
+                            toWindow:
+                                x.toWindow,
+                            prior:
+                                x.prior,
+                            priorEVMomentum:
+                                x.priorEVMomentum,
+                            consecutivePositiveWindows:
+                                x.consecutivePositiveWindows,
+                            next:
+                                x.next,
+                            activationWorked:
+                                x.activationWorked,
+                            activationFailure:
+                                x.activationFailure
+                        })
+                    ),
+        
+                interpretationGuard:
+                    "Diagnostic only. V22.5 does not create candidates, change thresholds, promote contexts, modify validation/OOS, select exits, alter trade execution, or use next-window outcomes to modify earlier activation features.",
+        
+                decisionGuard:
+                    "No filter is considered a strategy rule from this audit alone. Any apparently strong tier must survive a separate chronological validation experiment before it can influence trading."
+            };
+        }
+        
+        // =====================================================
         // FINAL LEARNING
         // =====================================================
 
@@ -10302,6 +11076,11 @@ export default async function handler(req, res) {
         const v224EdgeActivationAudit =
             buildV224EdgeActivationAudit(
                 historicalCandles,
+                finalDiscovery.rawRecords
+            );
+
+        const v225ActivationQualityPersistenceAudit =
+            buildV225ActivationQualityPersistenceAudit(
                 finalDiscovery.rawRecords
             );
 
@@ -11240,6 +12019,8 @@ export default async function handler(req, res) {
             v223RegimeConditionalSurvivalAudit,
 
             v224EdgeActivationAudit,
+
+            v225ActivationQualityPersistenceAudit,
 
             regimeFingerprintDiagnostics,
 
