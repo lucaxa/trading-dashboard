@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V24.1";
+    const VERSION = "V24.2";
 
     try {
 
@@ -14873,7 +14873,7 @@ function buildV227EVPersistenceFailureAnatomy(
             sourceEndTs = null
         }) {
 
-            const VERSION = "V24.1";
+            const VERSION = "V24.2";
 
             const PRIOR_RECORDS = 40;
             const FORWARD_RECORDS = 20;
