@@ -1,14 +1,14 @@
 /*
 ===========================================================
  TradeMind Pro
- V25.7-DSC-v4 — Dhan S2 Three-Window Historical Coverage Audit
+ V25.7-DSC-v5 — Dhan S3 Three-Window Historical Coverage Audit
 ===========================================================
 
 PURPOSE
 -------
-Verify the complete V25.7 Segment 2 historical period using
-three DhanHQ requests, each safely below the documented
-intraday request-window limit.
+Verify historical candle availability for V25.7 Segment 3
+using DhanHQ, with three requests safely below the intraday
+request-window limit.
 
 THIS IS A DATA-SOURCE AUDIT ONLY.
 
@@ -24,33 +24,30 @@ It does NOT:
 
 WHY THREE WINDOWS
 -----------------
-V25.7-DSC-v3 proved that Dhan returns S2-era candles, but its
-second request was about 120 calendar days and returned HTTP 400.
+V25.7-DSC-v4 successfully established S2 coverage using three
+windows. S3 is now tested with the same architecture.
 
-V25.7-DSC-v4 therefore divides the actual V25.7 S2-era range
-into THREE ~60-day windows. Each request is comfortably below
-the 90-day intraday request limit.
+TARGET S3 PERIOD
+----------------
+The original V25.7 S3 invocation was approximately:
 
-TARGET V25.7 S2 RANGE
----------------------
-Based on the V25.7 Segment 2 invocation:
+  2023-01-01 -> 2023-06-28
 
-  Start: approximately 2023-06-29
-  End:   approximately 2023-12-26
+Three windows are used, each below Dhan's 90-day intraday
+request limit:
 
-Windows:
+  A: 2023-01-01 -> 2023-02-28
+  B: 2023-02-28 -> 2023-04-29
+  C: 2023-04-29 -> 2023-06-28
 
-  A: 2023-06-29 00:00:00 -> 2023-08-28 00:00:00
-  B: 2023-08-28 00:00:00 -> 2023-10-27 00:00:00
-  C: 2023-10-27 00:00:00 -> 2023-12-26 00:00:00
-
-The windows touch at their boundaries. Actual candle timestamps
-are retained so cross-window duplicate timestamps can be tested.
+The windows touch at boundaries. Actual timestamps are retained
+internally so cross-window duplicate timestamps are explicitly
+checked.
 
 RUN
 ---
 GET:
-  /api/v25_7-dsc-v4?probe=1
+  /api/v25_7-dsc-v5?probe=1
 
 ENVIRONMENT
 -----------
@@ -72,7 +69,7 @@ AUDIT GOALS
 10. Session/calendar-day coverage.
 11. First/last actual candle.
 12. Zero-volume preservation.
-13. Complete S2 historical availability.
+13. S3 historical availability.
 
 IMPORTANT
 ---------
@@ -85,7 +82,7 @@ segment required by the frozen experiment.
 
 export default async function handler(req, res) {
 
-    const VERSION = "V25.7-DSC-v4";
+    const VERSION = "V25.7-DSC-v5";
 
     const ENDPOINT =
         "https://api.dhan.co/v2/charts/intraday";
@@ -93,24 +90,24 @@ export default async function handler(req, res) {
     const PROBES = {
         "1": {
             id: "1",
-            label: "S2_180D_THREE_WINDOW",
+            label: "S3_180D_THREE_WINDOW",
             description:
-                "Three-window Dhan coverage audit for the actual V25.7 Segment 2 historical period.",
+                "Three-window Dhan coverage audit for the V25.7 Segment 3 historical period.",
             windows: [
                 {
                     id: "A",
-                    fromDate: "2023-06-29 00:00:00",
-                    toDate: "2023-08-28 00:00:00"
+                    fromDate: "2023-01-01 00:00:00",
+                    toDate: "2023-02-28 00:00:00"
                 },
                 {
                     id: "B",
-                    fromDate: "2023-08-28 00:00:00",
-                    toDate: "2023-10-27 00:00:00"
+                    fromDate: "2023-02-28 00:00:00",
+                    toDate: "2023-04-29 00:00:00"
                 },
                 {
                     id: "C",
-                    fromDate: "2023-10-27 00:00:00",
-                    toDate: "2023-12-26 00:00:00"
+                    fromDate: "2023-04-29 00:00:00",
+                    toDate: "2023-06-28 00:00:00"
                 }
             ]
         }
@@ -229,10 +226,6 @@ export default async function handler(req, res) {
                 volumeRows: volume.length
             },
 
-            /*
-             * Keep the actual timestamps internally so the parent
-             * audit can perform a genuine cross-window duplicate test.
-             */
             timestamps: unique,
 
             timestampAudit: {
@@ -337,11 +330,6 @@ export default async function handler(req, res) {
                 ? auditPayload(payload)
                 : null;
 
-        /*
-         * Timestamps are removed from the public per-window result
-         * later. They remain available to the combined audit while
-         * this invocation is running.
-         */
         return {
             window,
             request: body,
@@ -369,7 +357,7 @@ export default async function handler(req, res) {
                 status: "METHOD_NOT_ALLOWED",
                 paperOnly: true,
                 realOrders: false,
-                error: "V25.7-DSC-v4 uses GET only."
+                error: "V25.7-DSC-v5 uses GET only."
             });
         }
 
@@ -411,10 +399,6 @@ export default async function handler(req, res) {
             );
         }
 
-        /*
-         * Gather every actual unique timestamp returned by every
-         * successful window. This is the key improvement over v3.
-         */
         const allTimestampEntries = [];
 
         for (const result of results) {
@@ -551,16 +535,6 @@ export default async function handler(req, res) {
             ] ??
             null;
 
-        /*
-         * A complete coverage result means every request returned
-         * data, all OHLC rows are valid, no suspicious short gaps
-         * exist, the combined timestamp sequence is chronological,
-         * and there are no cross-window duplicates.
-         *
-         * We intentionally do not infer that every theoretical
-         * 5-minute market slot must exist because market holidays,
-         * weekends, and session boundaries are legitimate gaps.
-         */
         const materiallyCovered =
             allWindowsDataBearing &&
             allOHLCValid &&
@@ -569,10 +543,6 @@ export default async function handler(req, res) {
             crossWindowDuplicateCount === 0 &&
             combinedUniqueRows > 0;
 
-        /*
-         * Remove raw timestamp arrays from the public response.
-         * The combined audit has already consumed them.
-         */
         const publicWindowResults =
             results.map(
                 result => {
@@ -606,7 +576,7 @@ export default async function handler(req, res) {
             status: "COMPLETED",
 
             mode:
-                "V25_7_DHAN_S2_180D_THREE_WINDOW_COVERAGE",
+                "V25_7_DHAN_S3_180D_THREE_WINDOW_COVERAGE",
 
             paperOnly: true,
 
@@ -617,7 +587,7 @@ export default async function handler(req, res) {
             brokerOrderSent: false,
 
             purpose:
-                "Verify the complete V25.7 Segment 2 historical period using three Dhan windows below the intraday request limit.",
+                "Verify the complete V25.7 Segment 3 historical period using three Dhan windows below the intraday request limit.",
 
             thisIsNotATradingTest: true,
 
@@ -690,11 +660,11 @@ export default async function handler(req, res) {
 
             comparisonTarget: {
 
-                INDSTOCKS_S2:
+                INDSTOCKS_S3:
                     "CANDLES_NULL",
 
-                DHAN_PROBE_1:
-                    "90D_COVERAGE_CONFIRMED",
+                DHAN_S2:
+                    "180D_COVERAGE_CONFIRMED",
 
                 requiredV25_7Protocol: {
                     segments: 5,
@@ -712,8 +682,8 @@ export default async function handler(req, res) {
 
                 status:
                     materiallyCovered
-                        ? "S2_180D_COVERAGE_CONFIRMED"
-                        : "S2_180D_COVERAGE_REQUIRES_REVIEW",
+                        ? "S3_180D_COVERAGE_CONFIRMED"
+                        : "S3_180D_COVERAGE_REQUIRES_REVIEW",
 
                 historicalDataReturned:
                     allWindowsDataBearing,
@@ -744,12 +714,12 @@ export default async function handler(req, res) {
 
                 conclusion:
                     materiallyCovered
-                        ? "DHAN_S2_180D_COVERAGE_CONFIRMED"
-                        : "DHAN_S2_180D_COVERAGE_NOT_YET_CONFIRMED"
+                        ? "DHAN_S3_180D_COVERAGE_CONFIRMED"
+                        : "DHAN_S3_180D_COVERAGE_NOT_YET_CONFIRMED"
             },
 
             nextStep:
-                "Inspect all three windows and the cross-window duplicate audit before building any importer. Do not modify learning-engine.js.",
+                "Inspect all three S3 windows and the cross-window duplicate audit before building any importer. Do not modify learning-engine.js.",
 
             guardrails: {
 
