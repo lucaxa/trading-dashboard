@@ -6093,7 +6093,7 @@ export default async function handler(req, res) {
             v24IndependentEdgeHealthConfirmation = {
 
                 success: false,
-                version: "V24.1",
+                version: "V24.3",
                 status: "INSUFFICIENT_CONFIRMATION_DATA",
                 mode:
                     "V24_INDEPENDENT_EDGE_HEALTH_CONFIRMATION",
@@ -15527,6 +15527,19 @@ function buildV227EVPersistenceFailureAnatomy(
                 decayingObserved
                     ? decaying.forwardEV
                     : null;
+
+            /*
+            V24.3 FIX:
+            The confirmation summary referenced
+            healthyForwardEV / decayingForwardEV, but those
+            aliases were never initialized. Keep the existing
+            calculated values as the single source of truth.
+            */
+            const healthyForwardEV =
+                healthyEV;
+
+            const decayingForwardEV =
+                decayingEV;
 
             const healthyPositive =
                 healthyObserved &&
