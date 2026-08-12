@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro
- V24.0 — INDEPENDENT EDGE-HEALTH CONFIRMATION ENGINE (CRASH-SAFE)
+ V24.4.1 — RATE-LIMIT-SAFE INDEPENDENT EDGE-HEALTH CONFIRMATION ENGINE
 
  Instrument : NIFTY 50
  Scrip      : NIDX_40000001
@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V24.4";
+    const VERSION = "V24.4.1";
 
     try {
 
@@ -75,7 +75,10 @@ export default async function handler(req, res) {
         // Diagnostic/performance change only.
         // Does not alter strategy thresholds or trade mechanics.
         // =====================================================
-        const V24_FETCH_CONCURRENCY = 5;
+        const V24_FETCH_CONCURRENCY = 1;
+        const V24_INTER_CHUNK_DELAY_MS = 250;
+        const V24_MAX_429_RETRIES = 5;
+        const V24_429_BASE_DELAY_MS = 2000;
         const v24PerformanceStartMs = Date.now();
 
         // =====================================================
@@ -5788,9 +5791,28 @@ export default async function handler(req, res) {
 
             if (!response.ok) {
 
-                throw new Error(
-                    `INDstocks historical API failed: HTTP ${response.status} ${text}`
-                );
+                const error =
+                    new Error(
+                        `INDstocks historical API failed: HTTP ${response.status} ${text}`
+                    );
+
+                error.httpStatus =
+                    response.status;
+
+                error.retryAfterMs =
+                    Number(
+                        response.headers.get(
+                            "retry-after"
+                        )
+                    ) > 0
+                        ? Number(
+                            response.headers.get(
+                                "retry-after"
+                            )
+                        ) * 1000
+                        : null;
+
+                throw error;
             }
 
             return payload;
@@ -5810,6 +5832,92 @@ export default async function handler(req, res) {
         // This changes execution speed only. Chunk boundaries,
         // source data, ordering and normalization remain unchanged.
         // =====================================================
+        async function sleep(ms) {
+            return new Promise(
+                resolve =>
+                    setTimeout(
+                        resolve,
+                        ms
+                    )
+            );
+        }
+
+        async function fetchHistoricalChunkRateLimitSafe(
+            accessToken,
+            chunk
+        ) {
+
+            let attempt = 0;
+
+            while (true) {
+
+                try {
+
+                    return await fetchHistoricalChunk(
+                        accessToken,
+                        chunk.start,
+                        chunk.end
+                    );
+
+                } catch (error) {
+
+                    const status =
+                        Number(
+                            error?.httpStatus
+                        );
+
+                    if (
+                        status !== 429 ||
+                        attempt >=
+                            V24_MAX_429_RETRIES
+                    ) {
+                        throw error;
+                    }
+
+                    const retryAfter =
+                        Number(
+                            error?.retryAfterMs
+                        );
+
+                    const backoff =
+                        Math.max(
+                            0,
+                            Number.isFinite(
+                                retryAfter
+                            ) && retryAfter > 0
+                                ? retryAfter
+                                : V24_429_BASE_DELAY_MS *
+                                  (
+                                      2 ** attempt
+                                  )
+                        );
+
+                    attempt++;
+
+                    await sleep(
+                        backoff
+                    );
+                }
+            }
+        }
+
+        // =====================================================
+        // RATE-LIMIT-SAFE HISTORICAL CHUNK FETCH
+        // -----------------------------------------------------
+        // V24.4 concurrency=5 caused INDstocks HTTP 429 errors.
+        //
+        // V24.4.1 intentionally uses ONE request at a time and
+        // retries HTTP 429 with exponential backoff.
+        //
+        // This changes request scheduling only.
+        // It does NOT change:
+        //   - candle boundaries
+        //   - chronological ordering
+        //   - normalization
+        //   - learning-record generation
+        //   - confirmation geometry
+        //   - trading mechanics
+        // =====================================================
         async function fetchHistoricalChunksControlled(
             accessToken,
             chunks
@@ -5818,36 +5926,30 @@ export default async function handler(req, res) {
             const all = [];
 
             for (
-                let offset = 0;
-                offset < chunks.length;
-                offset += V24_FETCH_CONCURRENCY
+                let index = 0;
+                index < chunks.length;
+                index++
             ) {
 
-                const batch =
-                    chunks.slice(
-                        offset,
-                        offset +
-                            V24_FETCH_CONCURRENCY
+                const chunk =
+                    chunks[index];
+
+                const payload =
+                    await fetchHistoricalChunkRateLimitSafe(
+                        accessToken,
+                        chunk
                     );
 
-                const payloads =
-                    await Promise.all(
-                        batch.map(
-                            chunk =>
-                                fetchHistoricalChunk(
-                                    accessToken,
-                                    chunk.start,
-                                    chunk.end
-                                )
-                        )
-                    );
+                all.push(
+                    ...extractRows(payload)
+                );
 
-                for (
-                    const payload of payloads
+                if (
+                    index <
+                    chunks.length - 1
                 ) {
-
-                    all.push(
-                        ...extractRows(payload)
+                    await sleep(
+                        V24_INTER_CHUNK_DELAY_MS
                     );
                 }
             }
@@ -17197,6 +17299,15 @@ function buildV227EVPersistenceFailureAnatomy(
                 confirmationFetchConcurrency:
                     V24_FETCH_CONCURRENCY,
 
+                interChunkDelayMs:
+                    V24_INTER_CHUNK_DELAY_MS,
+
+                max429Retries:
+                    V24_MAX_429_RETRIES,
+
+                rateLimitHandling:
+                    "HTTP_429_EXPONENTIAL_BACKOFF",
+
                 fullCandidateDiscoveryForConfirmation:
                     false
             },
@@ -17393,7 +17504,7 @@ function buildV227EVPersistenceFailureAnatomy(
             v24PerformanceDiagnostics: {
 
                 mode:
-                    "V24.4_PERFORMANCE_SAFE_CONFIRMATION",
+                    "V24.4_RATE_LIMIT_SAFE_CONFIRMATION",
 
                 confirmationDays:
                     V24_CONFIRMATION_DAYS,
