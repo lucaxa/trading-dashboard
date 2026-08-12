@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V22.3";
+    const VERSION = "V22.4";
 
     try {
 
@@ -8054,6 +8054,523 @@ export default async function handler(req, res) {
         // =====================================================
 
         // =====================================================
+
+        // =====================================================
+        // V22.4 EDGE ACTIVATION / DEACTIVATION AUDIT
+        // -----------------------------------------------------
+        // Diagnostic only.
+        //
+        // Question:
+        //   If a context is profitable in one completed
+        //   chronological window, does that prior-window
+        //   evidence predict profitability in the NEXT window?
+        //
+        // This is a point-in-time diagnostic:
+        //   W1 evidence -> W2 test
+        //   W2 evidence -> W3 test
+        //   W3 evidence -> W4 test
+        //
+        // It DOES NOT change:
+        //   - discovery
+        //   - candidate qualification
+        //   - validation
+        //   - diversification
+        //   - OOS
+        //   - exits
+        //   - risk
+        //   - trade selection
+        //
+        // No future-window result is used to activate/deactivate
+        // an earlier window.
+        // =====================================================
+
+        function buildV224EdgeActivationAudit(
+            candles,
+            records
+        ) {
+
+            const safe =
+                safeArray(records)
+                    .filter(
+                        x =>
+                            x &&
+                            x.side === "SELL" &&
+                            Number.isFinite(x.index) &&
+                            Number.isFinite(x.resultR)
+                    )
+                    .sort(
+                        (a, b) =>
+                            a.index - b.index
+                    );
+
+            const WINDOW_COUNT = 4;
+
+            const windows =
+                Array.from(
+                    { length: WINDOW_COUNT },
+                    () => []
+                );
+
+            if (safe.length) {
+
+                for (let i = 0; i < safe.length; i++) {
+
+                    const window =
+                        Math.min(
+                            WINDOW_COUNT - 1,
+                            Math.floor(
+                                i *
+                                WINDOW_COUNT /
+                                safe.length
+                            )
+                        );
+
+                    windows[window].push(
+                        safe[i]
+                    );
+                }
+            }
+
+            function getFeature(record) {
+                return features(
+                    candles,
+                    record.index
+                );
+            }
+
+            function contextKey(record) {
+
+                const f =
+                    getFeature(record);
+
+                if (!f) return null;
+
+                const setup =
+                    record.setup ??
+                    "UNKNOWN";
+
+                const regime =
+                    f.regime ??
+                    record.regime ??
+                    "UNKNOWN";
+
+                const volatility =
+                    f.volatility ??
+                    "UNKNOWN";
+
+                return {
+                    key:
+                        [
+                            setup,
+                            regime,
+                            volatility
+                        ].join("|"),
+                    setup,
+                    regime,
+                    volatility
+                };
+            }
+
+            function metrics(rows) {
+
+                if (!rows.length) {
+                    return {
+                        samples: 0,
+                        decisiveTrades: 0,
+                        wins: 0,
+                        losses: 0,
+                        timeouts: 0,
+                        netR: 0,
+                        EV: 0,
+                        PF: 0,
+                        winRate: 0
+                    };
+                }
+
+                const m =
+                    calculateMetrics(rows);
+
+                return {
+                    samples: m.trades,
+                    decisiveTrades:
+                        m.decisiveTrades,
+                    wins: m.wins,
+                    losses: m.losses,
+                    timeouts: m.timeouts,
+                    netR: round(m.netR, 4),
+                    EV:
+                        round(
+                            m.expectedValueR,
+                            4
+                        ),
+                    PF:
+                        round(
+                            m.profitFactor,
+                            4
+                        ),
+                    winRate:
+                        round(
+                            m.winRate,
+                            2
+                        )
+                };
+            }
+
+            const cellMap = new Map();
+
+            for (
+                let windowIndex = 0;
+                windowIndex < WINDOW_COUNT;
+                windowIndex++
+            ) {
+
+                for (
+                    const record
+                    of windows[windowIndex]
+                ) {
+
+                    const context =
+                        contextKey(
+                            record
+                        );
+
+                    if (!context) continue;
+
+                    if (
+                        !cellMap.has(
+                            context.key
+                        )
+                    ) {
+                        cellMap.set(
+                            context.key,
+                            {
+                                key:
+                                    context.key,
+                                setup:
+                                    context.setup,
+                                regime:
+                                    context.regime,
+                                volatility:
+                                    context.volatility,
+                                windows:
+                                    Array.from(
+                                        {
+                                            length:
+                                                WINDOW_COUNT
+                                        },
+                                        () => []
+                                    )
+                            }
+                        );
+                    }
+
+                    cellMap
+                        .get(context.key)
+                        .windows[
+                            windowIndex
+                        ]
+                        .push(record);
+                }
+            }
+
+            const cells = [];
+
+            for (
+                const cell
+                of cellMap.values()
+            ) {
+
+                const chronological =
+                    cell.windows.map(
+                        (rows, i) => ({
+                            window: i + 1,
+                            ...metrics(rows)
+                        })
+                    );
+
+                const transitions = [];
+
+                for (
+                    let i = 1;
+                    i < WINDOW_COUNT;
+                    i++
+                ) {
+
+                    const previous =
+                        chronological[
+                            i - 1
+                        ];
+
+                    const next =
+                        chronological[i];
+
+                    // Activation uses ONLY the completed
+                    // previous window.
+                    const activated =
+                        previous.samples > 0 &&
+                        previous.EV > 0;
+
+                    const nextOutcome =
+                        next.samples > 0
+                            ? next
+                            : null;
+
+                    transitions.push({
+                        fromWindow:
+                            previous.window,
+                        toWindow:
+                            next.window,
+
+                        activationSignal:
+                            activated
+                                ? "ACTIVE"
+                                : "INACTIVE",
+
+                        activationEvidence: {
+                            priorSamples:
+                                previous.samples,
+                            priorEV:
+                                previous.EV,
+                            priorPF:
+                                previous.PF
+                        },
+
+                        nextWindow: {
+                            samples:
+                                next.samples,
+                            EV:
+                                next.EV,
+                            PF:
+                                next.PF,
+                            winRate:
+                                next.winRate,
+                            netR:
+                                next.netR
+                        },
+
+                        activationWorked:
+                            activated &&
+                            next.samples > 0
+                                ? next.EV > 0
+                                : null,
+
+                        activationFailure:
+                            activated &&
+                            next.samples > 0
+                                ? next.EV <= 0
+                                : null
+                    });
+                }
+
+                const activeTransitions =
+                    transitions.filter(
+                        x =>
+                            x.activationSignal ===
+                                "ACTIVE" &&
+                            x.nextWindow.samples > 0
+                    );
+
+                const successfulActivations =
+                    activeTransitions.filter(
+                        x =>
+                            x.nextWindow.EV > 0
+                    );
+
+                const failedActivations =
+                    activeTransitions.filter(
+                        x =>
+                            x.nextWindow.EV <= 0
+                    );
+
+                const activationEV =
+                    activeTransitions.length
+                        ? activeTransitions.reduce(
+                            (sum, x) =>
+                                sum +
+                                x.nextWindow.EV,
+                            0
+                        ) /
+                        activeTransitions.length
+                        : null;
+
+                let classification =
+                    "INSUFFICIENT_ACTIVATION_EVIDENCE";
+
+                if (
+                    activeTransitions.length >= 2
+                ) {
+
+                    if (
+                        successfulActivations.length ===
+                        activeTransitions.length
+                    ) {
+                        classification =
+                            "PRIOR_WINDOW_ACTIVATION_SUPPORTS_NEXT_WINDOW";
+                    } else if (
+                        failedActivations.length ===
+                        activeTransitions.length
+                    ) {
+                        classification =
+                            "PRIOR_WINDOW_ACTIVATION_FAILS_NEXT_WINDOW";
+                    } else {
+                        classification =
+                            "PRIOR_WINDOW_ACTIVATION_INCONSISTENT";
+                    }
+                } else if (
+                    activeTransitions.length === 1
+                ) {
+
+                    classification =
+                        successfulActivations.length
+                            ? "SINGLE_ACTIVATION_SUCCESS"
+                            : "SINGLE_ACTIVATION_FAILURE";
+                }
+
+                cells.push({
+                    key: cell.key,
+                    setup: cell.setup,
+                    regime: cell.regime,
+                    volatility: cell.volatility,
+                    chronologicalWindows:
+                        chronological,
+                    transitions,
+                    activationSummary: {
+                        eligibleTransitions:
+                            activeTransitions.length,
+                        successfulActivations:
+                            successfulActivations.length,
+                        failedActivations:
+                            failedActivations.length,
+                        forwardActivationWinRate:
+                            activeTransitions.length
+                                ? round(
+                                    successfulActivations.length /
+                                    activeTransitions.length *
+                                    100,
+                                    2
+                                )
+                                : 0,
+                        forwardActivationEV:
+                            activationEV === null
+                                ? null
+                                : round(
+                                    activationEV,
+                                    4
+                                )
+                    },
+                    classification
+                });
+            }
+
+            cells.sort(
+                (a, b) => {
+
+                    const order = {
+                        PRIOR_WINDOW_ACTIVATION_SUPPORTS_NEXT_WINDOW: 1,
+                        SINGLE_ACTIVATION_SUCCESS: 2,
+                        PRIOR_WINDOW_ACTIVATION_INCONSISTENT: 3,
+                        SINGLE_ACTIVATION_FAILURE: 4,
+                        PRIOR_WINDOW_ACTIVATION_FAILS_NEXT_WINDOW: 5,
+                        INSUFFICIENT_ACTIVATION_EVIDENCE: 6
+                    };
+
+                    return (
+                        (order[
+                            a.classification
+                        ] || 99) -
+                        (order[
+                            b.classification
+                        ] || 99)
+                    );
+                }
+            );
+
+            const allActiveTransitions =
+                cells.flatMap(
+                    cell =>
+                        cell.transitions.filter(
+                            x =>
+                                x.activationSignal ===
+                                    "ACTIVE" &&
+                                x.nextWindow.samples > 0
+                        )
+                );
+
+            const allSuccessful =
+                allActiveTransitions.filter(
+                    x =>
+                        x.nextWindow.EV > 0
+                );
+
+            const allForwardEV =
+                allActiveTransitions.length
+                    ? allActiveTransitions.reduce(
+                        (sum, x) =>
+                            sum +
+                            x.nextWindow.EV,
+                        0
+                    ) /
+                    allActiveTransitions.length
+                    : null;
+
+            return {
+                purpose:
+                    "Test whether positive prior-window evidence can identify a context whose next chronological window remains profitable, without changing the trading pipeline.",
+                activationDefinition:
+                    "A context is ACTIVE for the next window only when the immediately preceding completed window has EV > 0. No current/future outcome is used to activate that next window.",
+                contextDefinition:
+                    "SETUP × REGIME × VOLATILITY",
+                chronologicalWindows:
+                    WINDOW_COUNT,
+                sample: {
+                    sellRecords:
+                        safe.length,
+                    windowSizes:
+                        windows.map(
+                            rows =>
+                                rows.length
+                        )
+                },
+                cells,
+                summary: {
+                    totalCells:
+                        cells.length,
+                    activeForwardTransitions:
+                        allActiveTransitions.length,
+                    successfulForwardActivations:
+                        allSuccessful.length,
+                    failedForwardActivations:
+                        allActiveTransitions.length -
+                        allSuccessful.length,
+                    forwardActivationWinRate:
+                        allActiveTransitions.length
+                            ? round(
+                                allSuccessful.length /
+                                allActiveTransitions.length *
+                                100,
+                                2
+                            )
+                            : 0,
+                    forwardActivationEV:
+                        allForwardEV === null
+                            ? null
+                            : round(
+                                allForwardEV,
+                                4
+                            ),
+                    stableActivationCandidateDetected:
+                        cells.some(
+                            cell =>
+                                cell.classification ===
+                                "PRIOR_WINDOW_ACTIVATION_SUPPORTS_NEXT_WINDOW"
+                        )
+                },
+                guard:
+                    "Diagnostic only. V22.4 does not create candidates, alter thresholds, promote contexts, change validation/OOS, or use future outcomes to modify earlier activation decisions."
+            };
+        }
+
+
         // V22.3 REGIME-CONDITIONAL EDGE SURVIVAL AUDIT
         // -----------------------------------------------------
         // Diagnostic only.
@@ -9782,6 +10299,12 @@ export default async function handler(req, res) {
                 finalDiscovery.rawRecords
             );
 
+        const v224EdgeActivationAudit =
+            buildV224EdgeActivationAudit(
+                historicalCandles,
+                finalDiscovery.rawRecords
+            );
+
         const edgeAnatomy =
             buildEdgeAnatomy(
                 finalDiscovery.rawRecords,
@@ -10523,7 +11046,7 @@ export default async function handler(req, res) {
                     "Qualified candidates are explicitly counted before untouched chronological validation.",
 
                 diagnostics:
-                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics; V22.2 diagnoses Window-3 to Window-4 edge decay using entry-time feature shifts and separate outcome/mechanics evidence; V22.3 audits conditional edge survival across setup, regime and volatility without changing strategy mechanics.",
+                    "Every qualified candidate is traceable through the exact promotion path, pre-validation rejection, adaptive regime gating, validation rejection, survival and diversification; V15.9 audits validation occurrence matching for regime-context candidates; V15.9 additionally investigates every discovered context variant and its validation occurrence opportunity; V16 audits recent and recency-weighted context stability; V15.7 validation-failure audit is retained; V20 audits candidate stability across expanding walk-forward folds and distinguishes absence, qualification, validation, selection and OOS execution; V21 audits exact edge persistence across those chronological stages without changing strategy mechanics; V22.2 diagnoses Window-3 to Window-4 edge decay using entry-time feature shifts and separate outcome/mechanics evidence; V22.3 audits conditional edge survival across setup, regime and volatility; V22.4 tests whether positive prior-window evidence can activate the same context for the next window without changing strategy mechanics.",
 
                 oos:
                     "Only validation survivors are allowed into chronological true OOS.",
@@ -10715,6 +11238,8 @@ export default async function handler(req, res) {
             v222EdgeDecayDiagnosis,
 
             v223RegimeConditionalSurvivalAudit,
+
+            v224EdgeActivationAudit,
 
             regimeFingerprintDiagnostics,
 
