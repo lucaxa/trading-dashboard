@@ -494,7 +494,7 @@ export default async function handler(req, res) {
                 http:result.http,
                 rowCount:rows.length,
                 negativeVolumeSummary:summarizeNegative(rows),
-                negativeVolumeRows,
+                negativeVolumeRows: negativeRows,
                 rawResponsePreview:result.rawResponsePreview
             };
         });
