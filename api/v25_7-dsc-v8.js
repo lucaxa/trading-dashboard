@@ -1,12 +1,12 @@
 /*
 ===========================================================
  TradeMind Pro
- V25.7-DSC-v7 — Dhan S4 Three-Window Historical Coverage Audit
+ V25.7-DSC-v8 — Dhan S5 Three-Window Historical Coverage Audit
 ===========================================================
 
 PURPOSE
 -------
-Verify historical candle availability for V25.7 Segment 4
+Verify historical candle availability for V25.7 Segment 5
 using DhanHQ, with three requests safely below the intraday
 request-window limit.
 
@@ -22,35 +22,34 @@ It does NOT:
 - tune thresholds
 - place orders
 
-S4 RANGE
+S5 RANGE
 --------
-The V25.7 Segment 4 historical period is approximately:
+The V25.7 Segment 5 historical period is approximately:
 
-  2022-06-30 -> 2022-12-27
+  2021-12-28 -> 2022-06-26
 
-Three windows are used:
+Three adjacent windows are used:
 
-  A: 2022-06-30 -> 2022-08-29
-  B: 2022-08-29 -> 2022-10-28
-  C: 2022-10-28 -> 2022-12-27
+  A: 2021-12-28 -> 2022-02-26
+  B: 2022-02-26 -> 2022-04-27
+  C: 2022-04-27 -> 2022-06-26
 
 Each request is below Dhan's intraday request-window limit.
 
 IMPORTANT
 ---------
-These windows are deliberately adjacent. Actual timestamps are
-retained internally so cross-window duplicate timestamps can be
-detected.
+These are data-source controls only. Actual returned timestamps
+are retained internally so cross-window duplicate timestamps can
+be detected.
 
-If an edge begins/ends on a weekend or market holiday, a lack
-of candles at that exact boundary is not automatically treated
-as a data-source failure. The audit evaluates actual returned
-trading-session candles.
+A lack of candles caused by weekends/holidays is not automatically
+treated as a data-source failure. The audit evaluates actual
+returned trading-session candles.
 
 RUN
 ---
 GET:
-  /api/v25_7-dsc-v7?probe=1
+  /api/v25_7-dsc-v8?probe=1
 
 ENVIRONMENT
 -----------
@@ -63,7 +62,7 @@ The token must be configured in Vercel. Never put it in source.
 
 export default async function handler(req, res) {
 
-    const VERSION = "V25.7-DSC-v7";
+    const VERSION = "V25.7-DSC-v8";
 
     const ENDPOINT =
         "https://api.dhan.co/v2/charts/intraday";
@@ -71,24 +70,24 @@ export default async function handler(req, res) {
     const PROBES = {
         "1": {
             id: "1",
-            label: "S4_180D_THREE_WINDOW",
+            label: "S5_180D_THREE_WINDOW",
             description:
-                "Three-window Dhan coverage audit for the V25.7 Segment 4 historical period.",
+                "Three-window Dhan coverage audit for the V25.7 Segment 5 historical period.",
             windows: [
                 {
                     id: "A",
-                    fromDate: "2022-06-30 00:00:00",
-                    toDate: "2022-08-29 00:00:00"
+                    fromDate: "2021-12-28 00:00:00",
+                    toDate: "2022-02-26 00:00:00"
                 },
                 {
                     id: "B",
-                    fromDate: "2022-08-29 00:00:00",
-                    toDate: "2022-10-28 00:00:00"
+                    fromDate: "2022-02-26 00:00:00",
+                    toDate: "2022-04-27 00:00:00"
                 },
                 {
                     id: "C",
-                    fromDate: "2022-10-28 00:00:00",
-                    toDate: "2022-12-27 00:00:00"
+                    fromDate: "2022-04-27 00:00:00",
+                    toDate: "2022-06-26 00:00:00"
                 }
             ]
         }
@@ -154,7 +153,6 @@ export default async function handler(req, res) {
         let chronological = true;
 
         for (let i = 1; i < timestamp.length; i++) {
-
             if (timestamp[i] <= timestamp[i - 1]) {
                 chronological = false;
                 break;
@@ -167,8 +165,7 @@ export default async function handler(req, res) {
 
         for (let i = 1; i < unique.length; i++) {
 
-            const diff =
-                unique[i] - unique[i - 1];
+            const diff = unique[i] - unique[i - 1];
 
             if (diff === 300) {
                 fiveMinuteIntervals++;
@@ -183,16 +180,13 @@ export default async function handler(req, res) {
         }
 
         const sessionDays = new Set(
-            unique.map(
-                ts => iso(ts)?.slice(0, 10)
-            )
+            unique.map(ts => iso(ts)?.slice(0, 10))
         );
 
         return {
             responseShape: {
                 topLevelKeys:
-                    payload &&
-                    typeof payload === "object"
+                    payload && typeof payload === "object"
                         ? Object.keys(payload)
                         : [],
 
@@ -205,10 +199,7 @@ export default async function handler(req, res) {
                         "volume",
                         "timestamp"
                     ].every(
-                        key =>
-                            Array.isArray(
-                                payload?.[key]
-                            )
+                        key => Array.isArray(payload?.[key])
                     )
             },
 
@@ -224,34 +215,19 @@ export default async function handler(req, res) {
             timestamps: unique,
 
             timestampAudit: {
-                numericTimestampRows:
-                    timestamp.length,
-
-                uniqueTimestampRows:
-                    unique.length,
-
+                numericTimestampRows: timestamp.length,
+                uniqueTimestampRows: unique.length,
                 duplicateTimestampRows:
-                    timestamp.length -
-                    unique.length,
-
+                    timestamp.length - unique.length,
                 chronological,
 
-                firstTimestamp:
-                    unique[0] ?? null,
-
-                firstTimestampISO:
-                    iso(unique[0]),
+                firstTimestamp: unique[0] ?? null,
+                firstTimestampISO: iso(unique[0]),
 
                 lastTimestamp:
-                    unique[unique.length - 1] ??
-                    null,
-
+                    unique[unique.length - 1] ?? null,
                 lastTimestampISO:
-                    iso(
-                        unique[
-                            unique.length - 1
-                        ]
-                    )
+                    iso(unique[unique.length - 1])
             },
 
             ohlcAudit: {
@@ -291,16 +267,12 @@ export default async function handler(req, res) {
                         : null,
 
                 volumePreserved:
-                    volume.length ===
-                    timestamp.length
+                    volume.length === timestamp.length
             }
         };
     }
 
-    async function fetchWindow(
-        accessToken,
-        window
-    ) {
+    async function fetchWindow(accessToken, window) {
 
         const body = {
             securityId: "13",
@@ -318,65 +290,41 @@ export default async function handler(req, res) {
                 method: "POST",
 
                 headers: {
-                    "Content-Type":
-                        "application/json",
-
-                    Accept:
-                        "application/json",
-
-                    "access-token":
-                        accessToken
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    "access-token": accessToken
                 },
 
-                body:
-                    JSON.stringify(body)
+                body: JSON.stringify(body)
             }
         );
 
-        const rawText =
-            await response.text();
+        const rawText = await response.text();
 
         let payload = null;
         let parseStatus = "NOT_JSON";
 
         try {
-
-            payload =
-                JSON.parse(rawText);
-
+            payload = JSON.parse(rawText);
             parseStatus = "JSON";
-
         } catch {
-
             payload = null;
         }
 
         const audit =
-            payload &&
-            typeof payload === "object"
+            payload && typeof payload === "object"
                 ? auditPayload(payload)
                 : null;
 
         return {
-
             window,
-
-            request:
-                body,
+            request: body,
 
             http: {
-
-                status:
-                    response.status,
-
-                ok:
-                    response.ok,
-
+                status: response.status,
+                ok: response.ok,
                 contentType:
-                    response.headers.get(
-                        "content-type"
-                    ),
-
+                    response.headers.get("content-type"),
                 parseStatus
             },
 
@@ -385,145 +333,81 @@ export default async function handler(req, res) {
             rawResponsePreview:
                 audit
                     ? null
-                    : rawText
-                        .replace(/\s+/g, " ")
-                        .slice(0, 1000)
+                    : rawText.replace(/\s+/g, " ").slice(0, 1000)
         };
     }
 
     try {
 
         if (req.method !== "GET") {
-
             return res.status(405).json({
-
                 success: false,
-
-                version:
-                    VERSION,
-
-                status:
-                    "METHOD_NOT_ALLOWED",
-
-                paperOnly:
-                    true,
-
-                realOrders:
-                    false,
-
-                error:
-                    "V25.7-DSC-v7 uses GET only."
+                version: VERSION,
+                status: "METHOD_NOT_ALLOWED",
+                paperOnly: true,
+                realOrders: false,
+                error: "V25.7-DSC-v8 uses GET only."
             });
         }
 
         const token =
-            (
-                process.env
-                    .DHAN_ACCESS_TOKEN ||
-                ""
-            ).trim();
+            (process.env.DHAN_ACCESS_TOKEN || "").trim();
 
         if (!token) {
-
             return res.status(500).json({
-
                 success: false,
-
-                version:
-                    VERSION,
-
-                status:
-                    "CONFIG_ERROR",
-
-                paperOnly:
-                    true,
-
-                realOrders:
-                    false,
-
+                version: VERSION,
+                status: "CONFIG_ERROR",
+                paperOnly: true,
+                realOrders: false,
                 error:
                     "DHAN_ACCESS_TOKEN is not configured."
             });
         }
 
         const probeId =
-            String(
-                req.query?.probe ||
-                "1"
-            );
+            String(req.query?.probe || "1");
 
-        const probe =
-            PROBES[probeId];
+        const probe = PROBES[probeId];
 
         if (!probe) {
-
             return res.status(400).json({
-
                 success: false,
-
-                version:
-                    VERSION,
-
-                status:
-                    "INVALID_PROBE",
-
-                availableProbes:
-                    Object.keys(PROBES),
-
-                error:
-                    "Use probe=1."
+                version: VERSION,
+                status: "INVALID_PROBE",
+                availableProbes: Object.keys(PROBES),
+                error: "Use probe=1."
             });
         }
 
         const results = [];
 
-        for (
-            const window of probe.windows
-        ) {
-
+        for (const window of probe.windows) {
             results.push(
-                await fetchWindow(
-                    token,
-                    window
-                )
+                await fetchWindow(token, window)
             );
         }
 
         const allTimestampEntries = [];
 
-        for (
-            const result of results
-        ) {
+        for (const result of results) {
 
             const timestamps =
-                result.audit?.timestamps ||
-                [];
+                result.audit?.timestamps || [];
 
-            for (
-                const ts of timestamps
-            ) {
-
+            for (const ts of timestamps) {
                 allTimestampEntries.push({
                     timestamp: ts,
-                    windowId:
-                        result.window.id
+                    windowId: result.window.id
                 });
             }
         }
 
-        const timestampWindowMap =
-            new Map();
+        const timestampWindowMap = new Map();
 
-        for (
-            const entry of allTimestampEntries
-        ) {
+        for (const entry of allTimestampEntries) {
 
-            if (
-                !timestampWindowMap.has(
-                    entry.timestamp
-                )
-            ) {
-
+            if (!timestampWindowMap.has(entry.timestamp)) {
                 timestampWindowMap.set(
                     entry.timestamp,
                     []
@@ -532,58 +416,38 @@ export default async function handler(req, res) {
 
             timestampWindowMap
                 .get(entry.timestamp)
-                .push(
-                    entry.windowId
-                );
+                .push(entry.windowId);
         }
 
-        const crossWindowDuplicateTimestamps =
-            [];
+        const crossWindowDuplicateTimestamps = [];
 
         for (
-            const [
-                timestamp,
-                windowIds
-            ] of timestampWindowMap.entries()
+            const [timestamp, windowIds]
+            of timestampWindowMap.entries()
         ) {
 
             const uniqueWindowIds =
-                [
-                    ...new Set(windowIds)
-                ];
+                [...new Set(windowIds)];
 
-            if (
-                uniqueWindowIds.length > 1
-            ) {
+            if (uniqueWindowIds.length > 1) {
 
-                crossWindowDuplicateTimestamps
-                    .push({
-
-                        timestamp,
-
-                        timestampISO:
-                            iso(timestamp),
-
-                        windows:
-                            uniqueWindowIds
-                    });
+                crossWindowDuplicateTimestamps.push({
+                    timestamp,
+                    timestampISO: iso(timestamp),
+                    windows: uniqueWindowIds
+                });
             }
         }
 
         const combinedUniqueTimestamps =
-            [
-                ...timestampWindowMap.keys()
-            ].sort(
-                (a, b) => a - b
-            );
+            [...timestampWindowMap.keys()]
+                .sort((a, b) => a - b);
 
-        let combinedChronological =
-            true;
+        let combinedChronological = true;
 
         for (
             let i = 1;
-            i <
-            combinedUniqueTimestamps.length;
+            i < combinedUniqueTimestamps.length;
             i++
         ) {
 
@@ -591,65 +455,54 @@ export default async function handler(req, res) {
                 combinedUniqueTimestamps[i] <=
                 combinedUniqueTimestamps[i - 1]
             ) {
-
-                combinedChronological =
-                    false;
-
+                combinedChronological = false;
                 break;
             }
         }
 
         const successfulWindows =
             results.filter(
-                result =>
-                    result.http.ok &&
-                    result.audit
-                        ?.timestampAudit
+                r =>
+                    r.http.ok &&
+                    r.audit?.timestampAudit
                         ?.uniqueTimestampRows > 0
             );
 
         const allWindowsDataBearing =
-            successfulWindows.length ===
-            results.length;
+            successfulWindows.length === results.length;
 
         const allOHLCValid =
             results.every(
-                result =>
-                    result.audit
-                        ?.ohlcAudit
+                r =>
+                    r.audit?.ohlcAudit
                         ?.allOHLCValid === true
             );
 
         const noSpacingProblems =
             results.every(
-                result =>
-                    result.audit
-                        ?.intervalAudit
+                r =>
+                    r.audit?.intervalAudit
                         ?.noShortIntervalViolations === true
             );
 
         const totalRows =
             results.reduce(
-                (sum, result) =>
+                (sum, r) =>
                     sum +
                     (
-                        result.audit
-                            ?.timestampAudit
-                            ?.numericTimestampRows ||
-                        0
+                        r.audit?.timestampAudit
+                            ?.numericTimestampRows || 0
                     ),
                 0
             );
 
         const totalPerWindowUniqueRows =
             results.reduce(
-                (sum, result) =>
+                (sum, r) =>
                     sum +
                     (
-                        result.audit
-                            ?.timestampAudit
-                            ?.uniqueTimestampRows ||
-                        0
+                        r.audit?.timestampAudit
+                            ?.uniqueTimestampRows || 0
                     ),
                 0
             );
@@ -661,14 +514,12 @@ export default async function handler(req, res) {
             crossWindowDuplicateTimestamps.length;
 
         const combinedFirst =
-            combinedUniqueTimestamps[0] ??
-            null;
+            combinedUniqueTimestamps[0] ?? null;
 
         const combinedLast =
             combinedUniqueTimestamps[
                 combinedUniqueTimestamps.length - 1
-            ] ??
-            null;
+            ] ?? null;
 
         const materiallyCovered =
             allWindowsDataBearing &&
@@ -679,101 +530,65 @@ export default async function handler(req, res) {
             combinedUniqueRows > 0;
 
         const publicWindowResults =
-            results.map(
-                result => {
+            results.map(result => {
 
-                    const audit =
-                        result.audit;
+                const audit = result.audit;
 
-                    if (audit) {
+                if (audit) {
 
-                        const {
-                            timestamps,
-                            ...publicAudit
-                        } = audit;
+                    const {
+                        timestamps,
+                        ...publicAudit
+                    } = audit;
 
-                        return {
-
-                            ...result,
-
-                            audit:
-                                publicAudit
-                        };
-                    }
-
-                    return result;
+                    return {
+                        ...result,
+                        audit: publicAudit
+                    };
                 }
-            );
+
+                return result;
+            });
 
         return res.status(200).json({
 
-            success:
-                true,
+            success: true,
 
-            version:
-                VERSION,
+            version: VERSION,
 
-            status:
-                "COMPLETED",
+            status: "COMPLETED",
 
             mode:
-                "V25_7_DHAN_S4_180D_THREE_WINDOW_COVERAGE",
+                "V25_7_DHAN_S5_180D_THREE_WINDOW_COVERAGE",
 
-            paperOnly:
-                true,
+            paperOnly: true,
 
-            realOrders:
-                false,
+            realOrders: false,
 
-            brokerOrderEnabled:
-                false,
+            brokerOrderEnabled: false,
 
-            brokerOrderSent:
-                false,
+            brokerOrderSent: false,
 
             purpose:
-                "Verify the complete V25.7 Segment 4 historical period using three Dhan windows below the intraday request limit.",
+                "Verify the complete V25.7 Segment 5 historical period using three Dhan windows below the intraday request limit.",
 
-            thisIsNotATradingTest:
-                true,
+            thisIsNotATradingTest: true,
 
             probe: {
-
-                id:
-                    probe.id,
-
-                label:
-                    probe.label,
-
-                description:
-                    probe.description,
-
-                windows:
-                    probe.windows
+                id: probe.id,
+                label: probe.label,
+                description: probe.description,
+                windows: probe.windows
             },
 
             request: {
-
-                endpoint:
-                    ENDPOINT,
-
-                method:
-                    "POST",
-
-                securityId:
-                    "13",
-
-                exchangeSegment:
-                    "IDX_I",
-
-                instrument:
-                    "INDEX",
-
-                interval:
-                    "5",
-
-                oi:
-                    false
+                endpoint: ENDPOINT,
+                method: "POST",
+                securityId: "13",
+                exchangeSegment: "IDX_I",
+                instrument: "INDEX",
+                interval: "5",
+                oi: false
             },
 
             windowResults:
@@ -793,9 +608,7 @@ export default async function handler(req, res) {
                 totalUniqueRowsAcrossIndividualWindows:
                     totalPerWindowUniqueRows,
 
-                combinedUniqueRows:
-
-                    combinedUniqueRows,
+                combinedUniqueRows,
 
                 crossWindowDuplicateTimestamps:
                     crossWindowDuplicateCount,
@@ -804,8 +617,7 @@ export default async function handler(req, res) {
                     crossWindowDuplicateTimestamps
                         .slice(0, 20),
 
-                combinedChronological:
-                    combinedChronological,
+                combinedChronological,
 
                 firstTimestamp:
                     combinedFirst,
@@ -819,22 +631,19 @@ export default async function handler(req, res) {
                 lastTimestampISO:
                     iso(combinedLast),
 
-                allWindowsDataBearing:
-                    allWindowsDataBearing,
+                allWindowsDataBearing,
 
-                allOHLCValid:
-                    allOHLCValid,
+                allOHLCValid,
 
                 noShortSpacingViolations:
                     noSpacingProblems,
 
-                materiallyCovered:
-                    materiallyCovered
+                materiallyCovered
             },
 
             comparisonTarget: {
 
-                INDSTOCKS_S4:
+                INDSTOCKS_S5:
                     "CANDLES_NULL",
 
                 DHAN_S2:
@@ -843,31 +652,18 @@ export default async function handler(req, res) {
                 DHAN_S3:
                     "180D_COVERAGE_CONFIRMED",
 
+                DHAN_S4:
+                    "180D_COVERAGE_CONFIRMED",
+
                 requiredV25_7Protocol: {
-
-                    segments:
-                        5,
-
-                    segmentDays:
-                        180,
-
-                    totalResearchDays:
-                        900,
-
-                    priorRecords:
-                        40,
-
-                    forwardRecords:
-                        20,
-
-                    recordsPerBlock:
-                        60,
-
-                    targetIndependentBlocks:
-                        5,
-
-                    targetUsableSELLRecords:
-                        300
+                    segments: 5,
+                    segmentDays: 180,
+                    totalResearchDays: 900,
+                    priorRecords: 40,
+                    forwardRecords: 20,
+                    recordsPerBlock: 60,
+                    targetIndependentBlocks: 5,
+                    targetUsableSELLRecords: 300
                 }
             },
 
@@ -875,17 +671,15 @@ export default async function handler(req, res) {
 
                 status:
                     materiallyCovered
-                        ? "S4_180D_COVERAGE_CONFIRMED"
-                        : "S4_180D_COVERAGE_REQUIRES_REVIEW",
+                        ? "S5_180D_COVERAGE_CONFIRMED"
+                        : "S5_180D_COVERAGE_REQUIRES_REVIEW",
 
                 historicalDataReturned:
                     allWindowsDataBearing,
 
-                materiallyCovered:
-                    materiallyCovered,
+                materiallyCovered,
 
-                enoughToProceed:
-                    false,
+                enoughToProceed: false,
 
                 reason:
                     "This audit establishes historical candle coverage only. It does not generate V25.7 learning records or authorize the V25.7 confirmation run."
@@ -893,61 +687,46 @@ export default async function handler(req, res) {
 
             interpretation: {
 
-                learningRecordsGenerated:
-                    false,
+                learningRecordsGenerated: false,
 
-                healthStatesCalculated:
-                    false,
+                healthStatesCalculated: false,
 
-                strategyModified:
-                    false,
+                strategyModified: false,
 
-                thresholdTuning:
-                    false,
+                thresholdTuning: false,
 
-                validationRun:
-                    false,
+                validationRun: false,
 
-                oosRun:
-                    false,
+                oosRun: false,
 
-                realOrders:
-                    false,
+                realOrders: false,
 
                 conclusion:
                     materiallyCovered
-                        ? "DHAN_S4_180D_COVERAGE_CONFIRMED"
-                        : "DHAN_S4_180D_COVERAGE_NOT_YET_CONFIRMED"
+                        ? "DHAN_S5_180D_COVERAGE_CONFIRMED"
+                        : "DHAN_S5_180D_COVERAGE_NOT_YET_CONFIRMED"
             },
 
             nextStep:
-                "Inspect all three S4 windows and the cross-window duplicate audit before building any importer. Do not modify learning-engine.js.",
+                "Inspect all three S5 windows and the cross-window duplicate audit before building any importer. Do not modify learning-engine.js.",
 
             guardrails: {
 
-                noCandidateDiscovery:
-                    true,
+                noCandidateDiscovery: true,
 
-                noLearningRecords:
-                    true,
+                noLearningRecords: true,
 
-                noHealthClassification:
-                    true,
+                noHealthClassification: true,
 
-                noValidation:
-                    true,
+                noValidation: true,
 
-                noOOS:
-                    true,
+                noOOS: true,
 
-                noStrategyChange:
-                    true,
+                noStrategyChange: true,
 
-                noThresholdChange:
-                    true,
+                noThresholdChange: true,
 
-                noRealOrders:
-                    true
+                noRealOrders: true
             }
         });
 
@@ -955,26 +734,19 @@ export default async function handler(req, res) {
 
         return res.status(500).json({
 
-            success:
-                false,
+            success: false,
 
-            version:
-                VERSION,
+            version: VERSION,
 
-            status:
-                "ERROR",
+            status: "ERROR",
 
-            paperOnly:
-                true,
+            paperOnly: true,
 
-            realOrders:
-                false,
+            realOrders: false,
 
-            brokerOrderEnabled:
-                false,
+            brokerOrderEnabled: false,
 
-            brokerOrderSent:
-                false,
+            brokerOrderSent: false,
 
             error:
                 error?.message ||
