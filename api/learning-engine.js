@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V22.8";
+    const VERSION = "V22.9";
 
     try {
 
@@ -13971,11 +13971,715 @@ function buildV227EVPersistenceFailureAnatomy(
                 folds
             );
 
+
+        // =====================================================
+        // V22.9 — EDGE HEALTH PERSISTENCE EXPANSION TEST
+        // -----------------------------------------------------
+        // Diagnostic only.
+        //
+        // V22.8 found a promising HEALTHY vs DECAYING/BROKEN
+        // relationship, but only 4 eligible transitions were
+        // available under the six production fold boundaries.
+        //
+        // V22.9 deliberately keeps the V22.8 state definitions
+        // unchanged and increases the number of chronological
+        // diagnostic checkpoints inside the completed learning
+        // history. The production six-fold validation/OOS engine
+        // is NOT modified.
+        //
+        // IMPORTANT:
+        //   - No candidate selection changes.
+        //   - No validation/OOS changes.
+        //   - No exits/risk changes.
+        //   - No future outcome is used to assign health state.
+        //   - Rolling checkpoints are explicitly marked as
+        //     overlapping/non-independent observations.
+        //   - No state is promoted into trading by V22.9.
+        // =====================================================
+        function buildV229EdgeHealthPersistenceExpansion(
+            records
+        ) {
+
+            const safe =
+                safeArray(records)
+                    .filter(
+                        x =>
+                            x &&
+                            x.side === "SELL" &&
+                            Number.isFinite(x.index) &&
+                            Number.isFinite(x.resultR)
+                    )
+                    .sort(
+                        (a, b) =>
+                            a.index - b.index
+                    );
+
+            const MIN_CONTEXT_SAMPLES = 4;
+            const MIN_FORWARD_SAMPLES = 1;
+
+            // Fixed diagnostic geometry. These values are declared
+            // before any forward outcomes are aggregated.
+            const PRIOR_TOTAL_RECORDS = 40;
+            const FORWARD_RECORDS = 20;
+            const STEP_RECORDS = 10;
+
+            const STATE_DEFINITIONS = [
+                {
+                    key: "BASELINE_PRIOR_EV_GT_0",
+                    label: "Prior EV > 0",
+                    test: x => x.priorEV > 0
+                },
+                {
+                    key: "HEALTHY",
+                    label: "Positive EV + no internal decay + positive late-half EV",
+                    test: x =>
+                        x.priorEV > 0 &&
+                        x.internalEVChange >= -0.10 &&
+                        x.lateEV > 0
+                },
+                {
+                    key: "STABLE",
+                    label: "Positive EV + no internal decay + non-positive late-half EV",
+                    test: x =>
+                        x.priorEV > 0 &&
+                        x.internalEVChange >= -0.10 &&
+                        x.lateEV <= 0
+                },
+                {
+                    key: "DECAYING",
+                    label: "Positive EV + internal decay + positive late-half EV",
+                    test: x =>
+                        x.priorEV > 0 &&
+                        x.internalEVChange < -0.10 &&
+                        x.lateEV > 0
+                },
+                {
+                    key: "BROKEN",
+                    label: "Positive EV + internal decay + non-positive late-half EV",
+                    test: x =>
+                        x.priorEV > 0 &&
+                        x.internalEVChange < -0.10 &&
+                        x.lateEV <= 0
+                }
+            ];
+
+            function localRound(value, digits = 4) {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return 0;
+                const p = 10 ** digits;
+                return Math.round(n * p) / p;
+            }
+
+            function localMetrics(rows) {
+                if (!rows.length) {
+                    return {
+                        trades: 0,
+                        decisiveTrades: 0,
+                        wins: 0,
+                        losses: 0,
+                        timeouts: 0,
+                        netR: 0,
+                        EV: 0,
+                        PF: 0,
+                        winRate: 0
+                    };
+                }
+
+                const wins = rows.filter(x => x.resultR > 0).length;
+                const losses = rows.filter(x => x.resultR < 0).length;
+                const timeouts = rows.filter(x => x.resultR === 0).length;
+                const decisiveTrades = wins + losses;
+                const netR = rows.reduce(
+                    (sum, x) => sum + Number(x.resultR || 0),
+                    0
+                );
+                const totalWinR = rows.reduce(
+                    (sum, x) => sum + (x.resultR > 0 ? Number(x.resultR) : 0),
+                    0
+                );
+                const totalLossR = rows.reduce(
+                    (sum, x) => sum + (x.resultR < 0 ? Math.abs(Number(x.resultR)) : 0),
+                    0
+                );
+
+                return {
+                    trades: rows.length,
+                    decisiveTrades,
+                    wins,
+                    losses,
+                    timeouts,
+                    netR: localRound(netR),
+                    EV: localRound(netR / rows.length),
+                    PF: totalLossR > 0
+                        ? localRound(totalWinR / totalLossR)
+                        : (totalWinR > 0 ? 999 : 0),
+                    winRate: decisiveTrades > 0
+                        ? localRound(wins / decisiveTrades * 100, 2)
+                        : 0
+                };
+            }
+
+            function contextKey(row) {
+                return [
+                    row.setup ?? "UNKNOWN",
+                    row.trend ?? "UNKNOWN",
+                    row.regime ?? "UNKNOWN",
+                    row.volatility ?? "UNKNOWN"
+                ].join("|");
+            }
+
+            function groupByContext(rows) {
+                const map = new Map();
+                for (const row of rows) {
+                    const key = contextKey(row);
+                    if (!map.has(key)) map.set(key, []);
+                    map.get(key).push(row);
+                }
+                return map;
+            }
+
+            function splitInternal(rows) {
+                const midpoint = Math.floor(rows.length / 2);
+                return {
+                    early: rows.slice(0, midpoint),
+                    late: rows.slice(midpoint)
+                };
+            }
+
+            function maxForwardLossStreak(rows) {
+                let current = 0;
+                let max = 0;
+                for (const row of rows) {
+                    if (Number(row.resultR) < 0) {
+                        current++;
+                        max = Math.max(max, current);
+                    } else {
+                        current = 0;
+                    }
+                }
+                return max;
+            }
+
+            const checkpoints = [];
+
+            // The first checkpoint has 40 completed records before the
+            // forward segment. Subsequent checkpoints advance by 10.
+            // This intentionally creates overlapping diagnostic samples
+            // so that sample expansion does not pretend to be independent.
+            for (
+                let priorEnd = PRIOR_TOTAL_RECORDS;
+                priorEnd + FORWARD_RECORDS <= safe.length;
+                priorEnd += STEP_RECORDS
+            ) {
+
+                const previousStart = 0;
+                const priorStart =
+                    Math.max(
+                        0,
+                        priorEnd - PRIOR_TOTAL_RECORDS
+                    );
+
+                const trainingRows =
+                    safe.slice(
+                        previousStart,
+                        priorEnd
+                    );
+
+                const forwardRows =
+                    safe.slice(
+                        priorEnd,
+                        priorEnd + FORWARD_RECORDS
+                    );
+
+                const splitPoint =
+                    Math.floor(
+                        trainingRows.length / 2
+                    );
+
+                const previousRows =
+                    trainingRows.slice(
+                        0,
+                        splitPoint
+                    );
+
+                const priorRows =
+                    trainingRows.slice(
+                        splitPoint
+                    );
+
+                const previousByContext =
+                    groupByContext(
+                        previousRows
+                    );
+
+                const priorByContext =
+                    groupByContext(
+                        priorRows
+                    );
+
+                const forwardByContext =
+                    groupByContext(
+                        forwardRows
+                    );
+
+                const contexts =
+                    new Set([
+                        ...priorByContext.keys(),
+                        ...forwardByContext.keys()
+                    ]);
+
+                const transitions = [];
+
+                for (const key of contexts) {
+
+                    const previous =
+                        previousByContext.get(key) || [];
+                    const prior =
+                        priorByContext.get(key) || [];
+                    const forward =
+                        forwardByContext.get(key) || [];
+
+                    if (
+                        prior.length <
+                        MIN_CONTEXT_SAMPLES
+                    ) continue;
+
+                    if (
+                        forward.length <
+                        MIN_FORWARD_SAMPLES
+                    ) continue;
+
+                    const previousMetrics =
+                        localMetrics(previous);
+                    const priorMetrics =
+                        localMetrics(prior);
+                    const forwardMetrics =
+                        localMetrics(forward);
+
+                    if (!(priorMetrics.EV > 0)) {
+                        continue;
+                    }
+
+                    const internal =
+                        splitInternal(prior);
+                    const earlyMetrics =
+                        localMetrics(internal.early);
+                    const lateMetrics =
+                        localMetrics(internal.late);
+
+                    const internalEVChange =
+                        localRound(
+                            lateMetrics.EV -
+                            earlyMetrics.EV
+                        );
+
+                    const evMomentum =
+                        localRound(
+                            priorMetrics.EV -
+                            previousMetrics.EV
+                        );
+
+                    const context = {
+                        key,
+                        priorEV: priorMetrics.EV,
+                        previousEV: previousMetrics.EV,
+                        evMomentum,
+                        priorPF: priorMetrics.PF,
+                        priorWinRate: priorMetrics.winRate,
+                        priorSamples: prior.length,
+                        priorDecisive: priorMetrics.decisiveTrades,
+                        internalEarlyEV: earlyMetrics.EV,
+                        internalLateEV: lateMetrics.EV,
+                        internalEVChange,
+                        lateEV: lateMetrics.EV,
+                        forward: forwardMetrics
+                    };
+
+                    const state =
+                        STATE_DEFINITIONS.find(
+                            x =>
+                                x.key !==
+                                    "BASELINE_PRIOR_EV_GT_0" &&
+                                x.test(context)
+                        )?.key ||
+                        "UNCLASSIFIED_POSITIVE_EV";
+
+                    transitions.push({
+                        checkpoint:
+                            checkpoints.length + 1,
+                        priorEndRecord:
+                            priorEnd,
+                        forwardEndRecord:
+                            priorEnd + FORWARD_RECORDS,
+                        contextKey: key,
+                        healthState: state,
+                        context,
+                        forward: forwardMetrics,
+                        forwardSuccess:
+                            forwardMetrics.EV > 0,
+                        forwardLossStreak:
+                            maxForwardLossStreak(forward),
+                        priorRecordIndexRange: {
+                            first:
+                                prior[0]?.index ?? null,
+                            last:
+                                prior[prior.length - 1]?.index ?? null
+                        },
+                        forwardRecordIndexRange: {
+                            first:
+                                forward[0]?.index ?? null,
+                            last:
+                                forward[forward.length - 1]?.index ?? null
+                        }
+                    });
+                }
+
+                checkpoints.push({
+                    checkpoint:
+                        checkpoints.length + 1,
+                    trainingStartRecord:
+                        priorStart,
+                    trainingEndRecord:
+                        priorEnd,
+                    forwardStartRecord:
+                        priorEnd,
+                    forwardEndRecord:
+                        priorEnd + FORWARD_RECORDS,
+                    trainingRows:
+                        trainingRows.length,
+                    forwardRows:
+                        forwardRows.length,
+                    eligibleTransitions:
+                        transitions.length,
+                    transitions
+                });
+            }
+
+            const allTransitions =
+                checkpoints.flatMap(
+                    x => x.transitions
+                );
+
+            function aggregate(rows) {
+                const successful =
+                    rows.filter(
+                        x => x.forwardSuccess
+                    ).length;
+                const forwardTrades =
+                    rows.reduce(
+                        (sum, x) =>
+                            sum + x.forward.trades,
+                        0
+                    );
+                const forwardDecisive =
+                    rows.reduce(
+                        (sum, x) =>
+                            sum + x.forward.decisiveTrades,
+                        0
+                    );
+                const forwardNetR =
+                    rows.reduce(
+                        (sum, x) =>
+                            sum + x.forward.netR,
+                        0
+                    );
+                const weightedEV =
+                    forwardTrades > 0
+                        ? forwardNetR / forwardTrades
+                        : 0;
+
+                return {
+                    activations:
+                        rows.length,
+                    successfulForwardContexts:
+                        successful,
+                    failedForwardContexts:
+                        rows.length - successful,
+                    forwardContextSuccessRatePct:
+                        rows.length
+                            ? localRound(
+                                successful /
+                                rows.length *
+                                100,
+                                2
+                            )
+                            : 0,
+                    forwardTrades,
+                    forwardDecisiveTrades:
+                        forwardDecisive,
+                    forwardNetR:
+                        localRound(forwardNetR),
+                    forwardEV:
+                        localRound(weightedEV),
+                    profitableCheckpoints:
+                        new Set(
+                            rows
+                                .filter(x => x.forwardSuccess)
+                                .map(x => x.checkpoint)
+                        ).size,
+                    losingCheckpoints:
+                        new Set(
+                            rows
+                                .filter(x => !x.forwardSuccess)
+                                .map(x => x.checkpoint)
+                        ).size
+                };
+            }
+
+            const stateResults =
+                STATE_DEFINITIONS.map(
+                    state => {
+                        const rows =
+                            allTransitions.filter(
+                                x =>
+                                    state.key ===
+                                        "BASELINE_PRIOR_EV_GT_0"
+                                        ? true
+                                        : x.healthState === state.key
+                            );
+                        return {
+                            key: state.key,
+                            label: state.label,
+                            ...aggregate(rows),
+                            diagnosticOnly: true
+                        };
+                    }
+                );
+
+            const baseline =
+                stateResults.find(
+                    x =>
+                        x.key ===
+                        "BASELINE_PRIOR_EV_GT_0"
+                );
+
+            const comparison =
+                stateResults
+                    .filter(
+                        x =>
+                            x.key !==
+                            "BASELINE_PRIOR_EV_GT_0"
+                    )
+                    .map(x => ({
+                        state: x.key,
+                        activations: x.activations,
+                        forwardEV: x.forwardEV,
+                        forwardNetR: x.forwardNetR,
+                        successRatePct:
+                            x.forwardContextSuccessRatePct,
+                        EVDeltaVsBaseline:
+                            baseline && x.activations
+                                ? localRound(
+                                    x.forwardEV -
+                                    baseline.forwardEV
+                                )
+                                : null,
+                        netRDeltaVsBaseline:
+                            baseline
+                                ? localRound(
+                                    x.forwardNetR -
+                                    baseline.forwardNetR
+                                )
+                                : null,
+                        diagnosticOnly: true
+                    }));
+
+            const contextIntegrity = {
+                totalSellRecords:
+                    safe.length,
+                recordsWithCompleteContext:
+                    safe.filter(
+                        x =>
+                            x.setup != null &&
+                            x.trend != null &&
+                            x.regime != null &&
+                            x.volatility != null
+                    ).length,
+                recordsWithMissingContext:
+                    safe.filter(
+                        x =>
+                            x.setup == null ||
+                            x.trend == null ||
+                            x.regime == null ||
+                            x.volatility == null
+                    ).length,
+                undefinedOrUnknownFields: {
+                    setup:
+                        safe.filter(
+                            x =>
+                                x.setup == null ||
+                                x.setup === "UNKNOWN" ||
+                                x.setup === "undefined"
+                        ).length,
+                    trend:
+                        safe.filter(
+                            x =>
+                                x.trend == null ||
+                                x.trend === "UNKNOWN" ||
+                                x.trend === "undefined"
+                        ).length,
+                    regime:
+                        safe.filter(
+                            x =>
+                                x.regime == null ||
+                                x.regime === "UNKNOWN" ||
+                                x.regime === "undefined"
+                        ).length,
+                    volatility:
+                        safe.filter(
+                            x =>
+                                x.volatility == null ||
+                                x.volatility === "UNKNOWN" ||
+                                x.volatility === "undefined"
+                        ).length
+                }
+            };
+
+            const overlap = {
+                checkpointStepRecords:
+                    STEP_RECORDS,
+                trainingWindowRecords:
+                    PRIOR_TOTAL_RECORDS,
+                forwardWindowRecords:
+                    FORWARD_RECORDS,
+                overlappingDiagnosticWindows:
+                    true,
+                independentObservations:
+                    false,
+                reason:
+                    "Rolling checkpoints intentionally reuse historical records to increase diagnostic coverage. They must not be interpreted as independent confirmations."
+            };
+
+            const sampleAdequacy = {
+                totalTransitions:
+                    allTransitions.length,
+                minimumSuggestedStateObservations:
+                    10,
+                statesMeetingSuggestedMinimum:
+                    stateResults
+                        .filter(
+                            x =>
+                                x.activations >= 10
+                        )
+                        .map(x => x.key),
+                stateObservationCounts:
+                    Object.fromEntries(
+                        stateResults.map(
+                            x => [x.key, x.activations]
+                        )
+                    ),
+                conclusion:
+                    allTransitions.length >= 20
+                        ? "EXPANDED_BUT_NOT_INDEPENDENT"
+                        : "INSUFFICIENT_EXPANSION"
+            };
+
+            return {
+                version:
+                    "V22.9",
+                purpose:
+                    "Expand chronological edge-health observations while preserving the exact V22.8 health-state definitions and leaving the production trading pipeline untouched.",
+                hypothesis:
+                    "If HEALTHY consistently outperforms DECAYING/BROKEN across a materially larger set of chronological checkpoints, edge-health state may contain genuine forward-persistence information.",
+                diagnosticOnly:
+                    true,
+                strategyPipelineModified:
+                    false,
+                stateDefinitions:
+                    STATE_DEFINITIONS.map(
+                        x => ({
+                            key: x.key,
+                            label: x.label
+                        })
+                    ),
+                geometry: {
+                    priorTotalRecords:
+                        PRIOR_TOTAL_RECORDS,
+                    forwardRecords:
+                        FORWARD_RECORDS,
+                    stepRecords:
+                        STEP_RECORDS,
+                    minimumContextSamples:
+                        MIN_CONTEXT_SAMPLES,
+                    minimumForwardSamples:
+                        MIN_FORWARD_SAMPLES
+                },
+                sample: {
+                    sellRecords:
+                        safe.length,
+                    checkpoints:
+                        checkpoints.length,
+                    totalTransitions:
+                        allTransitions.length
+                },
+                contextIntegrity,
+                overlap,
+                sampleAdequacy,
+                stateResults,
+                comparison,
+                checkpointResults:
+                    checkpoints.map(
+                        x => ({
+                            checkpoint:
+                                x.checkpoint,
+                            trainingRows:
+                                x.trainingRows,
+                            forwardRows:
+                                x.forwardRows,
+                            eligibleTransitions:
+                                x.eligibleTransitions,
+                            transitions:
+                                x.transitions
+                        })
+                    ),
+                antiLeakage: {
+                    chronological:
+                        true,
+                    completedTrainingOnly:
+                        true,
+                    priorWindowOnly:
+                        true,
+                    nextWindowUsedOnlyAsOutcome:
+                        true,
+                    futureOutcomeUsedForState:
+                        false,
+                    thresholdsSelectedFromOutcome:
+                        false,
+                    productionPipelineModified:
+                        false
+                },
+                decisionRules: {
+                    noTradingChange:
+                        true,
+                    noThresholdTuning:
+                        true,
+                    noStatePromotion:
+                        true,
+                    interpretation:
+                        "V22.9 can establish that an edge-health relationship is worth a separate independent test; it cannot promote HEALTHY or suppress DECAYING/BROKEN in the trading engine.",
+                    nextIfSupported:
+                        "Run an independent chronological confirmation experiment on a separate historical slice before any strategy integration.",
+                    nextIfRejected:
+                        "Discard edge-health gating and investigate another explanation for temporal instability."
+                },
+                interpretationGuard:
+                    "V22.9 is diagnostic only. Rolling checkpoints overlap by design and therefore do not constitute independent evidence. No result from this audit can create candidates, change qualification, alter validation/OOS, select exits, change risk, or generate live signals.",
+                decisionGuard:
+                    "No V22.9 state or threshold is a trading rule. A later experiment must independently confirm the relationship before any strategy modification is considered."
+            };
+        }
+
+
         const v228EdgeHealthValidation =
             buildV228EdgeHealthValidation(
                 historicalCandles,
                 finalDiscovery.rawRecords,
                 folds
+            );
+
+        const v229EdgeHealthPersistenceExpansion =
+            buildV229EdgeHealthPersistenceExpansion(
+                finalDiscovery.rawRecords
             );
 
         // V22.1 FIX: finalDiscovery must exist before its raw records
@@ -14951,6 +15655,8 @@ function buildV227EVPersistenceFailureAnatomy(
             v227EVPersistenceFailureAnatomy,
 
             v228EdgeHealthValidation,
+
+            v229EdgeHealthPersistenceExpansion,
 
             regimeFingerprintDiagnostics,
 
