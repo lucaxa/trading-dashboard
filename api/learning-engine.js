@@ -14953,8 +14953,6 @@ function buildV227EVPersistenceFailureAnatomy(
         const v230EdgeHealthContextInteractionAudit =
             buildV230EdgeHealthContextInteractionAudit(
                 v229EdgeHealthPersistenceExpansion,
-
-            v230EdgeHealthContextInteractionAudit,
                 finalDiscovery.rawRecords
             );
 
