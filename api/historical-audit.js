@@ -152,8 +152,7 @@ export default async function handler(req, res) {
 
         const end =
             start +
-            minimumSpan -
-            1000;
+            minimumSpan;
 
         return {
             startMs: start,
@@ -262,8 +261,7 @@ export default async function handler(req, res) {
             endMs:
                 S3_START_MS +
                 51 *
-                DAY_MS -
-                1000
+                DAY_MS
         }
     };
 
