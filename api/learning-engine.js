@@ -364,7 +364,7 @@ function sendAudit(req, res) {
 
             totalSELLRecords,
 
-            totalPossibleCompleteBlocks,
+            totalPossibleCompleteBlocks: totalPossibleBlocks,
 
             totalBlocksInspected,
 
