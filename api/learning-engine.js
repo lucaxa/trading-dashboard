@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V24.3";
+    const VERSION = "V24.4";
 
     try {
 
@@ -6027,7 +6027,7 @@ export default async function handler(req, res) {
         // no candle can belong to both experiments.
         // -----------------------------------------------------
 
-        const V24_CONFIRMATION_DAYS = 180;
+        const V24_CONFIRMATION_DAYS = 720;
 
         const v24LatestStartMs =
             Date.now() -
@@ -6075,7 +6075,7 @@ export default async function handler(req, res) {
                 );
 
             v24IndependentEdgeHealthConfirmation =
-                buildV243IndependentEdgeHealthConfirmation({
+                buildV244IndependentEdgeHealthConfirmation({
                     confirmationRecords:
                         v24ConfirmationDiscovery.rawRecords,
                     sourceLabel:
@@ -6093,7 +6093,7 @@ export default async function handler(req, res) {
             v24IndependentEdgeHealthConfirmation = {
 
                 success: false,
-                version: "V24.3",
+                version: "V24.4",
                 status: "INSUFFICIENT_CONFIRMATION_DATA",
                 mode:
                     "V24_INDEPENDENT_EDGE_HEALTH_CONFIRMATION",
@@ -14859,26 +14859,33 @@ function buildV227EVPersistenceFailureAnatomy(
 
 
         // =====================================================
-        // V24.3 — CONFIRMATION BLOCK EXECUTION AUDIT
+        // V24.4 — INDEPENDENT CONFIRMATION SAMPLE EXPANSION AUDIT
         // -----------------------------------------------------
         // Diagnostic only. Runs on a SEPARATE, NON-OVERLAPPING
         // historical slice. It does not alter the V23 trading
         // pipeline, candidate discovery, validation, OOS, exits,
         // risk, or current signal generation.
         // =====================================================
-        function buildV243IndependentEdgeHealthConfirmation({
+        function buildV244IndependentEdgeHealthConfirmation({
             confirmationRecords,
             sourceLabel = "SEPARATE_HISTORICAL_SLICE",
             sourceStartTs = null,
             sourceEndTs = null
         }) {
 
-            const VERSION = "V24.3";
+            const VERSION = "V24.4";
 
             const PRIOR_RECORDS = 40;
             const FORWARD_RECORDS = 20;
             const BLOCK_SIZE =
                 PRIOR_RECORDS + FORWARD_RECORDS;
+
+            // V24.4 SAMPLE-EXPANSION TARGET
+            // Five complete non-overlapping 40+20 blocks require
+            // at least 300 usable SELL records.
+            const TARGET_INDEPENDENT_BLOCKS = 5;
+            const TARGET_USABLE_SELL_RECORDS =
+                TARGET_INDEPENDENT_BLOCKS * BLOCK_SIZE;
 
             // FROZEN from V22.8 / V22.9 / V24.
             const HEALTH_DECAY_THRESHOLD = -0.10;
@@ -15130,7 +15137,7 @@ function buildV227EVPersistenceFailureAnatomy(
 
             /*
             =========================================================
-             V24.3 BLOCK EXECUTION AUDIT
+             V24.4 BLOCK EXECUTION AUDIT
             ---------------------------------------------------------
              Every geometrically possible block is INSPECTED.
 
@@ -15529,7 +15536,7 @@ function buildV227EVPersistenceFailureAnatomy(
                     : null;
 
             /*
-            V24.3 FIX:
+            V24.4 FIX:
             The confirmation summary referenced
             healthyForwardEV / decayingForwardEV, but those
             aliases were never initialized. Keep the existing
@@ -15646,6 +15653,12 @@ function buildV227EVPersistenceFailureAnatomy(
                         ? "CONFIRMATION_BLOCKS_TESTED"
                         : "COMPLETE_BLOCKS_REJECTED";
 
+            const sampleExpansionStatus =
+                records.length >= TARGET_USABLE_SELL_RECORDS &&
+                possibleCompleteBlocks >= TARGET_INDEPENDENT_BLOCKS
+                    ? "TARGET_REACHED"
+                    : "TARGET_NOT_REACHED";
+
             return {
 
                 success:
@@ -15673,7 +15686,7 @@ function buildV227EVPersistenceFailureAnatomy(
                     false,
 
                 purpose:
-                    "Audit whether V24 confirmation blocks are actually constructed, tested, or explicitly rejected on the independent chronological slice.",
+                    "Expand the independent chronological confirmation sample so the frozen 40+20 geometry can be tested across multiple non-overlapping blocks.",
 
                 hypothesis:
                     "HEALTHY should outperform DECAYING on an independent chronological sample if the V23 relationship is genuine.",
@@ -15734,7 +15747,13 @@ function buildV227EVPersistenceFailureAnatomy(
                         true,
 
                     blockStep:
-                        BLOCK_SIZE
+                        BLOCK_SIZE,
+
+                    targetIndependentBlocks:
+                        TARGET_INDEPENDENT_BLOCKS,
+
+                    targetUsableSELLRecords:
+                        TARGET_USABLE_SELL_RECORDS
                 },
 
                 executionAudit: {
@@ -15766,6 +15785,14 @@ function buildV227EVPersistenceFailureAnatomy(
 
                     remainderRecords,
 
+                    targetIndependentBlocks:
+                        TARGET_INDEPENDENT_BLOCKS,
+
+                    targetUsableSELLRecords:
+                        TARGET_USABLE_SELL_RECORDS,
+
+                    sampleExpansionStatus,
+
                     auditStatus
                 },
 
@@ -15783,6 +15810,14 @@ function buildV227EVPersistenceFailureAnatomy(
                         round(
                             totalForwardNetR
                         ),
+
+                    targetIndependentBlocks:
+                        TARGET_INDEPENDENT_BLOCKS,
+
+                    targetUsableSELLRecords:
+                        TARGET_USABLE_SELL_RECORDS,
+
+                    sampleExpansionStatus,
 
                     minimumStateObservations:
                         MIN_STATE_OBSERVATIONS
@@ -15915,11 +15950,11 @@ function buildV227EVPersistenceFailureAnatomy(
                         true,
 
                     interpretation:
-                        "V24.3 is a replication-test execution audit. A rejected block is reported explicitly and is not treated as evidence for or against the trading hypothesis."
+                        "V24.4 is a diagnostic sample-expansion experiment. It reports whether the expanded independent slice reaches the five-block target; rejected blocks remain explicitly reported and do not change the trading hypothesis."
                 },
 
                 interpretationGuard:
-                    "V24.3 must not be interpreted as proof of live profitability. It first verifies whether the independent confirmation geometry actually produces testable blocks before interpreting health-state outcomes."
+                    "V24.4 must not be interpreted as proof of live profitability. It only expands and audits independent chronological confirmation evidence before any strategy integration is considered."
             };
         }
 
