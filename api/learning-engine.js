@@ -65,7 +65,7 @@
 
 export default async function handler(req, res) {
 
-    const VERSION = "V24.0";
+    const VERSION = "V24.1";
 
     try {
 
@@ -6027,7 +6027,7 @@ export default async function handler(req, res) {
         // no candle can belong to both experiments.
         // -----------------------------------------------------
 
-        const V24_CONFIRMATION_DAYS = 60;
+        const V24_CONFIRMATION_DAYS = 180;
 
         const v24LatestStartMs =
             Date.now() -
@@ -6093,7 +6093,7 @@ export default async function handler(req, res) {
             v24IndependentEdgeHealthConfirmation = {
 
                 success: false,
-                version: "V24.0",
+                version: "V24.1",
                 status: "INSUFFICIENT_CONFIRMATION_DATA",
                 mode:
                     "V24_INDEPENDENT_EDGE_HEALTH_CONFIRMATION",
@@ -14873,7 +14873,7 @@ function buildV227EVPersistenceFailureAnatomy(
             sourceEndTs = null
         }) {
 
-            const VERSION = "V24.0";
+            const VERSION = "V24.1";
 
             const PRIOR_RECORDS = 40;
             const FORWARD_RECORDS = 20;
