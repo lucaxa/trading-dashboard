@@ -6255,7 +6255,45 @@ export default async function handler(req, res) {
         // no candle can belong to both experiments.
         // -----------------------------------------------------
 
-        const V24_CONFIRMATION_DAYS = 720;
+        // V24.5 SEGMENTED CONFIRMATION
+        // -----------------------------------------------------
+        // A single 720-day invocation exceeded the serverless
+        // execution window. V24.5 keeps the total 720-day
+        // research horizon but processes ONE 180-day segment
+        // per invocation.
+        //
+        // Segment 1 = closest to V23
+        // Segment 2 = immediately older
+        // Segment 3 = immediately older
+        // Segment 4 = oldest
+        //
+        // Each segment is 180 days and non-overlapping.
+        // The segment number is supplied as:
+        //   ?confirmationSegment=1..4
+        // or request body confirmationSegment.
+        // -----------------------------------------------------
+        const V24_TOTAL_CONFIRMATION_DAYS = 720;
+        const V24_CONFIRMATION_SEGMENT_DAYS = 180;
+        const V24_CONFIRMATION_SEGMENTS =
+            V24_TOTAL_CONFIRMATION_DAYS /
+            V24_CONFIRMATION_SEGMENT_DAYS;
+
+        const requestedConfirmationSegment = Number(
+            req.body?.confirmationSegment ??
+            req.query?.confirmationSegment ??
+            1
+        );
+
+        const V24_CONFIRMATION_SEGMENT =
+            Number.isFinite(requestedConfirmationSegment)
+                ? Math.min(
+                    V24_CONFIRMATION_SEGMENTS,
+                    Math.max(1, Math.floor(requestedConfirmationSegment))
+                )
+                : 1;
+
+        const V24_CONFIRMATION_DAYS =
+            V24_CONFIRMATION_SEGMENT_DAYS;
 
         const v24LatestStartMs =
             Date.now() -
@@ -6265,12 +6303,24 @@ export default async function handler(req, res) {
             60 *
             1000;
 
-        const v24ConfirmationEndMs =
+        const v24V23BoundaryEndMs =
             v24LatestStartMs - 1000;
+
+        const segmentOffsetMs =
+            (V24_CONFIRMATION_SEGMENT - 1) *
+            V24_CONFIRMATION_SEGMENT_DAYS *
+            24 *
+            60 *
+            60 *
+            1000;
+
+        const v24ConfirmationEndMs =
+            v24V23BoundaryEndMs -
+            segmentOffsetMs;
 
         const v24ConfirmationStartMs =
             v24ConfirmationEndMs -
-            V24_CONFIRMATION_DAYS *
+            V24_CONFIRMATION_SEGMENT_DAYS *
             24 *
             60 *
             60 *
@@ -6308,7 +6358,7 @@ export default async function handler(req, res) {
             };
 
             v24IndependentEdgeHealthConfirmation =
-                buildV244IndependentEdgeHealthConfirmation({
+                buildV245IndependentEdgeHealthConfirmation({
                     confirmationRecords:
                         v24ConfirmationDiscovery.rawRecords,
                     sourceLabel:
@@ -6321,16 +6371,34 @@ export default async function handler(req, res) {
                         ]?.ts ?? null
                 });
 
+            v24IndependentEdgeHealthConfirmation.segment = {
+                segment: V24_CONFIRMATION_SEGMENT,
+                segmentCount: V24_CONFIRMATION_SEGMENTS,
+                segmentDays: V24_CONFIRMATION_SEGMENT_DAYS,
+                totalResearchDays: V24_TOTAL_CONFIRMATION_DAYS,
+                v23BoundaryEndMs: v24V23BoundaryEndMs,
+                rangeStartMs: v24ConfirmationStartMs,
+                rangeEndMs: v24ConfirmationEndMs
+            };
+
         } else {
 
             v24IndependentEdgeHealthConfirmation = {
 
                 success: false,
-                version: "V24.4",
+                version: "V24.5",
                 status: "INSUFFICIENT_CONFIRMATION_DATA",
                 mode:
                     "V24_INDEPENDENT_EDGE_HEALTH_CONFIRMATION",
                 diagnosticOnly: true,
+                segment: {
+                    segment: V24_CONFIRMATION_SEGMENT,
+                    segmentCount: V24_CONFIRMATION_SEGMENTS,
+                    segmentDays: V24_CONFIRMATION_SEGMENT_DAYS,
+                    totalResearchDays: V24_TOTAL_CONFIRMATION_DAYS,
+                    rangeStartMs: v24ConfirmationStartMs,
+                    rangeEndMs: v24ConfirmationEndMs
+                },
                 paperOnly: true,
                 realOrders: false,
                 brokerOrderEnabled: false,
@@ -15095,28 +15163,28 @@ function buildV227EVPersistenceFailureAnatomy(
 
 
         // =====================================================
-        // V24.4 — INDEPENDENT CONFIRMATION SAMPLE EXPANSION AUDIT
+        // V24.5 — SEGMENTED INDEPENDENT CONFIRMATION AUDIT
         // -----------------------------------------------------
         // Diagnostic only. Runs on a SEPARATE, NON-OVERLAPPING
         // historical slice. It does not alter the V23 trading
         // pipeline, candidate discovery, validation, OOS, exits,
         // risk, or current signal generation.
         // =====================================================
-        function buildV244IndependentEdgeHealthConfirmation({
+        function buildV245IndependentEdgeHealthConfirmation({
             confirmationRecords,
             sourceLabel = "SEPARATE_HISTORICAL_SLICE",
             sourceStartTs = null,
             sourceEndTs = null
         }) {
 
-            const VERSION = "V24.4";
+            const VERSION = "V24.5";
 
             const PRIOR_RECORDS = 40;
             const FORWARD_RECORDS = 20;
             const BLOCK_SIZE =
                 PRIOR_RECORDS + FORWARD_RECORDS;
 
-            // V24.4 SAMPLE-EXPANSION TARGET
+            // V24.5 SEGMENTED CONFIRMATION TARGET
             // Five complete non-overlapping 40+20 blocks require
             // at least 300 usable SELL records.
             const TARGET_INDEPENDENT_BLOCKS = 5;
@@ -17273,10 +17341,22 @@ function buildV227EVPersistenceFailureAnatomy(
                 enabled: true,
 
                 purpose:
-                    "Independent chronological confirmation of the frozen V23 edge-health hypothesis using a separate non-overlapping historical slice.",
+                    "Independent chronological confirmation of the frozen V23 edge-health hypothesis using one 180-day non-overlapping segment per invocation across a 720-day research horizon.",
 
                 confirmationDays:
                     V24_CONFIRMATION_DAYS,
+
+                totalConfirmationDays:
+                    V24_TOTAL_CONFIRMATION_DAYS,
+
+                confirmationSegment:
+                    V24_CONFIRMATION_SEGMENT,
+
+                confirmationSegmentCount:
+                    V24_CONFIRMATION_SEGMENTS,
+
+                confirmationSegmentDays:
+                    V24_CONFIRMATION_SEGMENT_DAYS,
 
                 confirmationRangeStartMs:
                     v24ConfirmationStartMs,
@@ -17504,10 +17584,19 @@ function buildV227EVPersistenceFailureAnatomy(
             v24PerformanceDiagnostics: {
 
                 mode:
-                    "V24.4_RATE_LIMIT_SAFE_CONFIRMATION",
+                    "V24.5_SEGMENTED_CONFIRMATION",
 
                 confirmationDays:
                     V24_CONFIRMATION_DAYS,
+
+                totalConfirmationDays:
+                    V24_TOTAL_CONFIRMATION_DAYS,
+
+                confirmationSegment:
+                    V24_CONFIRMATION_SEGMENT,
+
+                confirmationSegmentCount:
+                    V24_CONFIRMATION_SEGMENTS,
 
                 fetchConcurrency:
                     V24_FETCH_CONCURRENCY,
