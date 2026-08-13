@@ -1,0 +1,177 @@
+name: V25.21 Stable Evidence Volatility Conditioned Magnitude Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # IMPORTANT:
+      # V25.10 is the frozen source of truth.
+      # Do NOT attempt to download it from the current workflow run.
+      # Pin the exact successful V25.10 run so the audit remains reproducible.
+      - name: Download frozen V25.10 learning dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-10-learning-dataset
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31714266120
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.10 dataset
+        shell: bash
+        run: |
+          set -e
+
+          test -f v25_10_learning_dataset.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file = "v25_10_learning_dataset.json";
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
+          const dataset = data.learningDataset || {};
+          const audit = data.learningRecordAudit || {};
+          const guard = data.guard || {};
+
+          const summary = {
+            version: data.version,
+            status: data.status,
+            sourceRows: data.source?.sourceRows,
+            datasetRows: dataset.rowCount,
+            featureCount: dataset.featureCount,
+            datasetFrozen: dataset.frozen,
+            sha256: dataset.sha256,
+            learningRecordAuditPass: audit.learningRecordAuditPass,
+            datasetInvalidRows: audit.datasetInvalidRows,
+            datasetDuplicateRows: audit.datasetDuplicateRows,
+            learningEngineCalled: guard.learningEngineCalled,
+            candidateDiscovery: guard.candidateDiscovery,
+            validation: guard.validation,
+            oos: guard.oos,
+            strategyModified: guard.strategyModified,
+            realOrders: guard.realOrders
+          };
+
+          console.log(JSON.stringify(summary, null, 2));
+
+          if (data.status !== "DATASET_FREEZE_COMPLETE") {
+            throw new Error("V25.10 status is not DATASET_FREEZE_COMPLETE.");
+          }
+
+          if (dataset.frozen !== true) {
+            throw new Error("V25.10 frozen flag is not true.");
+          }
+
+          if (dataset.rowCount !== 7791) {
+            throw new Error(`Expected 7791 rows, got ${dataset.rowCount}.`);
+          }
+
+          if (dataset.featureCount !== 19) {
+            throw new Error(`Expected 19 features, got ${dataset.featureCount}.`);
+          }
+
+          if (audit.datasetInvalidRows !== 0) {
+            throw new Error("V25.10 contains invalid dataset rows.");
+          }
+
+          if (audit.datasetDuplicateRows !== 0) {
+            throw new Error("V25.10 contains duplicate dataset rows.");
+          }
+
+          if (guard.learningEngineCalled !== false) {
+            throw new Error("Learning engine was called unexpectedly.");
+          }
+
+          if (guard.candidateDiscovery !== false) {
+            throw new Error("Candidate discovery was enabled unexpectedly.");
+          }
+
+          if (guard.validation !== false) {
+            throw new Error("Validation was enabled unexpectedly.");
+          }
+
+          if (guard.oos !== false) {
+            throw new Error("OOS testing was enabled unexpectedly.");
+          }
+
+          if (guard.strategyModified !== false) {
+            throw new Error("Strategy modification was enabled unexpectedly.");
+          }
+
+          if (guard.realOrders !== false) {
+            throw new Error("Real orders flag is not false.");
+          }
+
+          console.log("V25.10 frozen dataset verification: PASS");
+          NODE
+
+      - name: Verify V25.10 artifact identity
+        shell: bash
+        run: |
+          echo "Pinned V25.10 source run: 31714266120"
+          echo "Pinned V25.10 artifact: v25-10-learning-dataset"
+          echo "Expected frozen dataset: 7,791 rows / 19 features"
+          echo "Artifact is intentionally reused unchanged."
+
+      - name: Run V25.21 magnitude audit
+        run: node .github/scripts/v25_21-stable-evidence-volatility-conditioned-magnitude-audit.js
+
+      - name: Print V25.21 magnitude audit summary
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const r = require("./v25_21_stable_evidence_volatility_conditioned_magnitude_audit.json");
+
+          console.log(JSON.stringify({
+            version: r.version,
+            status: r.status,
+            datasetRows: r.source?.datasetRows,
+            highVolatilityFocus: r.highVolatilityFocus,
+            auditPass: r.auditPass
+          }, null, 2));
+          NODE
+
+      - name: Verify V25.21 audit result
+        shell: bash
+        run: |
+          set -e
+
+          test -f v25_21_stable_evidence_volatility_conditioned_magnitude_audit.json
+
+          node - <<'NODE'
+          const r = require("./v25_21_stable_evidence_volatility_conditioned_magnitude_audit.json");
+
+          if (r.success !== true) {
+            throw new Error("V25.21 success flag is not true.");
+          }
+
+          if (r.auditPass !== true) {
+            throw new Error("V25.21 auditPass is not true.");
+          }
+
+          if (r.source?.datasetRows !== 7791) {
+            throw new Error(`Unexpected V25.21 dataset rows: ${r.source?.datasetRows}`);
+          }
+
+          if (r.source?.featureCount !== 19) {
+            throw new Error(`Unexpected V25.21 feature count: ${r.source?.featureCount}`);
+          }
+
+          console.log("V25.21 audit result verification: PASS");
+          NODE
+
+      - name: Upload V25.21 magnitude audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-21-stable-evidence-volatility-conditioned-magnitude-audit
+          path: v25_21_stable_evidence_volatility_conditioned_magnitude_audit.json
+          if-no-files-found: error
+          retention-days: 90
