@@ -1,0 +1,197 @@
+name: TradeMind Pro V25.24 ATR Normalization Direction Consistency Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.10 learning dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-10-learning-dataset
+          path: .
+
+      - name: Verify frozen V25.10 dataset
+        shell: bash
+        run: |
+          test -f v25_10_learning_dataset.json
+          echo "Frozen V25.10 learning dataset found."
+
+      - name: Run V25.24 ATR normalization direction consistency audit
+        run: node .github/scripts/v25_24-stable-evidence-atr-normalization-direction-consistency-audit.js
+
+      - name: Print V25.24 direction consistency summary
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json";
+
+          const result = JSON.parse(
+            fs.readFileSync(file, "utf8")
+          );
+
+          console.log(
+            JSON.stringify(
+              {
+                status: result.status,
+                datasetRows: result.source.datasetRows,
+                overallConsistency: result.overall.consistency,
+                overallStrata: result.overall.strata.map((x) => ({
+                  stratum: x.stratum,
+                  rows: x.rows,
+                  pearsonNormalizedMinusRaw:
+                    x.analysis.outcomePearson.normalizedMinusRaw,
+                  pearsonDirection:
+                    x.direction.pearsonNormalizedMinusRaw,
+                  spearmanNormalizedMinusRaw:
+                    x.analysis.outcomeSpearman.normalizedMinusRaw,
+                  spearmanDirection:
+                    x.direction.spearmanNormalizedMinusRaw
+                })),
+                chronologicalBlocks:
+                  result.chronologicalBlocks.map((block) => ({
+                    block: block.block,
+                    consistency: block.consistency
+                  })),
+                auditPass: result.auditPass
+              },
+              null,
+              2
+            )
+          );
+          NODE
+
+      - name: Verify V25.24 audit result
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json";
+
+          if (!fs.existsSync(file)) {
+            throw new Error(
+              "V25.24 output file not found."
+            );
+          }
+
+          const result = JSON.parse(
+            fs.readFileSync(file, "utf8")
+          );
+
+          if (
+            result.success !== true ||
+            result.auditPass !== true
+          ) {
+            throw new Error(
+              "V25.24 audit did not pass."
+            );
+          }
+
+          if (
+            result.version !==
+            "V25.24-STABLE-EVIDENCE-ATR-NORMALIZATION-DIRECTION-CONSISTENCY"
+          ) {
+            throw new Error(
+              "Unexpected V25.24 version."
+            );
+          }
+
+          if (
+            result.source.datasetRows !== 7791
+          ) {
+            throw new Error(
+              "V25.24 dataset row-count guard failed."
+            );
+          }
+
+          if (
+            result.source.featureCount !== 19
+          ) {
+            throw new Error(
+              "V25.24 feature-count guard failed."
+            );
+          }
+
+          if (
+            result.policy.sourceFrozen !== true ||
+            result.policy.datasetModified !== false ||
+            result.policy.featureSelection !== false ||
+            result.policy.optimization !== false ||
+            result.policy.modelFitting !== false ||
+            result.policy.validation !== false ||
+            result.policy.strategyModified !== false ||
+            result.policy.realOrders !== false
+          ) {
+            throw new Error(
+              "V25.24 policy guard failed."
+            );
+          }
+
+          console.log(
+            "V25.24 audit verification PASS"
+          );
+          NODE
+
+      - name: Upload V25.24 direction consistency audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-24-stable-evidence-atr-normalization-direction-consistency-audit
+          path: v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json
+          if-no-files-found: error
+
+      - name: Save V25.24 progress checkpoint
+        shell: bash
+        run: |
+          cat > v25_24_progress_checkpoint.json <<'JSON'
+          {
+            "project": "TradeMind Pro",
+            "version": "V25.24",
+            "stage": "STABLE_EVIDENCE_ATR_NORMALIZATION_DIRECTION_CONSISTENCY",
+            "status": "COMPLETE_IF_AUDIT_PASSES",
+            "sourceDataset": "v25_10_learning_dataset.json",
+            "datasetFrozen": true,
+            "datasetRows": 7791,
+            "featureCount": 19,
+            "paperOnly": true,
+            "realOrders": false,
+            "purpose": "Descriptively test whether the raw-vs-ATR-normalized outcome-correlation difference remains directionally consistent across fixed ATR strata inside the HIGH-volatility region.",
+            "previousEvidence": [
+              "V25.18 mathematical identity audit",
+              "V25.19 volatility conditioning audit",
+              "V25.20 volatility-conditioned persistence audit",
+              "V25.21 volatility-conditioned magnitude audit",
+              "V25.22 ATR normalization decomposition audit",
+              "V25.23 extreme ATR tail integrity audit"
+            ],
+            "nextDecision": "Inspect V25.24 result before defining the next evidence-audit step.",
+            "sourceModified": false,
+            "strategyModified": false,
+            "featureSelection": false,
+            "optimization": false,
+            "modelFitting": false,
+            "validation": false,
+            "oos": false,
+            "realOrders": false
+          }
+          JSON
+
+      - name: Upload V25.24 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-24-progress-checkpoint
+          path: v25_24_progress_checkpoint.json
+          if-no-files-found: error
