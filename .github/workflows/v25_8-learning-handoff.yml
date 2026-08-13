@@ -1,0 +1,104 @@
+name: V25.8 Learning Handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Handoff mode
+        required: true
+        default: control
+        type: choice
+        options:
+          - control
+          - full_s5
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.7 full S5 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          ARTIFACT_ID=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[]
+              | select(.name=="v25-7-full_s5-import")
+              | select(.expired==false)
+              | .id' \
+            | head -n 1)
+
+          if [ -z "$ARTIFACT_ID" ]; then
+            echo "No non-expired V25.7 full_s5 artifact found."
+            exit 1
+          fi
+
+          echo "Using V25.7 artifact ID: $ARTIFACT_ID"
+
+          mkdir -p data
+
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            > /tmp/v25_7_import.zip
+
+          unzip -o /tmp/v25_7_import.zip -d /tmp/v25_7_import
+
+          IMPORT_FILE=$(find /tmp/v25_7_import -type f -name "v25_7_import.json" | head -n 1)
+
+          if [ -z "$IMPORT_FILE" ]; then
+            echo "v25_7_import.json was not found inside the V25.7 artifact."
+            exit 1
+          fi
+
+          cp "$IMPORT_FILE" data/v25_7_import.json
+
+          echo "Frozen V25.7 input ready:"
+          ls -lh data/v25_7_import.json
+
+      - name: Run V25.8 controlled learning handoff
+        env:
+          INPUT_FILE: data/v25_7_import.json
+          HANDOFF_MODE: ${{ inputs.mode }}
+          CONTROL_ROWS: 500
+          OUTPUT_FILE: v25_8_learning_handoff.json
+        run: |
+          node .github/scripts/v25_8-learning-handoff.js
+
+      - name: Print V25.8 summary
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const r = JSON.parse(
+            fs.readFileSync("v25_8_learning_handoff.json", "utf8")
+          );
+
+          console.log(JSON.stringify({
+            status: r.status,
+            mode: r.mode,
+            sourceCanonicalRows: r.source?.sourceCanonicalRows,
+            selectedRows: r.input?.selectedRows,
+            learningRows: r.output?.learningRows,
+            skippedRows: r.output?.skippedRows,
+            datasetStatistics: r.datasetStatistics,
+            guard: r.guard
+          }, null, 2));
+          NODE
+
+      - name: Upload V25.8 handoff JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-8-${{ inputs.mode }}-learning-handoff
+          path: v25_8_learning_handoff.json
+          if-no-files-found: error
