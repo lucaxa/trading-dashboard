@@ -1,0 +1,61 @@
+name: V25.22 Stable Evidence ATR Normalization Decomposition Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.10 learning dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-10-learning-dataset
+          path: .
+
+      - name: Verify frozen V25.10 dataset
+        run: |
+          node .github/scripts/v25_11-frozen-learning-dataset-validation.js
+
+      - name: Run V25.22 ATR normalization decomposition audit
+        run: |
+          node .github/scripts/v25_22-stable-evidence-atr-normalization-decomposition-audit.js
+
+      - name: Print V25.22 decomposition summary
+        run: |
+          node -e "const r=require('./v25_22_stable_evidence_atr_normalization_decomposition_audit.json'); console.log(JSON.stringify({status:r.status, auditPass:r.auditPass, overallHighVolatility:r.overallHighVolatility.outcomePearson, internalThresholds:r.methodology.internalThresholds, blocks:r.chronologicalBlocks.map(b=>({block:b.block,highOverall:b.decomposition.highOverall.outcomePearson,subRegimes:b.decomposition.subRegimes.map(x=>({regime:x.regime,pearson:x.analysis.outcomePearson}))}))},null,2))"
+
+      - name: Verify V25.22 audit result
+        run: |
+          node -e "const r=require('./v25_22_stable_evidence_atr_normalization_decomposition_audit.json'); if(!r.success || !r.auditPass || !r.interpretation.constantScalingCannotChangePearson || !r.interpretation.withinSubRegimeComparisonPerformed) process.exit(1); console.log('V25.22 audit verification PASS')"
+
+      - name: Upload V25.22 decomposition JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-22-stable-evidence-atr-normalization-decomposition-audit
+          path: v25_22_stable_evidence_atr_normalization_decomposition_audit.json
+
+      - name: Save V25.22 progress checkpoint
+        run: |
+          cat > v25_22_progress_checkpoint.json <<'EOF'
+          {
+            "project": "TradeMind Pro",
+            "stage": "V25.22",
+            "status": "ATR_NORMALIZATION_DECOMPOSITION_AUDIT",
+            "source": "v25_10_learning_dataset.json",
+            "sourceFrozen": true,
+            "strategyModified": false,
+            "realOrders": false,
+            "nextDecision": "Inspect HIGH_Q1..HIGH_Q4 Pearson divergence before any feature-selection or strategy work."
+          }
+          EOF
+
+      - name: Upload V25.22 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-22-progress-checkpoint
+          path: v25_22_progress_checkpoint.json
