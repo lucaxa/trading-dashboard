@@ -1,0 +1,166 @@
+name: TradeMind Pro V25.28 Controlled Feature Research Specification
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/scripts/v25_28-controlled-feature-research-specification.js"
+      - ".github/workflows/v25_28-controlled-feature-research-specification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  specification:
+    name: V25.28 controlled feature research specification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify required evidence chain scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            ".github/scripts/v25_18-stable-evidence-mathematical-identity-audit.js"
+            ".github/scripts/v25_19-stable-evidence-volatility-conditioning-audit.js"
+            ".github/scripts/v25_20-stable-evidence-volatility-conditioned-persistence-audit.js"
+            ".github/scripts/v25_21-stable-evidence-volatility-conditioned-magnitude-audit.js"
+            ".github/scripts/v25_22-stable-evidence-atr-normalization-decomposition-audit.js"
+            ".github/scripts/v25_23-stable-evidence-extreme-atr-tail-integrity-audit.js"
+            ".github/scripts/v25_24-stable-evidence-atr-normalization-direction-consistency-audit.js"
+            ".github/scripts/v25_25-stable-evidence-high-q4-temporal-concentration-audit.js"
+            ".github/scripts/v25_26-stable-evidence-high-q4-regime-state-attribution-audit.js"
+          )
+
+          for file in "${required[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "Missing required evidence script: $file"
+              exit 1
+            fi
+          done
+
+          echo "All V25.18-V25.26 evidence scripts are present."
+
+      - name: Run V25.28 controlled research specification
+        run: |
+          node .github/scripts/v25_28-controlled-feature-research-specification.js
+
+      - name: Verify V25.28 specification
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const file = 'v25_28_controlled_feature_research_specification.json';
+          if (!fs.existsSync(file)) {
+            throw new Error('V25.28 output JSON was not created.');
+          }
+
+          const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+          if (data.status !== 'CONTROLLED_FEATURE_RESEARCH_SPECIFICATION_COMPLETE') {
+            throw new Error('Unexpected V25.28 status.');
+          }
+
+          if (data.version !== 'V25.28') {
+            throw new Error('Unexpected V25.28 version.');
+          }
+
+          if (data.mode !== 'specification_only') {
+            throw new Error('V25.28 is not running in specification-only mode.');
+          }
+
+          if (data.featurePromotion !== 'PROHIBITED') {
+            throw new Error('Feature promotion must remain prohibited.');
+          }
+
+          if (data.optimization !== 'PROHIBITED') {
+            throw new Error('Optimization must remain prohibited.');
+          }
+
+          if (data.modelFitting !== 'PROHIBITED') {
+            throw new Error('Model fitting must remain prohibited.');
+          }
+
+          if (data.liveTrading !== 'PROHIBITED') {
+            throw new Error('Live trading must remain prohibited.');
+          }
+
+          if (!data.frozenDatasetRequired || data.frozenDatasetSource !== 'V25.10') {
+            throw new Error('Frozen V25.10 dataset requirement is missing.');
+          }
+
+          if (!Array.isArray(data.researchDimensions) ||
+              data.researchDimensions.length !== 7) {
+            throw new Error('Unexpected research-dimension count.');
+          }
+
+          for (const item of data.researchDimensions) {
+            if (item.status !== 'HYPOTHESIS_ONLY') {
+              throw new Error(`Research dimension ${item.id} is not hypothesis-only.`);
+            }
+          }
+
+          console.log('V25.28 specification verification: PASS');
+          NODE
+
+      - name: Print V25.28 summary
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(
+            fs.readFileSync(
+              'v25_28_controlled_feature_research_specification.json',
+              'utf8'
+            )
+          );
+
+          console.log('==============================================');
+          console.log('TradeMind Pro V25.28');
+          console.log('Controlled Feature Research Specification');
+          console.log('==============================================');
+          console.log(`Status: ${d.status}`);
+          console.log(`Research eligibility: ${d.researchEligibility}`);
+          console.log(`Frozen dataset: ${d.frozenDatasetSource}`);
+          console.log(`Evidence chain: ${d.evidenceChain.start} -> ${d.evidenceChain.end}`);
+          console.log(`Gate: ${d.evidenceChain.gate}`);
+          console.log(`Research dimensions: ${d.researchDimensions.length}`);
+          console.log(`Feature promotion: ${d.featurePromotion}`);
+          console.log(`Optimization: ${d.optimization}`);
+          console.log(`Model fitting: ${d.modelFitting}`);
+          console.log(`Live trading: ${d.liveTrading}`);
+          console.log(`Next stage: ${d.nextResearchStage}`);
+          console.log('==============================================');
+          NODE
+
+      - name: Upload V25.28 specification
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-28-controlled-feature-research-specification
+          path: v25_28_controlled_feature_research_specification.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Save V25.28 progress checkpoint
+        run: |
+          cp v25_28_controlled_feature_research_specification.json \
+             v25_28_progress_checkpoint.json
+
+      - name: Upload V25.28 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-28-progress-checkpoint
+          path: v25_28_progress_checkpoint.json
+          if-no-files-found: error
+          retention-days: 90
