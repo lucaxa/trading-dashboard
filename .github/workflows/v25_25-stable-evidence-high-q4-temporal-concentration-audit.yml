@@ -1,0 +1,308 @@
+name: V25.25 Stable Evidence HIGH-Q4 Temporal Concentration Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        run: |
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify rebuilt frozen V25.10 dataset
+        run: |
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: V25.10 dataset was not generated."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 dataset rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 dataset rows detected.")
+
+          if guard.get("learningEngineCalled") is not False:
+              raise SystemExit("Learning engine was called.")
+
+          if guard.get("candidateDiscovery") is not False:
+              raise SystemExit("Candidate discovery was enabled.")
+
+          if guard.get("validation") is not False:
+              raise SystemExit("Validation was enabled.")
+
+          if guard.get("oos") is not False:
+              raise SystemExit("OOS was enabled.")
+
+          if guard.get("strategyModified") is not False:
+              raise SystemExit("Strategy modification was enabled.")
+
+          if guard.get("realOrders") is not False:
+              raise SystemExit("Real orders flag is not false.")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          print("Rows:", dataset.get("rowCount"))
+          print("Features:", dataset.get("featureCount"))
+          print("SHA256:", dataset.get("sha256"))
+          PY
+
+      - name: Run V25.25 HIGH-Q4 temporal concentration audit
+        run: |
+          node .github/scripts/v25_25-stable-evidence-high-q4-temporal-concentration-audit.js
+
+      - name: Print V25.25 concentration summary
+        run: |
+          node - <<'NODE'
+          const r = require(
+            './v25_25_stable_evidence_high_q4_temporal_concentration_audit.json'
+          );
+
+          const compact = (block) => ({
+            block: block.block,
+            rows: block.rows,
+            concentration: block.concentration,
+            strata: block.strata.map(x => ({
+              stratum: x.stratum,
+              rows: x.rows,
+              rawPearson:
+                x.analysis.outcomePearson.rawEmaSpread,
+              normalizedPearson:
+                x.analysis.outcomePearson.normalizedEmaSpreadATR,
+              pearsonNormalizedMinusRaw:
+                x.analysis.outcomePearson.normalizedMinusRaw,
+              rawSpearman:
+                x.analysis.outcomeSpearman.rawEmaSpread,
+              normalizedSpearman:
+                x.analysis.outcomeSpearman.normalizedEmaSpreadATR,
+              spearmanNormalizedMinusRaw:
+                x.analysis.outcomeSpearman.normalizedMinusRaw
+            }))
+          });
+
+          console.log(JSON.stringify({
+            status: r.status,
+            auditPass: r.auditPass,
+            datasetRows: r.source.datasetRows,
+            overall: compact(r.overall),
+            chronologicalBlocks:
+              r.chronologicalBlocks.map(compact)
+          }, null, 2));
+          NODE
+
+      - name: Verify V25.25 audit result
+        run: |
+          node - <<'NODE'
+          const r = require(
+            './v25_25_stable_evidence_high_q4_temporal_concentration_audit.json'
+          );
+
+          if (!r.success || !r.auditPass) {
+            throw new Error("V25.25 audit did not pass.");
+          }
+
+          if (
+            r.version !==
+            "V25.25-STABLE-EVIDENCE-HIGH-Q4-TEMPORAL-CONCENTRATION"
+          ) {
+            throw new Error("Unexpected V25.25 version.");
+          }
+
+          if (r.source.datasetRows !== 7791) {
+            throw new Error("Unexpected V25.10 dataset row count.");
+          }
+
+          if (r.source.featureCount !== 19) {
+            throw new Error("Unexpected feature count.");
+          }
+
+          if (r.policy.sourceFrozen !== true) {
+            throw new Error("Source is not marked frozen.");
+          }
+
+          if (r.policy.datasetModified !== false) {
+            throw new Error("Dataset modification detected.");
+          }
+
+          if (r.policy.featureSelection !== false) {
+            throw new Error("Feature selection was enabled.");
+          }
+
+          if (r.policy.optimization !== false) {
+            throw new Error("Optimization was enabled.");
+          }
+
+          if (r.policy.modelFitting !== false) {
+            throw new Error("Model fitting was enabled.");
+          }
+
+          if (r.policy.strategyValidation !== false) {
+            throw new Error("Strategy validation was enabled.");
+          }
+
+          if (r.policy.strategyModified !== false) {
+            throw new Error("Strategy modification was enabled.");
+          }
+
+          if (r.policy.realOrders !== false) {
+            throw new Error("Real orders flag is not false.");
+          }
+
+          const blocks = [r.overall, ...r.chronologicalBlocks];
+
+          for (const block of blocks) {
+            if (!block.concentration) {
+              throw new Error(
+                `Missing concentration metrics for ${block.block}`
+              );
+            }
+
+            for (const stratum of block.strata) {
+              const identity = stratum.analysis.identityCheck;
+
+              if (
+                identity.count !==
+                identity.exactResidualZeroCount
+              ) {
+                throw new Error(
+                  `Identity residual count failed for ${block.block}/${stratum.stratum}`
+                );
+              }
+
+              if (
+                identity.maxAbsResidual !== null &&
+                identity.maxAbsResidual !== 0
+              ) {
+                throw new Error(
+                  `Identity residual is non-zero for ${block.block}/${stratum.stratum}`
+                );
+              }
+            }
+          }
+
+          console.log("V25.25 audit verification PASS");
+          NODE
+
+      - name: Upload V25.25 audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-25-stable-evidence-high-q4-temporal-concentration-audit
+          path: v25_25_stable_evidence_high_q4_temporal_concentration_audit.json
+          if-no-files-found: error
+
+      - name: Save V25.25 progress checkpoint
+        run: |
+          cat > v25_25_progress_checkpoint.json <<'EOF'
+          {
+            "project": "TradeMind Pro",
+            "stage": "V25.25",
+            "status": "HIGH_Q4_TEMPORAL_CONCENTRATION_AUDIT",
+            "source": "v25_10_learning_dataset.json rebuilt from frozen V25.7 full_s5 artifact",
+            "sourceFrozen": true,
+            "datasetModified": false,
+            "datasetRows": 7791,
+            "featureCount": 19,
+            "paperOnly": true,
+            "realOrders": false,
+            "featureSelection": false,
+            "optimization": false,
+            "modelFitting": false,
+            "validation": false,
+            "oos": false,
+            "strategyModified": false,
+            "purpose": "Descriptively determine whether the HIGH_Q4 raw-vs-ATR-normalized outcome-correlation divergence is temporally concentrated and disproportionately concentrated relative to HIGH_Q1/HIGH_Q2/HIGH_Q3.",
+            "previousEvidence": [
+              "V25.18 mathematical identity audit",
+              "V25.19 volatility conditioning audit",
+              "V25.20 volatility-conditioned persistence audit",
+              "V25.21 volatility-conditioned magnitude audit",
+              "V25.22 ATR normalization decomposition audit",
+              "V25.23 extreme ATR tail audit",
+              "V25.24 ATR normalization direction consistency audit"
+            ],
+            "nextDecision": "Inspect V25.25 result before defining the next evidence-audit step."
+          }
+          EOF
+
+      - name: Upload V25.25 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-25-progress-checkpoint
+          path: v25_25_progress_checkpoint.json
+          if-no-files-found: error
