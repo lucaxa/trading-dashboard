@@ -12,7 +12,7 @@ states.
 
 RESEARCH ONLY
 -------------
-- Frozen V25.10 dataset required.
+- Uses the frozen V25.10 learning dataset.
 - No feature selection.
 - No threshold search.
 - No parameter optimization.
@@ -22,31 +22,35 @@ RESEARCH ONLY
 - No live trading.
 - No broker orders.
 
-This script is intentionally descriptive. It does not
-declare profitability or predictive validity.
+IMPORTANT V25.10 SCHEMA
+-----------------------
+V25.10 stores the actual learning rows at:
 
-INPUT
------
-The script searches for:
-  v25_10_learning_dataset.json
+  learningDataset.records[]
 
-It accepts common frozen-dataset shapes:
-  1) an array of rows
-  2) { rows: [...] }
-  3) { data: [...] }
-  4) { candles: [...] }
-  5) { dataset: [...] }
+Each record contains:
 
-Expected row fields are detected conservatively:
-  - close / price
-  - ema9 / ema_9 / EMA9
-  - ema21 / ema_21 / EMA21
-  - regime / regimeState / regime_state / regimeLabel
-  - timestamp / time / date / datetime
+  {
+    timestamp,
+    istDate,
+    features: {
+      ema9,
+      ema21,
+      ...
+    },
+    label: {
+      futureReturn,
+      futureMovePoints,
+      futureDirection,
+      horizonCandles
+    }
+  }
 
-If regime labels are absent, a deterministic descriptive
-regime proxy is derived from already-present EMA relationship
-and return direction. This proxy is NOT optimized.
+V25.32 therefore uses:
+- EMA9 vs EMA21 from the frozen FEATURES to define regime.
+- Existing frozen FUTURE LABELS only as descriptive outcomes.
+
+Future labels are NEVER used to define the regime itself.
 
 OUTPUT
 ------
@@ -65,6 +69,8 @@ const DATASET_VERSION = "V25.10";
 const INPUT_NAME = "v25_10_learning_dataset.json";
 const OUTPUT_NAME = "v25_32_controlled_regime_transition_research.json";
 
+const WINDOW = 3;
+
 function fail(message) {
   throw new Error(message);
 }
@@ -80,64 +86,58 @@ function loadJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function unwrapRows(value) {
-  if (Array.isArray(value)) return value;
-
-  const keys = ["rows", "data", "candles", "dataset", "records", "items"];
-  for (const key of keys) {
-    if (value && Array.isArray(value[key])) return value[key];
-  }
-
-  return null;
-}
-
 function num(v) {
   if (typeof v === "number" && Number.isFinite(v)) return v;
+
   if (typeof v === "string" && v.trim() !== "") {
     const n = Number(v);
     if (Number.isFinite(n)) return n;
   }
+
   return null;
 }
 
-function pick(row, keys) {
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(row, key)) {
-      const value = num(row[key]);
-      if (value !== null) return value;
-    }
-  }
-  return null;
-}
+function text(v) {
+  if (v === undefined || v === null) return null;
 
-function text(row, keys) {
-  for (const key of keys) {
-    if (row && row[key] !== undefined && row[key] !== null) {
-      const value = String(row[key]).trim();
-      if (value) return value;
-    }
-  }
-  return null;
-}
-
-function timestamp(row, index) {
-  const value = text(row, [
-    "timestamp", "time", "datetime", "date", "Date", "dateTime"
-  ]);
-  if (!value) return index;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : index;
-}
-
-function sign(v) {
-  if (v > 0) return 1;
-  if (v < 0) return -1;
-  return 0;
+  const s = String(v).trim();
+  return s ? s : null;
 }
 
 function sha256(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(value)
+    .digest("hex");
 }
+
+function timestamp(row, index) {
+  const raw =
+    row.timestamp ??
+    row.time ??
+    row.datetime ??
+    row.date ??
+    row.Date ??
+    row.dateTime;
+
+  const numeric = num(raw);
+
+  if (numeric !== null) {
+    return numeric;
+  }
+
+  const parsed = Date.parse(String(raw ?? ""));
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : index;
+}
+
+/*
+-----------------------------------------------------------
+LOAD FROZEN V25.10 DATASET
+-----------------------------------------------------------
+*/
 
 const inputPath = firstExisting([
   path.resolve(INPUT_NAME),
@@ -151,275 +151,539 @@ if (!inputPath) {
 }
 
 const raw = loadJson(inputPath);
+
+/*
+V25.10's authoritative learning rows are:
+
+  raw.learningDataset.records
+
+Compatibility fallbacks are retained only so the research
+script remains safe if the frozen file is wrapped differently.
+*/
+function unwrapRows(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value &&
+    value.learningDataset &&
+    Array.isArray(value.learningDataset.records)
+  ) {
+    return value.learningDataset.records;
+  }
+
+  const keys = [
+    "rows",
+    "data",
+    "candles",
+    "dataset",
+    "records",
+    "items"
+  ];
+
+  for (const key of keys) {
+    if (value && Array.isArray(value[key])) {
+      return value[key];
+    }
+  }
+
+  return null;
+}
+
 const rows = unwrapRows(raw);
 
 if (!rows || rows.length < 20) {
-  fail(`Frozen ${DATASET_VERSION} dataset must contain at least 20 rows.`);
+  fail(
+    `Frozen ${DATASET_VERSION} dataset records must contain at least 20 rows.`
+  );
 }
+
+/*
+-----------------------------------------------------------
+VERIFY THE FROZEN DATASET STRUCTURE
+-----------------------------------------------------------
+*/
 
 const normalized = [];
 
 for (let i = 0; i < rows.length; i++) {
   const row = rows[i] || {};
 
-  const close = pick(row, ["close", "Close", "CLOSE", "price", "last"]);
-  const ema9 = pick(row, ["ema9", "EMA9", "ema_9", "EMA_9"]);
-  const ema21 = pick(row, ["ema21", "EMA21", "ema_21", "EMA_21"]);
+  const features =
+    row.features &&
+    typeof row.features === "object"
+      ? row.features
+      : row;
 
-  if (close === null) continue;
+  const label =
+    row.label &&
+    typeof row.label === "object"
+      ? row.label
+      : {};
 
-  const directRegime = text(row, [
-    "regime", "Regime", "regimeState", "regime_state",
-    "regimeLabel", "regime_label", "marketRegime", "market_regime"
-  ]);
+  const ema9 = num(
+    features.ema9 ??
+    features.EMA9 ??
+    features.ema_9 ??
+    features.EMA_9
+  );
+
+  const ema21 = num(
+    features.ema21 ??
+    features.EMA21 ??
+    features.ema_21 ??
+    features.EMA_21
+  );
+
+  const futureReturn = num(
+    label.futureReturn ??
+    row.futureReturn
+  );
+
+  const futureMovePoints = num(
+    label.futureMovePoints ??
+    row.futureMovePoints
+  );
+
+  const futureDirection = text(
+    label.futureDirection ??
+    row.futureDirection
+  );
+
+  if (
+    ema9 === null ||
+    ema21 === null ||
+    futureReturn === null
+  ) {
+    continue;
+  }
 
   normalized.push({
     index: i,
     t: timestamp(row, i),
-    close,
+    istDate: text(row.istDate),
     ema9,
     ema21,
-    directRegime
+    futureReturn,
+    futureMovePoints,
+    futureDirection
   });
 }
 
 if (normalized.length < 20) {
-  fail("Insufficient usable rows after conservative normalization.");
+  fail(
+    "Frozen V25.10 dataset has fewer than 20 usable learning records after schema validation."
+  );
 }
 
 /*
-Deterministic regime state:
----------------------------
-If a regime label already exists, preserve it.
+-----------------------------------------------------------
+DETERMINISTIC REGIME STATE
+-----------------------------------------------------------
 
-Otherwise:
-  BULL      = EMA9 > EMA21 and return >= 0
-  BEAR      = EMA9 < EMA21 and return < 0
-  TRANSITION= conflicting direction
-  UNKNOWN   = insufficient EMA information
+CRITICAL:
+FutureReturn / futureDirection are NOT used here.
 
-No thresholds are searched or optimized.
+BULL:
+  EMA9 > EMA21
+
+BEAR:
+  EMA9 < EMA21
+
+UNKNOWN:
+  EMA9 === EMA21
+-----------------------------------------------------------
 */
-function stateAt(i) {
-  const r = normalized[i];
-  const prev = i > 0 ? normalized[i - 1] : null;
 
-  if (r.directRegime) return r.directRegime;
-
-  if (r.ema9 === null || r.ema21 === null) return "UNKNOWN";
-
-  const emaSign = sign(r.ema9 - r.ema21);
-
-  if (!prev) {
-    return emaSign > 0 ? "BULL" : emaSign < 0 ? "BEAR" : "UNKNOWN";
+function regimeAt(record) {
+  if (record.ema9 > record.ema21) {
+    return "BULL";
   }
 
-  const ret = prev.close !== 0
-    ? (r.close - prev.close) / Math.abs(prev.close)
-    : 0;
+  if (record.ema9 < record.ema21) {
+    return "BEAR";
+  }
 
-  if (emaSign > 0 && ret >= 0) return "BULL";
-  if (emaSign < 0 && ret < 0) return "BEAR";
-  if (emaSign !== 0) return "TRANSITION";
   return "UNKNOWN";
 }
 
-const states = normalized.map((_, i) => stateAt(i));
+const states = normalized.map(regimeAt);
+
+/*
+-----------------------------------------------------------
+REGIME TRANSITIONS
+-----------------------------------------------------------
+*/
 
 const transitions = [];
+
 for (let i = 1; i < normalized.length; i++) {
   const from = states[i - 1];
   const to = states[i];
 
-  if (from === "UNKNOWN" || to === "UNKNOWN") continue;
+  if (from === "UNKNOWN" || to === "UNKNOWN") {
+    continue;
+  }
 
   if (from !== to) {
     transitions.push({
       index: i,
       from,
       to,
-      timestamp: normalized[i].t
+      timestamp: normalized[i].t,
+      istDate: normalized[i].istDate
     });
   }
 }
 
+/*
+-----------------------------------------------------------
+DESCRIPTIVE OUTCOME SUMMARY
+-----------------------------------------------------------
+
+The frozen futureReturn is already part of V25.10's
+diagnostic label. It is used only to describe what was
+observed around each regime state/transition.
+
+No threshold, trade rule, score, or ranking is created.
+-----------------------------------------------------------
+*/
+
 function summarizeSegment(start, end) {
-  let n = 0;
-  let positive = 0;
-  let sumForward = 0;
-  let sumSignedAlignment = 0;
+  let observations = 0;
+  let positiveFutureReturns = 0;
+  let futureReturnSum = 0;
+  let directionUp = 0;
+  let directionDown = 0;
 
   for (let i = start; i < end; i++) {
-    if (i + 1 >= normalized.length) break;
+    const row = normalized[i];
 
-    const a = normalized[i];
-    const b = normalized[i + 1];
+    if (!row) {
+      continue;
+    }
 
-    if (a.close === 0) continue;
+    observations++;
 
-    const forwardReturn = (b.close - a.close) / Math.abs(a.close);
-    const emaDirection =
-      a.ema9 !== null && a.ema21 !== null
-        ? sign(a.ema9 - a.ema21)
-        : 0;
+    if (row.futureReturn > 0) {
+      positiveFutureReturns++;
+    }
 
-    n++;
-    if (forwardReturn > 0) positive++;
-    sumForward += forwardReturn;
+    futureReturnSum += row.futureReturn;
 
-    if (emaDirection !== 0) {
-      sumSignedAlignment += sign(forwardReturn) === emaDirection ? 1 : -1;
+    const direction =
+      row.futureDirection
+        ? row.futureDirection.toUpperCase()
+        : null;
+
+    if (
+      direction === "UP" ||
+      direction === "BULL" ||
+      direction === "LONG"
+    ) {
+      directionUp++;
+    }
+
+    if (
+      direction === "DOWN" ||
+      direction === "BEAR" ||
+      direction === "SHORT"
+    ) {
+      directionDown++;
     }
   }
 
   return {
-    observations: n,
-    positiveForwardReturns: positive,
-    positiveRate: n ? positive / n : null,
-    meanForwardReturn: n ? sumForward / n : null,
-    signedAlignmentScore: n ? sumSignedAlignment / n : null
+    observations,
+    positiveFutureReturns,
+    positiveRate:
+      observations
+        ? positiveFutureReturns / observations
+        : null,
+    meanFutureReturn:
+      observations
+        ? futureReturnSum / observations
+        : null,
+    directionUp,
+    directionDown
   };
 }
 
-const transitionWindows = [];
-const WINDOW = 3;
-
-for (const tr of transitions) {
-  const before = summarizeSegment(
-    Math.max(0, tr.index - WINDOW),
-    tr.index
-  );
-
-  const after = summarizeSegment(
-    tr.index,
-    Math.min(normalized.length - 1, tr.index + WINDOW)
-  );
-
-  transitionWindows.push({
-    ...tr,
-    before,
-    after,
-    directionChanged:
-      before.signedAlignmentScore !== null &&
-      after.signedAlignmentScore !== null &&
-      Math.sign(before.signedAlignmentScore) !==
-        Math.sign(after.signedAlignmentScore)
-  });
-}
+/*
+-----------------------------------------------------------
+STATE SUMMARY
+-----------------------------------------------------------
+*/
 
 const stateSummary = {};
 
 for (let i = 0; i < states.length; i++) {
   const state = states[i];
+
   if (!stateSummary[state]) {
+    stateSummary[state] = summarizeSegment(0, 0);
+
     stateSummary[state] = {
       observations: 0,
-      positiveForwardReturns: 0,
-      forwardReturnSum: 0,
-      alignmentSum: 0,
-      alignmentObservations: 0
+      positiveFutureReturns: 0,
+      positiveRate: null,
+      meanFutureReturn: null,
+      directionUp: 0,
+      directionDown: 0
     };
   }
 
-  if (i + 1 >= normalized.length) continue;
+  const row = normalized[i];
 
-  const a = normalized[i];
-  const b = normalized[i + 1];
-  if (a.close === 0) continue;
-
-  const forwardReturn = (b.close - a.close) / Math.abs(a.close);
-  const emaDirection =
-    a.ema9 !== null && a.ema21 !== null
-      ? sign(a.ema9 - a.ema21)
-      : 0;
+  if (!row) {
+    continue;
+  }
 
   const s = stateSummary[state];
-  s.observations++;
-  if (forwardReturn > 0) s.positiveForwardReturns++;
-  s.forwardReturnSum += forwardReturn;
 
-  if (emaDirection !== 0) {
-    s.alignmentSum +=
-      sign(forwardReturn) === emaDirection ? 1 : -1;
-    s.alignmentObservations++;
+  s.observations++;
+
+  if (row.futureReturn > 0) {
+    s.positiveFutureReturns++;
+  }
+
+  if (
+    row.futureDirection &&
+    ["UP", "BULL", "LONG"].includes(
+      row.futureDirection.toUpperCase()
+    )
+  ) {
+    s.directionUp++;
+  }
+
+  if (
+    row.futureDirection &&
+    ["DOWN", "BEAR", "SHORT"].includes(
+      row.futureDirection.toUpperCase()
+    )
+  ) {
+    s.directionDown++;
   }
 }
 
-for (const s of Object.values(stateSummary)) {
+for (const state of Object.keys(stateSummary)) {
+  const s = stateSummary[state];
+
+  /*
+  Recalculate mean without retaining a hidden ranking field.
+  */
+  let sum = 0;
+
+  for (let i = 0; i < states.length; i++) {
+    if (states[i] === state && normalized[i]) {
+      sum += normalized[i].futureReturn;
+    }
+  }
+
   s.positiveRate =
-    s.observations ? s.positiveForwardReturns / s.observations : null;
-  s.meanForwardReturn =
-    s.observations ? s.forwardReturnSum / s.observations : null;
-  s.signedAlignmentScore =
-    s.alignmentObservations
-      ? s.alignmentSum / s.alignmentObservations
+    s.observations
+      ? s.positiveFutureReturns / s.observations
       : null;
 
-  delete s.forwardReturnSum;
-  delete s.alignmentSum;
+  s.meanFutureReturn =
+    s.observations
+      ? sum / s.observations
+      : null;
 }
 
-const changedCount = transitionWindows.filter(
-  x => x.directionChanged
-).length;
+/*
+-----------------------------------------------------------
+TRANSITION WINDOWS
+-----------------------------------------------------------
+*/
 
-const interpretableTransitions = transitionWindows.filter(
-  x =>
-    x.before.signedAlignmentScore !== null &&
-    x.after.signedAlignmentScore !== null
-).length;
+const transitionWindows = [];
 
-let status = "MIXED_DESCRIPTIVE_EVIDENCE";
+for (const transition of transitions) {
+  const beforeStart =
+    Math.max(0, transition.index - WINDOW);
+
+  const beforeEnd =
+    transition.index;
+
+  const afterStart =
+    transition.index;
+
+  const afterEnd =
+    Math.min(
+      normalized.length,
+      transition.index + WINDOW
+    );
+
+  const before =
+    summarizeSegment(
+      beforeStart,
+      beforeEnd
+    );
+
+  const after =
+    summarizeSegment(
+      afterStart,
+      afterEnd
+    );
+
+  const beforeMean =
+    before.meanFutureReturn;
+
+  const afterMean =
+    after.meanFutureReturn;
+
+  const directionChanged =
+    beforeMean !== null &&
+    afterMean !== null &&
+    Math.sign(beforeMean) !==
+      Math.sign(afterMean);
+
+  transitionWindows.push({
+    ...transition,
+    windowObservations: WINDOW,
+    before,
+    after,
+    directionChanged
+  });
+}
+
+/*
+-----------------------------------------------------------
+DESCRIPTIVE CLASSIFICATION
+-----------------------------------------------------------
+*/
+
+const interpretableTransitions =
+  transitionWindows.filter(
+    item =>
+      item.before.meanFutureReturn !== null &&
+      item.after.meanFutureReturn !== null
+  ).length;
+
+const directionChangedTransitionCount =
+  transitionWindows.filter(
+    item => item.directionChanged
+  ).length;
+
+let classification =
+  "MIXED_DESCRIPTIVE_EVIDENCE";
 
 if (interpretableTransitions === 0) {
-  status = "INSUFFICIENT_TRANSITION_EVIDENCE";
-} else if (changedCount === 0) {
-  status = "SUPPORTED_DESCRIPTIVELY";
+  classification =
+    "INSUFFICIENT_TRANSITION_EVIDENCE";
+} else if (directionChangedTransitionCount === 0) {
+  classification =
+    "STABLE_DESCRIPTIVE_DIRECTION";
 }
 
-const datasetFingerprint = sha256(
-  fs.readFileSync(inputPath)
-);
+/*
+-----------------------------------------------------------
+RESULT
+-----------------------------------------------------------
+*/
+
+const datasetFingerprint =
+  sha256(
+    fs.readFileSync(inputPath)
+  );
 
 const result = {
-  status: "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE",
+  status:
+    "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE",
+
   version: VERSION,
-  mode: "controlled_descriptive_research",
+
+  mode:
+    "controlled_descriptive_research",
+
   dataset: {
-    requiredVersion: DATASET_VERSION,
-    sourceFile: path.basename(inputPath),
-    rowsRead: rows.length,
-    usableRows: normalized.length,
-    sha256: datasetFingerprint
+    requiredVersion:
+      DATASET_VERSION,
+
+    sourceFile:
+      path.basename(inputPath),
+
+    rowsRead:
+      rows.length,
+
+    usableRows:
+      normalized.length,
+
+    sha256:
+      datasetFingerprint
   },
+
   researchQuestion:
-    "Does the observed EMA relationship remain directionally interpretable through regime transitions, or does its behavior materially change when the market state transitions?",
+    "Does the EMA9-versus-EMA21 relationship remain directionally interpretable through regime transitions, or does the observed future behavior materially change when the EMA-defined market state transitions?",
+
   regimeMethod: {
-    existingLabelsPreserved: true,
-    fallbackProxy: "EMA9_vs_EMA21 plus next-bar return direction",
-    thresholdSearch: false,
-    parameterSearch: false,
-    optimization: false
+    source:
+      "V25.10 frozen learning-record features",
+
+    stateDefinition:
+      "EMA9 > EMA21 = BULL; EMA9 < EMA21 = BEAR; equal = UNKNOWN",
+
+    futureOutcomeUsedToDefineRegime:
+      false,
+
+    thresholdSearch:
+      false,
+
+    parameterSearch:
+      false,
+
+    optimization:
+      false
   },
+
   transitionAnalysis: {
-    transitionCount: transitions.length,
-    interpretableTransitionCount: interpretableTransitions,
-    directionChangedTransitionCount: changedCount,
-    transitionWindowBars: WINDOW
+    transitionCount:
+      transitions.length,
+
+    interpretableTransitionCount:
+      interpretableTransitions,
+
+    directionChangedTransitionCount:
+      directionChangedTransitionCount,
+
+    transitionWindowObservations:
+      WINDOW
   },
+
   stateSummary,
+
   transitionWindows,
+
   conclusion: {
-    classification: status,
-    featureSelection: false,
-    thresholdOptimization: false,
-    parameterOptimization: false,
-    pAndLRanking: false,
-    strategyPromotion: false,
-    predictiveClaim: false,
-    liveTrading: false,
-    brokerOrders: false
+    classification,
+
+    featureSelection:
+      false,
+
+    thresholdOptimization:
+      false,
+
+    parameterOptimization:
+      false,
+
+    pAndLRanking:
+      false,
+
+    strategyPromotion:
+      false,
+
+    predictiveClaim:
+      false,
+
+    liveTrading:
+      false,
+
+    brokerOrders:
+      false
   },
+
   prohibitedConclusions: [
     "feature_is_profitable",
     "feature_should_be_traded",
@@ -427,8 +691,12 @@ const result = {
     "feature_is_predictive_out_of_sample",
     "feature_should_be_promoted_to_strategy"
   ],
-  nextStage: "V25.33",
-  generatedAtUtc: new Date().toISOString()
+
+  nextStage:
+    "V25.33",
+
+  generatedAtUtc:
+    new Date().toISOString()
 };
 
 fs.writeFileSync(
@@ -436,4 +704,6 @@ fs.writeFileSync(
   JSON.stringify(result, null, 2) + "\n"
 );
 
-console.log(JSON.stringify(result, null, 2));
+console.log(
+  JSON.stringify(result, null, 2)
+);
