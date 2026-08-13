@@ -1,0 +1,307 @@
+name: V25.33 Controlled Transition Direction Attribution
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify V25.33 script
+        run: |
+          test -f .github/scripts/v25_33-controlled-transition-direction-attribution.js
+
+      - name: Download latest V25.32 research artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          import zipfile
+          import io
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+
+          url = (
+              f"https://api.github.com/repos/{repo}/actions/artifacts"
+              "?per_page=100"
+          )
+
+          req = urllib.request.Request(
+              url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28"
+              }
+          )
+
+          with urllib.request.urlopen(req) as response:
+              data = json.load(response)
+
+          candidates = [
+              a for a in data.get("artifacts", [])
+              if a.get("name") ==
+              "v25-32-controlled-regime-transition-research"
+              and not a.get("expired", False)
+          ]
+
+          if not candidates:
+              raise SystemExit(
+                  "No usable V25.32 research artifact found."
+              )
+
+          candidates.sort(
+              key=lambda a: a.get("created_at", ""),
+              reverse=True
+          )
+
+          artifact = candidates[0]
+
+          download_url = artifact["archive_download_url"]
+
+          req = urllib.request.Request(
+              download_url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28"
+              }
+          )
+
+          with urllib.request.urlopen(req) as response:
+              blob = response.read()
+
+          with zipfile.ZipFile(io.BytesIO(blob)) as z:
+              names = z.namelist()
+
+              target = None
+
+              for name in names:
+                  if name.endswith(
+                      "v25_32_controlled_regime_transition_research.json"
+                  ):
+                      target = name
+                      break
+
+              if target is None:
+                  raise SystemExit(
+                      "V25.32 JSON result not found inside artifact."
+                  )
+
+              with z.open(target) as src, open(
+                  "v25_32_controlled_regime_transition_research.json",
+                  "wb"
+              ) as dst:
+                  dst.write(src.read())
+
+          print(
+              "Recovered V25.32 research result:",
+              artifact["id"]
+          )
+          PY
+
+      - name: Verify V25.32 source
+        run: |
+          test -s v25_32_controlled_regime_transition_research.json
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "v25_32_controlled_regime_transition_research.json";
+
+          const data =
+            JSON.parse(fs.readFileSync(file, "utf8"));
+
+          if (
+            data.version !== "V25.32"
+          ) {
+            throw new Error(
+              `Unexpected V25.32 version: ${data.version}`
+            );
+          }
+
+          if (
+            data.status !==
+            "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE"
+          ) {
+            throw new Error(
+              "V25.32 source is not a completed research result."
+            );
+          }
+
+          if (
+            !Array.isArray(data.transitionWindows) ||
+            data.transitionWindows.length < 1
+          ) {
+            throw new Error(
+              "V25.32 transition evidence is missing."
+            );
+          }
+
+          console.log(
+            "V25.32 source verified:",
+            data.transitionWindows.length,
+            "transition windows"
+          );
+          NODE
+
+      - name: Run V25.33 controlled transition direction attribution
+        run: |
+          node .github/scripts/v25_33-controlled-transition-direction-attribution.js
+
+      - name: Verify V25.33 result
+        run: |
+          test -s v25_33_controlled_transition_direction_attribution.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "v25_33_controlled_transition_direction_attribution.json";
+
+          const data =
+            JSON.parse(fs.readFileSync(file, "utf8"));
+
+          if (
+            data.version !== "V25.33"
+          ) {
+            throw new Error(
+              `Unexpected V25.33 version: ${data.version}`
+            );
+          }
+
+          if (
+            data.status !==
+            "CONTROLLED_TRANSITION_DIRECTION_ATTRIBUTION_COMPLETE"
+          ) {
+            throw new Error(
+              "V25.33 did not complete correctly."
+            );
+          }
+
+          if (
+            !data.controls ||
+            data.controls.featureSelection !== false ||
+            data.controls.thresholdSearch !== false ||
+            data.controls.parameterSearch !== false ||
+            data.controls.optimization !== false ||
+            data.controls.strategyPromotion !== false
+          ) {
+            throw new Error(
+              "V25.33 research controls are invalid."
+            );
+          }
+
+          if (
+            !data.attribution ||
+            !data.attribution.BULL_TO_BEAR ||
+            !data.attribution.BEAR_TO_BULL
+          ) {
+            throw new Error(
+              "Transition-direction attribution is incomplete."
+            );
+          }
+
+          console.log(
+            "V25.33 result verified."
+          );
+          NODE
+
+      - name: Print V25.33 summary
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const data = JSON.parse(
+            fs.readFileSync(
+              "v25_33_controlled_transition_direction_attribution.json",
+              "utf8"
+            )
+          );
+
+          console.log("=== TRADEMIND PRO V25.33 ===");
+          console.log(
+            "STATUS:",
+            data.status
+          );
+          console.log(
+            "CLASSIFICATION:",
+            data.descriptiveClassification
+          );
+          console.log(
+            "TOTAL DIRECTIONAL TRANSITIONS:",
+            data.transitionUniverse.directionalTransitionCount
+          );
+          console.log(
+            "BULL -> BEAR:",
+            JSON.stringify(
+              data.attribution.BULL_TO_BEAR
+            )
+          );
+          console.log(
+            "BEAR -> BULL:",
+            JSON.stringify(
+              data.attribution.BEAR_TO_BULL
+            )
+          );
+          console.log(
+            "FEATURE SELECTION:",
+            data.controls.featureSelection
+          );
+          console.log(
+            "OPTIMIZATION:",
+            data.controls.optimization
+          );
+          console.log(
+            "STRATEGY PROMOTION:",
+            data.controls.strategyPromotion
+          );
+          NODE
+
+      - name: Upload V25.33 research JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-33-controlled-transition-direction-attribution
+          path: v25_33_controlled_transition_direction_attribution.json
+          if-no-files-found: error
+
+      - name: Save V25.33 progress checkpoint
+        run: |
+          cat > v25_33_progress_checkpoint.json <<'JSON'
+          {
+            "version": "V25.33",
+            "status": "COMPLETE",
+            "stage": "CONTROLLED_TRANSITION_DIRECTION_ATTRIBUTION",
+            "source": "V25.32",
+            "nextStage": "V25.34_CONTROLLED_TRANSITION_CONTEXT_RESEARCH",
+            "featureSelection": false,
+            "optimization": false,
+            "strategyPromotion": false,
+            "liveTrading": false,
+            "brokerOrders": false
+          }
+          JSON
+
+      - name: Upload V25.33 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-33-progress-checkpoint
+          path: v25_33_progress_checkpoint.json
+          if-no-files-found: error
