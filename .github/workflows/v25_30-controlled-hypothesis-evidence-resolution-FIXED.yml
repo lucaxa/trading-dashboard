@@ -1,0 +1,361 @@
+name: TradeMind Pro V25.30 Controlled Hypothesis Evidence Resolution
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    name: V25.30 controlled hypothesis evidence resolution
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify V25.30 script
+        shell: bash
+        run: |
+          test -f .github/scripts/v25_30-controlled-hypothesis-evidence-resolution.js
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        shell: bash
+        run: |
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify frozen V25.10 learning dataset
+        shell: bash
+        run: |
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: v25_10_learning_dataset.json was not generated."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 dataset rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 dataset rows detected.")
+
+          for key in [
+              "learningEngineCalled",
+              "candidateDiscovery",
+              "validation",
+              "oos",
+              "strategyModified",
+              "realOrders"
+          ]:
+              if guard.get(key) is not False:
+                  raise SystemExit(f"V25.10 guard failed: {key}")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          print("Rows:", dataset.get("rowCount"))
+          print("Features:", dataset.get("featureCount"))
+          print("SHA256:", dataset.get("sha256"))
+          PY
+
+      - name: Run V25.18 mathematical identity evidence
+        run: |
+          node .github/scripts/v25_18-stable-evidence-mathematical-identity-audit.js
+
+      - name: Run V25.19 volatility conditioning evidence
+        run: |
+          node .github/scripts/v25_19-stable-evidence-volatility-conditioning-audit.js
+
+      - name: Run V25.20 persistence evidence
+        run: |
+          node .github/scripts/v25_20-stable-evidence-volatility-conditioned-persistence-audit.js
+
+      - name: Run V25.21 magnitude evidence
+        run: |
+          node .github/scripts/v25_21-stable-evidence-volatility-conditioned-magnitude-audit.js
+
+      - name: Run V25.22 ATR decomposition evidence
+        run: |
+          node .github/scripts/v25_22-stable-evidence-atr-normalization-decomposition-audit.js
+
+      - name: Run V25.23 extreme ATR tail evidence
+        run: |
+          node .github/scripts/v25_23-stable-evidence-extreme-atr-tail-integrity-audit.js
+
+      - name: Run V25.24 direction consistency evidence
+        run: |
+          node .github/scripts/v25_24-stable-evidence-atr-normalization-direction-consistency-audit.js
+
+      - name: Run V25.25 HIGH-Q4 temporal concentration evidence
+        run: |
+          node .github/scripts/v25_25-stable-evidence-high-q4-temporal-concentration-audit.js
+
+      - name: Run V25.26 HIGH-Q4 regime-state attribution evidence
+        run: |
+          node .github/scripts/v25_26-stable-evidence-high-q4-regime-state-attribution-audit.js
+
+      - name: Create V25.18-V25.26 evidence compatibility handoff
+        shell: bash
+        run: |
+          cp v25_20_stable_evidence_volatility_conditioned_persistence_audit.json              v25_20_stable_evidence_volatility_conditioning_persistence_audit.json
+
+          cp v25_21_stable_evidence_volatility_conditioned_magnitude_audit.json              v25_21_stable_evidence_volatility_conditioning_magnitude_audit.json
+
+          cp v25_23_stable_evidence_extreme_atr_tail_audit.json              v25_23_stable_evidence_extreme_atr_tail_integrity_audit.json
+
+          echo "V25.18-V25.26 evidence compatibility handoff: PASS"
+
+      - name: Verify complete V25.18-V25.26 evidence chain
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = [
+              "v25_18_stable_evidence_mathematical_identity_audit.json",
+              "v25_19_stable_evidence_volatility_conditioning_audit.json",
+              "v25_20_stable_evidence_volatility_conditioning_persistence_audit.json",
+              "v25_21_stable_evidence_volatility_conditioning_magnitude_audit.json",
+              "v25_22_stable_evidence_atr_normalization_decomposition_audit.json",
+              "v25_23_stable_evidence_extreme_atr_tail_integrity_audit.json",
+              "v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json",
+              "v25_25_stable_evidence_high_q4_temporal_concentration_audit.json",
+              "v25_26_stable_evidence_high_q4_regime_state_attribution_audit.json"
+          ]
+
+          for name in files:
+              path = Path(name)
+              if not path.exists():
+                  raise SystemExit(f"Missing evidence artifact: {name}")
+
+              with path.open("r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              if data.get("auditPass") is not True:
+                  raise SystemExit(f"{name}: auditPass is not true.")
+
+              policy = data.get("policy", {})
+
+              if policy.get("sourceFrozen") is not True:
+                  raise SystemExit(f"{name}: sourceFrozen is not true.")
+
+              for key in [
+                  "datasetModified",
+                  "featureEngineering",
+                  "featureSelection",
+                  "candidateDiscovery",
+                  "strategyDiscovery",
+                  "optimization",
+                  "modelFitting",
+                  "strategyValidation",
+                  "strategyModified",
+                  "realOrders"
+              ]:
+                  if policy.get(key) is not False:
+                      raise SystemExit(f"{name}: policy.{key} is not false.")
+
+          print("V25.18-V25.26 evidence-chain verification: PASS")
+          PY
+
+      - name: Run V25.30 controlled hypothesis evidence resolution
+        run: |
+          node .github/scripts/v25_30-controlled-hypothesis-evidence-resolution.js
+
+      - name: Verify V25.30 result
+        shell: bash
+        run: |
+          test -f v25_30_controlled_hypothesis_evidence_resolution.json
+
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              'v25_30_controlled_hypothesis_evidence_resolution.json',
+              'utf8'
+            )
+          );
+
+          if (r.success !== true) throw new Error('V25.30 success flag is not true.');
+          if (r.version !== 'V25.30-CONTROLLED-HYPOTHESIS-EVIDENCE-RESOLUTION') {
+            throw new Error('Unexpected V25.30 version.');
+          }
+          if (r.auditPass !== true) throw new Error('V25.30 auditPass is not true.');
+          if (r.paperOnly !== true) throw new Error('V25.30 paperOnly guard failed.');
+          if (r.realOrders !== false) throw new Error('V25.30 realOrders guard failed.');
+
+          if (r.policy.sourceFrozen !== true) {
+            throw new Error('Frozen-source guard failed.');
+          }
+
+          for (const key of [
+            'datasetModified',
+            'featureEngineering',
+            'featureSelection',
+            'thresholdSearch',
+            'parameterSearch',
+            'rankingByPnL',
+            'cherryPicking',
+            'candidateDiscovery',
+            'strategyDiscovery',
+            'optimization',
+            'modelFitting',
+            'strategyValidation',
+            'strategyModified',
+            'realOrders'
+          ]) {
+            if (r.policy[key] !== false) {
+              throw new Error(`V25.30 policy guard failed: ${key}`);
+            }
+          }
+
+          if (r.hypotheses.length !== 7) {
+            throw new Error('Expected seven hypotheses.');
+          }
+
+          if (r.guards.learningEngineCalled !== false) {
+            throw new Error('Learning-engine guard failed.');
+          }
+
+          if (r.researchConclusion.decision !== 'NO_FEATURE_SELECTION') {
+            throw new Error('V25.30 feature-selection decision is invalid.');
+          }
+
+          console.log('V25.30 result verification: PASS');
+          NODE
+
+      - name: Print V25.30 summary
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              'v25_30_controlled_hypothesis_evidence_resolution.json',
+              'utf8'
+            )
+          );
+
+          console.log('=== TRADEMIND PRO V25.30 ===');
+          console.log(r.status);
+          console.log('Decision:', r.researchConclusion.decision);
+          console.log('Hypotheses:');
+
+          for (const h of r.hypotheses) {
+            console.log(`${h.id}: ${h.status}`);
+          }
+
+          console.log('Audit pass:', r.auditPass);
+          NODE
+
+      - name: Upload V25.30 evidence-resolution JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-30-controlled-hypothesis-evidence-resolution
+          path: v25_30_controlled_hypothesis_evidence_resolution.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Save V25.30 progress checkpoint
+        shell: bash
+        run: |
+          cat > v25_30_progress_checkpoint.json <<'JSON'
+          {
+            "project": "TradeMind Pro",
+            "stage": "V25.30",
+            "status": "CONTROLLED_HYPOTHESIS_EVIDENCE_RESOLUTION_COMPLETE",
+            "source": "V25.10 rebuilt from frozen V25.7 full_s5 artifact",
+            "sourceFrozen": true,
+            "datasetModified": false,
+            "featureSelection": false,
+            "optimization": false,
+            "modelFitting": false,
+            "strategyModified": false,
+            "realOrders": false,
+            "nextStage": "HUMAN_REVIEW_BEFORE_ANY_NEW_RESEARCH_PROTOCOL"
+          }
+          JSON
+
+      - name: Upload V25.30 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-30-progress-checkpoint
+          path: v25_30_progress_checkpoint.json
+          if-no-files-found: error
+          retention-days: 90
