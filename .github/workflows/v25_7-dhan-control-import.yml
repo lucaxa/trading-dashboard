@@ -107,7 +107,6 @@ jobs:
             "windowResults":[{"window":r["window"],"httpStatus":r["httpStatus"],"rawRows":r["rawRows"],"invalidOHLCRows":r["invalidOHLCRows"],"timestampAnomalyRows":r["timestampAnomalyRows"],"negativeVolumeRows":r["negativeVolumeRows"],"removedRows":r["removedRows"],"cleanRows":len(r["cleanRows"]),"timestampAnomalies":r["timestampAnomalies"]} for r in results],
             "integrity":{"chronological":chronological,"duplicateTimestamps":duplicate,"remainingTimestampAnomalies":len(remaining),"remainingShortSpacingRows":sum(1 for x in remaining if x["diffSeconds"]<300),"allOHLCValid":all_valid,"negativeVolumeRetained":neg,"rowCount":len(canonical)},
             "remainingTimestampAnomalies":remaining,
-            "expectedS5Reference":{"rawRows":9392,"invalidOHLCRows":2,"timestampAnomalyRows":5,"canonicalRows":9385} if MODE=="full_s5" else None,
             "guard":{"learningRecordsGenerated":False,"learningDatasetCalled":False,"learningEngineCalled":False,"candidateDiscovery":False,"validation":False,"oos":False,"strategyModified":False,"realOrders":False},
             "canonicalRows":canonical
           }
