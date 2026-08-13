@@ -1,0 +1,141 @@
+name: V25.20 Stable Evidence Volatility Conditioned Persistence Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.10 learning dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-10-learning-dataset
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31714266120
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.10 dataset
+        run: |
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: v25_10_learning_dataset.json was not found."
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          records = data.get("learningDataset", {}).get("records", [])
+
+          print(json.dumps({
+              "status": data.get("status"),
+              "frozen": data.get("learningDataset", {}).get("frozen"),
+              "datasetRows": len(records),
+              "featureCount": data.get("learningDataset", {}).get("featureCount")
+          }, indent=2))
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("Frozen V25.10 dataset status is invalid.")
+
+          if data.get("learningDataset", {}).get("frozen") is not True:
+              raise SystemExit("Frozen V25.10 dataset is not marked frozen.")
+
+          if len(records) != 7791:
+              raise SystemExit("Unexpected V25.10 dataset row count.")
+
+          if data.get("learningDataset", {}).get("featureCount") != 19:
+              raise SystemExit("Unexpected V25.10 feature count.")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          PY
+
+      - name: Run V25.20 persistence audit
+        run: |
+          node .github/scripts/v25_20-stable-evidence-volatility-conditioned-persistence-audit.js
+
+      - name: Print V25.20 persistence summary
+        run: |
+          if [ -f v25_20_stable_evidence_volatility_conditioned_persistence_audit.json ]; then
+            cat v25_20_stable_evidence_volatility_conditioned_persistence_audit.json
+          else
+            echo "V25.20 output JSON was not generated."
+            exit 1
+          fi
+
+      - name: Verify V25.20 audit result
+        run: |
+          python3 - <<'PY'
+          import json
+
+          with open(
+              "v25_20_stable_evidence_volatility_conditioned_persistence_audit.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+          print(json.dumps({
+              "version": data.get("version"),
+              "status": data.get("status"),
+              "datasetRows": data.get("source", {}).get("datasetRows"),
+              "featureCount": data.get("source", {}).get("featureCount"),
+              "thresholds": data.get("methodology", {}).get("thresholds"),
+              "highVolatilityFocus": data.get("highVolatilityFocus"),
+              "auditPass": data.get("auditPass")
+          }, indent=2))
+
+          if data.get("status") != "VOLATILITY_CONDITIONED_PERSISTENCE_AUDIT_COMPLETE":
+              raise SystemExit("V25.20 persistence audit did not complete.")
+
+          if data.get("auditPass") is not True:
+              raise SystemExit("V25.20 auditPass is not true.")
+
+          methodology = data.get("methodology", {})
+
+          if methodology.get("thresholdSourceBlock") != "EARLY":
+              raise SystemExit("V25.20 threshold source block is not EARLY.")
+
+          if methodology.get("thresholdsAppliedUnchangedToAllBlocks") is not True:
+              raise SystemExit("V25.20 thresholds were not fixed across blocks.")
+
+          if methodology.get("noFutureThresholdRecalculation") is not True:
+              raise SystemExit("V25.20 future-threshold guard failed.")
+
+          if methodology.get("persistenceDefinition") is None:
+              raise SystemExit("V25.20 persistence definition is missing.")
+
+          guards = data.get("guards", {})
+
+          for key in [
+              "learningEngineCalled",
+              "featureSelection",
+              "candidateDiscovery",
+              "strategyDiscovery",
+              "optimization",
+              "modelFitting",
+              "validation",
+              "oos",
+              "strategyModified",
+              "realOrders"
+          ]:
+              if guards.get(key) is not False:
+                  raise SystemExit(f"V25.20 guard failed: {key}")
+
+          print("V25.20 stable evidence volatility-conditioned persistence audit: PASS")
+          PY
+
+      - name: Upload V25.20 persistence audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-20-stable-evidence-volatility-conditioned-persistence-audit
+          path: v25_20_stable_evidence_volatility_conditioned_persistence_audit.json
+          if-no-files-found: error
