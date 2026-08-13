@@ -1,11 +1,7 @@
-name: TradeMind Pro V25.24 ATR Normalization Direction Consistency Audit
+name: V25.24 Stable Evidence ATR Normalization Direction Consistency Audit
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: read
-  actions: read
 
 jobs:
   audit:
@@ -15,130 +11,280 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download frozen V25.10 learning dataset
+      - name: Download frozen V25.7 full S5 artifact
         uses: actions/download-artifact@v4
         with:
-          name: v25-10-learning-dataset
+          name: v25-7-full_s5-import
           path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
 
-      - name: Verify frozen V25.10 dataset
-        shell: bash
+      - name: Verify frozen V25.7 dataset
         run: |
-          test -f v25_10_learning_dataset.json
-          echo "Frozen V25.10 learning dataset found."
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify rebuilt frozen V25.10 dataset
+        run: |
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: V25.10 dataset was not generated."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 dataset rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 dataset rows detected.")
+
+          if guard.get("learningEngineCalled") is not False:
+              raise SystemExit("Learning engine was called.")
+
+          if guard.get("candidateDiscovery") is not False:
+              raise SystemExit("Candidate discovery was enabled.")
+
+          if guard.get("validation") is not False:
+              raise SystemExit("Validation was enabled.")
+
+          if guard.get("oos") is not False:
+              raise SystemExit("OOS was enabled.")
+
+          if guard.get("strategyModified") is not False:
+              raise SystemExit("Strategy modification was enabled.")
+
+          if guard.get("realOrders") is not False:
+              raise SystemExit("Real orders flag is not false.")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          print("Rows:", dataset.get("rowCount"))
+          print("Features:", dataset.get("featureCount"))
+          print("SHA256:", dataset.get("sha256"))
+          PY
 
       - name: Run V25.24 ATR normalization direction consistency audit
-        run: node .github/scripts/v25_24-stable-evidence-atr-normalization-direction-consistency-audit.js
+        run: |
+          node .github/scripts/v25_24-stable-evidence-atr-normalization-direction-consistency-audit.js
 
       - name: Print V25.24 direction consistency summary
         run: |
           node - <<'NODE'
-          const fs = require("fs");
-
-          const file =
-            "v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json";
-
-          const result = JSON.parse(
-            fs.readFileSync(file, "utf8")
+          const r = require(
+            './v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json'
           );
 
-          console.log(
-            JSON.stringify(
-              {
-                status: result.status,
-                datasetRows: result.source.datasetRows,
-                overallConsistency: result.overall.consistency,
-                overallStrata: result.overall.strata.map((x) => ({
-                  stratum: x.stratum,
-                  rows: x.rows,
-                  pearsonNormalizedMinusRaw:
-                    x.analysis.outcomePearson.normalizedMinusRaw,
-                  pearsonDirection:
-                    x.direction.pearsonNormalizedMinusRaw,
-                  spearmanNormalizedMinusRaw:
-                    x.analysis.outcomeSpearman.normalizedMinusRaw,
-                  spearmanDirection:
-                    x.direction.spearmanNormalizedMinusRaw
-                })),
-                chronologicalBlocks:
-                  result.chronologicalBlocks.map((block) => ({
-                    block: block.block,
-                    consistency: block.consistency
-                  })),
-                auditPass: result.auditPass
-              },
-              null,
-              2
-            )
-          );
+          console.log(JSON.stringify({
+            status: r.status,
+            auditPass: r.auditPass,
+            datasetRows: r.source.datasetRows,
+
+            overallConsistency:
+              r.overall.consistency,
+
+            overallStrata:
+              r.overall.strata.map(x => ({
+                stratum: x.stratum,
+                rows: x.rows,
+                atrLowerBound: x.atrLowerBound,
+                atrUpperBound: x.atrUpperBound,
+
+                rawPearson:
+                  x.analysis.outcomePearson.rawEmaSpread,
+
+                normalizedPearson:
+                  x.analysis.outcomePearson.normalizedEmaSpreadATR,
+
+                pearsonNormalizedMinusRaw:
+                  x.analysis.outcomePearson.normalizedMinusRaw,
+
+                pearsonDirection:
+                  x.direction.pearsonNormalizedMinusRaw,
+
+                rawSpearman:
+                  x.analysis.outcomeSpearman.rawEmaSpread,
+
+                normalizedSpearman:
+                  x.analysis.outcomeSpearman.normalizedEmaSpreadATR,
+
+                spearmanNormalizedMinusRaw:
+                  x.analysis.outcomeSpearman.normalizedMinusRaw,
+
+                spearmanDirection:
+                  x.direction.spearmanNormalizedMinusRaw
+              })),
+
+            chronologicalBlocks:
+              r.chronologicalBlocks.map(b => ({
+                block: b.block,
+                rows: b.rows,
+                consistency: b.consistency,
+
+                strata:
+                  b.strata.map(x => ({
+                    stratum: x.stratum,
+                    rows: x.rows,
+                    pearsonNormalizedMinusRaw:
+                      x.analysis.outcomePearson.normalizedMinusRaw,
+                    pearsonDirection:
+                      x.direction.pearsonNormalizedMinusRaw,
+                    spearmanNormalizedMinusRaw:
+                      x.analysis.outcomeSpearman.normalizedMinusRaw,
+                    spearmanDirection:
+                      x.direction.spearmanNormalizedMinusRaw
+                  }))
+              }))
+          }, null, 2));
           NODE
 
       - name: Verify V25.24 audit result
-        shell: bash
         run: |
           node - <<'NODE'
-          const fs = require("fs");
-
-          const file =
-            "v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json";
-
-          if (!fs.existsSync(file)) {
-            throw new Error(
-              "V25.24 output file not found."
-            );
-          }
-
-          const result = JSON.parse(
-            fs.readFileSync(file, "utf8")
+          const r = require(
+            './v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json'
           );
 
-          if (
-            result.success !== true ||
-            result.auditPass !== true
-          ) {
-            throw new Error(
-              "V25.24 audit did not pass."
-            );
+          if (!r.success || !r.auditPass) {
+            throw new Error("V25.24 audit did not pass.");
           }
 
           if (
-            result.version !==
+            r.version !==
             "V25.24-STABLE-EVIDENCE-ATR-NORMALIZATION-DIRECTION-CONSISTENCY"
           ) {
-            throw new Error(
-              "Unexpected V25.24 version."
-            );
+            throw new Error("Unexpected V25.24 version.");
           }
 
-          if (
-            result.source.datasetRows !== 7791
-          ) {
-            throw new Error(
-              "V25.24 dataset row-count guard failed."
-            );
+          if (r.source.datasetRows !== 7791) {
+            throw new Error("Unexpected V25.10 dataset row count.");
           }
 
-          if (
-            result.source.featureCount !== 19
-          ) {
-            throw new Error(
-              "V25.24 feature-count guard failed."
-            );
+          if (r.source.featureCount !== 19) {
+            throw new Error("Unexpected feature count.");
           }
 
-          if (
-            result.policy.sourceFrozen !== true ||
-            result.policy.datasetModified !== false ||
-            result.policy.featureSelection !== false ||
-            result.policy.optimization !== false ||
-            result.policy.modelFitting !== false ||
-            result.policy.validation !== false ||
-            result.policy.strategyModified !== false ||
-            result.policy.realOrders !== false
-          ) {
-            throw new Error(
-              "V25.24 policy guard failed."
-            );
+          if (r.policy.sourceFrozen !== true) {
+            throw new Error("Source is not marked frozen.");
+          }
+
+          if (r.policy.datasetModified !== false) {
+            throw new Error("Dataset modification detected.");
+          }
+
+          if (r.policy.featureSelection !== false) {
+            throw new Error("Feature selection was enabled.");
+          }
+
+          if (r.policy.optimization !== false) {
+            throw new Error("Optimization was enabled.");
+          }
+
+          if (r.policy.modelFitting !== false) {
+            throw new Error("Model fitting was enabled.");
+          }
+
+          if (r.policy.strategyValidation !== false) {
+            throw new Error("Strategy validation was enabled.");
+          }
+
+          if (r.policy.strategyModified !== false) {
+            throw new Error("Strategy modification was enabled.");
+          }
+
+          if (r.policy.realOrders !== false) {
+            throw new Error("Real orders flag is not false.");
+          }
+
+          for (const block of [
+            r.overall,
+            ...r.chronologicalBlocks
+          ]) {
+            for (const stratum of block.strata) {
+              const identity =
+                stratum.analysis.identityCheck;
+
+              if (
+                identity.count !==
+                identity.exactResidualZeroCount
+              ) {
+                throw new Error(
+                  `Identity residual count failed for ${
+                    block.block || "OVERALL"
+                  }/${stratum.stratum}`
+                );
+              }
+
+              if (
+                identity.maxAbsResidual !== null &&
+                identity.maxAbsResidual !== 0
+              ) {
+                throw new Error(
+                  `Identity residual is non-zero for ${
+                    block.block || "OVERALL"
+                  }/${stratum.stratum}`
+                );
+              }
+            }
           }
 
           console.log(
@@ -154,20 +300,25 @@ jobs:
           if-no-files-found: error
 
       - name: Save V25.24 progress checkpoint
-        shell: bash
         run: |
-          cat > v25_24_progress_checkpoint.json <<'JSON'
+          cat > v25_24_progress_checkpoint.json <<'EOF'
           {
             "project": "TradeMind Pro",
-            "version": "V25.24",
-            "stage": "STABLE_EVIDENCE_ATR_NORMALIZATION_DIRECTION_CONSISTENCY",
-            "status": "COMPLETE_IF_AUDIT_PASSES",
-            "sourceDataset": "v25_10_learning_dataset.json",
-            "datasetFrozen": true,
+            "stage": "V25.24",
+            "status": "ATR_NORMALIZATION_DIRECTION_CONSISTENCY_AUDIT",
+            "source": "v25_10_learning_dataset.json rebuilt from frozen V25.7 full_s5 artifact",
+            "sourceFrozen": true,
+            "datasetModified": false,
             "datasetRows": 7791,
             "featureCount": 19,
             "paperOnly": true,
             "realOrders": false,
+            "featureSelection": false,
+            "optimization": false,
+            "modelFitting": false,
+            "validation": false,
+            "oos": false,
+            "strategyModified": false,
             "purpose": "Descriptively test whether the raw-vs-ATR-normalized outcome-correlation difference remains directionally consistent across fixed ATR strata inside the HIGH-volatility region.",
             "previousEvidence": [
               "V25.18 mathematical identity audit",
@@ -177,17 +328,9 @@ jobs:
               "V25.22 ATR normalization decomposition audit",
               "V25.23 extreme ATR tail integrity audit"
             ],
-            "nextDecision": "Inspect V25.24 result before defining the next evidence-audit step.",
-            "sourceModified": false,
-            "strategyModified": false,
-            "featureSelection": false,
-            "optimization": false,
-            "modelFitting": false,
-            "validation": false,
-            "oos": false,
-            "realOrders": false
+            "nextDecision": "Inspect V25.24 result before defining the next evidence-audit step."
           }
-          JSON
+          EOF
 
       - name: Upload V25.24 progress checkpoint
         uses: actions/upload-artifact@v4
