@@ -1,0 +1,325 @@
+name: V25.26 Stable Evidence HIGH-Q4 Regime-State Attribution Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        run: |
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify rebuilt frozen V25.10 dataset
+        run: |
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: V25.10 dataset was not generated."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 dataset rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 dataset rows detected.")
+
+          if guard.get("learningEngineCalled") is not False:
+              raise SystemExit("Learning engine was called.")
+
+          if guard.get("candidateDiscovery") is not False:
+              raise SystemExit("Candidate discovery was enabled.")
+
+          if guard.get("validation") is not False:
+              raise SystemExit("Validation was enabled.")
+
+          if guard.get("oos") is not False:
+              raise SystemExit("OOS was enabled.")
+
+          if guard.get("strategyModified") is not False:
+              raise SystemExit("Strategy modification was enabled.")
+
+          if guard.get("realOrders") is not False:
+              raise SystemExit("Real orders flag is not false.")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          print("Rows:", dataset.get("rowCount"))
+          print("Features:", dataset.get("featureCount"))
+          print("SHA256:", dataset.get("sha256"))
+          PY
+
+      - name: Run V25.26 HIGH-Q4 regime-state attribution audit
+        run: |
+          node .github/scripts/v25_26-stable-evidence-high-q4-regime-state-attribution-audit.js
+
+      - name: Print V25.26 regime-state summary
+        run: |
+          node - <<'NODE'
+          const r = require(
+            './v25_26_stable_evidence_high_q4_regime_state_attribution_audit.json'
+          );
+
+          const compactFeature = (name, x) => ({
+            feature: name,
+            highQ4Mean: x.strata.HIGH_Q4.mean,
+            nonQ4MeanDifference: x.q4VsNonQ4.meanDifference,
+            highQ4Median: x.strata.HIGH_Q4.median,
+            nonQ4MedianDifference: x.q4VsNonQ4.medianDifference,
+            standardizedMeanDifference:
+              x.q4VsNonQ4.standardizedMeanDifference
+          });
+
+          const compact = (block) => ({
+            block: block.block,
+            rows: block.rows,
+            highRows: block.highRows,
+            stratumCounts: block.stratumCounts,
+            featureStateDifferences:
+              Object.entries(block.featureAnalyses)
+                .map(([name, x]) => compactFeature(name, x))
+          });
+
+          console.log(JSON.stringify({
+            status: r.status,
+            auditPass: r.auditPass,
+            datasetRows: r.source.datasetRows,
+            overall: compact(r.overall),
+            chronologicalBlocks:
+              r.chronologicalBlocks.map(compact),
+            identityGuard: r.identityGuard
+          }, null, 2));
+          NODE
+
+      - name: Verify V25.26 audit result
+        run: |
+          node - <<'NODE'
+          const r = require(
+            './v25_26_stable_evidence_high_q4_regime_state_attribution_audit.json'
+          );
+
+          if (!r.success || !r.auditPass) {
+            throw new Error("V25.26 audit did not pass.");
+          }
+
+          if (
+            r.version !==
+            "V25.26-STABLE-EVIDENCE-HIGH-Q4-REGIME-STATE-ATTRIBUTION"
+          ) {
+            throw new Error("Unexpected V25.26 version.");
+          }
+
+          if (r.source.datasetRows !== 7791) {
+            throw new Error("Unexpected V25.10 dataset row count.");
+          }
+
+          if (r.source.featureCount !== 19) {
+            throw new Error("Unexpected feature count.");
+          }
+
+          if (r.policy.sourceFrozen !== true) {
+            throw new Error("Source is not marked frozen.");
+          }
+
+          if (r.policy.datasetModified !== false) {
+            throw new Error("Dataset modification detected.");
+          }
+
+          if (r.policy.featureEngineering !== false) {
+            throw new Error("Feature engineering was enabled.");
+          }
+
+          if (r.policy.featureSelection !== false) {
+            throw new Error("Feature selection was enabled.");
+          }
+
+          if (r.policy.optimization !== false) {
+            throw new Error("Optimization was enabled.");
+          }
+
+          if (r.policy.modelFitting !== false) {
+            throw new Error("Model fitting was enabled.");
+          }
+
+          if (r.policy.strategyValidation !== false) {
+            throw new Error("Strategy validation was enabled.");
+          }
+
+          if (r.policy.strategyModified !== false) {
+            throw new Error("Strategy modification was enabled.");
+          }
+
+          if (r.policy.realOrders !== false) {
+            throw new Error("Real orders flag is not false.");
+          }
+
+          if (r.identityGuard.count !== r.identityGuard.exactResidualZeroCount) {
+            throw new Error("emaSpreadATR identity count guard failed.");
+          }
+
+          if (r.identityGuard.maxAbsResidual !== 0) {
+            throw new Error("emaSpreadATR identity residual is non-zero.");
+          }
+
+          const requiredFeatures = r.source.approvedFeatures;
+
+          if (!Array.isArray(requiredFeatures) || requiredFeatures.length !== 19) {
+            throw new Error("Unexpected approved feature list length.");
+          }
+
+          const blocks = [r.overall, ...r.chronologicalBlocks];
+
+          for (const block of blocks) {
+            if (!block.featureAnalyses) {
+              throw new Error(
+                `Missing feature analyses for ${block.block}`
+              );
+            }
+
+            for (const feature of requiredFeatures) {
+              const analysis = block.featureAnalyses[feature];
+
+              if (!analysis) {
+                throw new Error(
+                  `Missing analysis for ${block.block}/${feature}`
+                );
+              }
+
+              if (
+                !analysis.q4VsNonQ4 ||
+                !analysis.strata ||
+                !analysis.strata.HIGH_Q4
+              ) {
+                throw new Error(
+                  `Incomplete feature analysis for ${block.block}/${feature}`
+                );
+              }
+            }
+          }
+
+          console.log("V25.26 audit verification PASS");
+          NODE
+
+      - name: Upload V25.26 audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-26-stable-evidence-high-q4-regime-state-attribution-audit
+          path: v25_26_stable_evidence_high_q4_regime_state_attribution_audit.json
+          if-no-files-found: error
+
+      - name: Save V25.26 progress checkpoint
+        run: |
+          cat > v25_26_progress_checkpoint.json <<'EOF'
+          {
+            "project": "TradeMind Pro",
+            "stage": "V25.26",
+            "status": "HIGH_Q4_REGIME_STATE_ATTRIBUTION_AUDIT",
+            "source": "v25_10_learning_dataset.json rebuilt from frozen V25.7 full_s5 artifact",
+            "sourceFrozen": true,
+            "datasetModified": false,
+            "datasetRows": 7791,
+            "featureCount": 19,
+            "paperOnly": true,
+            "realOrders": false,
+            "featureEngineering": false,
+            "featureSelection": false,
+            "optimization": false,
+            "modelFitting": false,
+            "validation": false,
+            "oos": false,
+            "strategyModified": false,
+            "purpose": "Determine descriptively whether HIGH_Q4 exhibits a distinct state profile across the already-approved frozen feature set and whether that profile persists across EARLY, MIDDLE and LATE.",
+            "previousEvidence": [
+              "V25.18 mathematical identity audit",
+              "V25.19 volatility conditioning audit",
+              "V25.20 volatility-conditioned persistence audit",
+              "V25.21 volatility-conditioned magnitude audit",
+              "V25.22 ATR normalization decomposition audit",
+              "V25.23 extreme ATR tail audit",
+              "V25.24 ATR normalization direction consistency audit",
+              "V25.25 HIGH_Q4 temporal concentration audit"
+            ],
+            "nextDecision": "Inspect V25.26 result before defining the next evidence-audit step."
+          }
+          EOF
+
+      - name: Upload V25.26 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-26-progress-checkpoint
+          path: v25_26_progress_checkpoint.json
+          if-no-files-found: error
