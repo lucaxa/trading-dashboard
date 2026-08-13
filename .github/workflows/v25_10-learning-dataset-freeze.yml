@@ -1,0 +1,166 @@
+name: V25.10 Learning Dataset Freeze
+
+on:
+  workflow_dispatch:
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        run: |
+          echo "Checking frozen V25.7 artifact..."
+
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          summary = {
+              "version": data.get("version"),
+              "status": data.get("status"),
+              "mode": data.get("mode"),
+              "canonicalRows": data.get("counts", {}).get("canonicalRows"),
+              "integrity": data.get("integrity")
+          }
+
+          print(json.dumps(summary, indent=2))
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("Frozen V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("Frozen V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Frozen V25.7 canonical row count is not 9385.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Frozen V25.7 dataset failed chronological check.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Frozen V25.7 dataset contains duplicate timestamps.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("Frozen V25.7 dataset contains invalid OHLC.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Run V25.10 learning dataset freeze
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify V25.10 frozen learning dataset
+        run: |
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: V25.10 dataset was not generated."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          summary = {
+              "version": data.get("version"),
+              "status": data.get("status"),
+              "sourceRows": data.get("source", {}).get("sourceRows"),
+              "datasetRowCount": dataset.get("rowCount"),
+              "featureCount": dataset.get("featureCount"),
+              "sha256": dataset.get("sha256"),
+              "datasetFrozen": dataset.get("frozen"),
+              "learningRecordAuditPass": data.get("learningRecordAudit", {}).get("learningRecordAuditPass"),
+              "datasetInvalidRows": audit.get("datasetInvalidRows"),
+              "datasetDuplicateRows": audit.get("datasetDuplicateRows"),
+              "learningEngineCalled": guard.get("learningEngineCalled"),
+              "candidateDiscovery": guard.get("candidateDiscovery"),
+              "validation": guard.get("validation"),
+              "oos": guard.get("oos"),
+              "strategyModified": guard.get("strategyModified"),
+              "realOrders": guard.get("realOrders")
+          }
+
+          print(json.dumps(summary, indent=2))
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 dataset freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 dataset frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 dataset row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("V25.10 contains invalid dataset rows.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("V25.10 contains duplicate dataset rows.")
+
+          if guard.get("learningEngineCalled") is not False:
+              raise SystemExit("Learning engine was called unexpectedly.")
+
+          if guard.get("candidateDiscovery") is not False:
+              raise SystemExit("Candidate discovery was enabled unexpectedly.")
+
+          if guard.get("validation") is not False:
+              raise SystemExit("Validation was enabled unexpectedly.")
+
+          if guard.get("oos") is not False:
+              raise SystemExit("OOS testing was enabled unexpectedly.")
+
+          if guard.get("strategyModified") is not False:
+              raise SystemExit("Strategy modification was enabled unexpectedly.")
+
+          if guard.get("realOrders") is not False:
+              raise SystemExit("Real orders flag is not false.")
+
+          print("V25.10 learning dataset freeze verification: PASS")
+          PY
+
+      - name: Print V25.10 dataset summary
+        run: |
+          cat v25_10_learning_dataset.json
+
+      - name: Upload V25.10 frozen learning dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-10-learning-dataset
+          path: v25_10_learning_dataset.json
+          if-no-files-found: error
