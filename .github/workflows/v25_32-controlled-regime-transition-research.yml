@@ -1,0 +1,226 @@
+name: V25.32 Controlled Regime Transition Research
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  research:
+    name: V25.32 controlled regime transition research
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify V25.32 script
+        shell: bash
+        run: |
+          test -f .github/scripts/v25_32-controlled-regime-transition-research.js
+
+      - name: Locate frozen V25.10 dataset
+        id: locate_dataset
+        shell: bash
+        run: |
+          set -e
+          found=""
+          for p in \
+            "v25_10_learning_dataset.json" \
+            ".github/scripts/v25_10_learning_dataset.json" \
+            ".github/data/v25_10_learning_dataset.json" \
+            "data/v25_10_learning_dataset.json"
+          do
+            if [ -f "$p" ]; then
+              found="$p"
+              break
+            fi
+          done
+
+          if [ -n "$found" ]; then
+            echo "dataset_found=true" >> "$GITHUB_OUTPUT"
+            echo "dataset_path=$found" >> "$GITHUB_OUTPUT"
+            echo "Frozen V25.10 dataset found at $found"
+          else
+            echo "dataset_found=false" >> "$GITHUB_OUTPUT"
+            echo "Frozen V25.10 dataset is not present in the checked-out tree."
+          fi
+
+      - name: Recover frozen V25.10 dataset from latest V25.31 artifact
+        if: steps.locate_dataset.outputs.dataset_found != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p .v25_recovery
+
+          RUN_ID="$(
+            gh run list \
+              --workflow "v25_31-controlled-independent-confirmation.yml" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId'
+          )"
+
+          if [ -z "${RUN_ID:-}" ]; then
+            echo "Could not locate a successful V25.31 workflow run."
+            exit 1
+          fi
+
+          echo "Using successful V25.31 run: $RUN_ID"
+
+          gh run download "$RUN_ID" \
+            --dir .v25_recovery
+
+          DATASET="$(
+            find .v25_recovery -type f \
+              -name 'v25_10_learning_dataset.json' \
+              -print -quit
+          )"
+
+          if [ -z "${DATASET:-}" ]; then
+            echo "V25.10 dataset was not found in the recovered V25.31 artifacts."
+            exit 1
+          fi
+
+          cp "$DATASET" ./v25_10_learning_dataset.json
+
+      - name: Verify frozen V25.10 dataset
+        shell: bash
+        run: |
+          set -e
+          test -f v25_10_learning_dataset.json
+          node - <<'NODE'
+          const fs = require("fs");
+          const raw = JSON.parse(fs.readFileSync("v25_10_learning_dataset.json", "utf8"));
+          const keys = ["rows","data","candles","dataset","records","items"];
+          const rows = Array.isArray(raw)
+            ? raw
+            : keys.map(k => raw && raw[k]).find(Array.isArray);
+
+          if (!rows || rows.length < 20) {
+            throw new Error("Frozen V25.10 dataset is invalid or contains fewer than 20 rows.");
+          }
+
+          console.log(`Frozen V25.10 dataset verified: ${rows.length} rows`);
+          NODE
+
+      - name: Run V25.32 controlled regime transition research
+        shell: bash
+        run: |
+          node .github/scripts/v25_32-controlled-regime-transition-research.js
+
+      - name: Verify V25.32 result
+        shell: bash
+        run: |
+          test -f v25_32_controlled_regime_transition_research.json
+          node - <<'NODE'
+          const fs = require("fs");
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_32_controlled_regime_transition_research.json",
+              "utf8"
+            )
+          );
+
+          if (r.status !== "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE") {
+            throw new Error("Unexpected V25.32 status.");
+          }
+
+          if (r.conclusion.featureSelection !== false) {
+            throw new Error("Feature selection must remain prohibited.");
+          }
+
+          if (r.conclusion.thresholdOptimization !== false) {
+            throw new Error("Threshold optimization must remain prohibited.");
+          }
+
+          if (r.conclusion.parameterOptimization !== false) {
+            throw new Error("Parameter optimization must remain prohibited.");
+          }
+
+          if (r.conclusion.strategyPromotion !== false) {
+            throw new Error("Strategy promotion must remain prohibited.");
+          }
+
+          if (r.conclusion.liveTrading !== false) {
+            throw new Error("Live trading must remain prohibited.");
+          }
+
+          if (r.conclusion.brokerOrders !== false) {
+            throw new Error("Broker orders must remain prohibited.");
+          }
+
+          console.log("V25.32 verification passed.");
+          NODE
+
+      - name: Print V25.32 summary
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_32_controlled_regime_transition_research.json",
+              "utf8"
+            )
+          );
+
+          console.log("=== TRADEMIND PRO V25.32 ===");
+          console.log("Status:", r.status);
+          console.log("Classification:", r.conclusion.classification);
+          console.log("Transitions:", r.transitionAnalysis.transitionCount);
+          console.log(
+            "Interpretable transitions:",
+            r.transitionAnalysis.interpretableTransitionCount
+          );
+          console.log(
+            "Direction-changing transitions:",
+            r.transitionAnalysis.directionChangedTransitionCount
+          );
+          console.log("Optimization:", r.regimeMethod.optimization);
+          console.log("Feature selection:", r.conclusion.featureSelection);
+          console.log("Strategy promotion:", r.conclusion.strategyPromotion);
+          NODE
+
+      - name: Upload V25.32 research JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-32-controlled-regime-transition-research
+          path: v25_32_controlled_regime_transition_research.json
+          if-no-files-found: error
+
+      - name: Save V25.32 progress checkpoint
+        shell: bash
+        run: |
+          cat > v25_32_progress_checkpoint.json <<'JSON'
+          {
+            "version": "V25.32",
+            "stage": "CONTROLLED_REGIME_TRANSITION_RESEARCH",
+            "dataset": "V25.10",
+            "mode": "controlled_descriptive_research",
+            "featurePromotion": false,
+            "optimization": false,
+            "modelFitting": false,
+            "liveTrading": false,
+            "brokerOrders": false,
+            "nextStage": "V25.33"
+          }
+          JSON
+
+      - name: Upload V25.32 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-32-progress-checkpoint
+          path: v25_32_progress_checkpoint.json
+          if-no-files-found: error
