@@ -1,307 +1,124 @@
-name: V25.7 Dhan Control Import
+name: V25.7 Dhan Historical Import
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Import mode
+        required: true
+        default: control
+        type: choice
+        options:
+          - control
+          - full_s5
 
 jobs:
-  control-import:
+  import:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run V25.7 Dhan control import
+      - name: Run V25.7 Dhan import
         env:
           DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+          IMPORT_MODE: ${{ inputs.mode }}
         run: |
           python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
+          import json, os, urllib.request
           from pathlib import Path
 
           ENDPOINT = "https://api.dhan.co/v2/charts/intraday"
-
-          WINDOW = {
-              "id": "S5-CONTROL-7D",
-              "fromDate": "2021-12-28 00:00:00",
-              "toDate": "2022-01-04 00:00:00"
-          }
-
           TOKEN = os.environ.get("DHAN_ACCESS_TOKEN")
-
+          MODE = os.environ.get("IMPORT_MODE", "control")
           if not TOKEN:
               raise SystemExit("DHAN_ACCESS_TOKEN secret is missing.")
 
-          payload = {
-              "securityId": "13",
-              "exchangeSegment": "IDX_I",
-              "instrument": "INDEX",
-              "interval": "5",
-              "oi": False,
-              "fromDate": WINDOW["fromDate"],
-              "toDate": WINDOW["toDate"]
-          }
-
-          request = urllib.request.Request(
-              ENDPOINT,
-              data=json.dumps(payload).encode("utf-8"),
-              headers={
-                  "Content-Type": "application/json",
-                  "access-token": TOKEN
-              },
-              method="POST"
-          )
-
-          try:
-              with urllib.request.urlopen(request, timeout=60) as response:
-                  status = response.status
-                  raw = response.read().decode("utf-8")
-          except Exception as e:
-              raise SystemExit(f"Dhan request failed: {e}")
-
-          try:
-              data = json.loads(raw)
-          except Exception:
-              raise SystemExit(
-                  f"Dhan returned non-JSON HTTP {status}: {raw[:1000]}"
-              )
-
-          if status < 200 or status >= 300:
-              raise SystemExit(
-                  f"Dhan HTTP {status}: {json.dumps(data)[:2000]}"
-              )
-
-          timestamps = data.get("timestamp", [])
-          opens = data.get("open", [])
-          highs = data.get("high", [])
-          lows = data.get("low", [])
-          closes = data.get("close", [])
-          volumes = data.get("volume", [])
-
-          count = min(
-              len(timestamps),
-              len(opens),
-              len(highs),
-              len(lows),
-              len(closes),
-              len(volumes)
-          )
-
-          rows = []
-
-          for i in range(count):
-              rows.append({
-                  "sourceIndex": i,
-                  "ts": timestamps[i],
-                  "open": opens[i],
-                  "high": highs[i],
-                  "low": lows[i],
-                  "close": closes[i],
-                  "volume": volumes[i]
-              })
-
-          def valid_ohlc(row):
-              try:
-                  o = float(row["open"])
-                  h = float(row["high"])
-                  l = float(row["low"])
-                  c = float(row["close"])
-              except Exception:
-                  return False
-
-              return (
-                  h >= l and
-                  h >= max(o, c) and
-                  l <= min(o, c)
-              )
-
-          invalid_ohlc = set()
-
-          for i, row in enumerate(rows):
-              if not valid_ohlc(row):
-                  invalid_ohlc.add(i)
-
-          timestamp_anomalies = set()
-          anomaly_details = []
-
-          for i in range(1, len(rows)):
-              try:
-                  previous = float(rows[i - 1]["ts"])
-                  current = float(rows[i]["ts"])
-              except Exception:
-                  timestamp_anomalies.add(i)
-                  anomaly_details.append({
-                      "index": i,
-                      "reason": "INVALID_TIMESTAMP"
-                  })
-                  continue
-
-              diff = current - previous
-
-              if diff <= 0 or diff < 300:
-                  timestamp_anomalies.add(i)
-                  anomaly_details.append({
-                      "index": i,
-                      "previousTimestamp": previous,
-                      "timestamp": current,
-                      "diffSeconds": diff,
-                      "reason": (
-                          "DUPLICATE_TIMESTAMP"
-                          if diff == 0
-                          else
-                          "NON_MONOTONIC_TIMESTAMP"
-                          if diff < 0
-                          else
-                          "SHORT_SPACING"
-                      )
-                  })
-
-          canonical = [
-              row
-              for i, row in enumerate(rows)
-              if i not in invalid_ohlc
-              and i not in timestamp_anomalies
-              and row["ts"] is not None
+          CONTROL = [{"id":"S5-CONTROL-7D","fromDate":"2021-12-28 00:00:00","toDate":"2022-01-04 00:00:00"}]
+          S5 = [
+            {"id":"S5-A","fromDate":"2021-12-28 00:00:00","toDate":"2022-02-26 00:00:00"},
+            {"id":"S5-B","fromDate":"2022-02-26 00:00:00","toDate":"2022-04-27 00:00:00"},
+            {"id":"S5-C","fromDate":"2022-04-27 00:00:00","toDate":"2022-06-26 00:00:00"}
           ]
+          windows = S5 if MODE == "full_s5" else CONTROL
 
-          canonical.sort(key=lambda x: float(x["ts"]))
+          def valid_ohlc(r):
+              try: o,h,l,c = map(float,(r["open"],r["high"],r["low"],r["close"]))
+              except Exception: return False
+              return h >= l and h >= max(o,c) and l <= min(o,c)
 
-          seen = set()
-          deduped = []
+          def fetch(w):
+              payload={"securityId":"13","exchangeSegment":"IDX_I","instrument":"INDEX","interval":"5","oi":False,"fromDate":w["fromDate"],"toDate":w["toDate"]}
+              req=urllib.request.Request(ENDPOINT,data=json.dumps(payload).encode(),headers={"Content-Type":"application/json","access-token":TOKEN},method="POST")
+              try:
+                  with urllib.request.urlopen(req,timeout=60) as resp:
+                      status=resp.status; raw=resp.read().decode()
+              except Exception as e: raise SystemExit(f"Dhan request failed for {w['id']}: {e}")
+              try: data=json.loads(raw)
+              except Exception: raise SystemExit(f"Non-JSON Dhan response for {w['id']} HTTP {status}: {raw[:1000]}")
+              if not 200 <= status < 300: raise SystemExit(f"Dhan HTTP {status} for {w['id']}: {json.dumps(data)[:2000]}")
+              ts,op,hi,lo,cl,vo=[data.get(k,[]) for k in ("timestamp","open","high","low","close","volume")]
+              n=min(map(len,(ts,op,hi,lo,cl,vo)))
+              rows=[{"sourceWindow":w["id"],"sourceIndex":i,"ts":ts[i],"open":op[i],"high":hi[i],"low":lo[i],"close":cl[i],"volume":vo[i]} for i in range(n)]
+              bad_ohlc={i for i,r in enumerate(rows) if not valid_ohlc(r)}
+              bad_ts=set(); details=[]
+              for i in range(1,len(rows)):
+                  try: diff=float(rows[i]["ts"])-float(rows[i-1]["ts"])
+                  except Exception: bad_ts.add(i); details.append({"index":i,"reason":"INVALID_TIMESTAMP"}); continue
+                  if diff <= 0 or diff < 300:
+                      bad_ts.add(i); details.append({"index":i,"diffSeconds":diff,"reason":"DUPLICATE_TIMESTAMP" if diff==0 else "NON_MONOTONIC_TIMESTAMP" if diff<0 else "SHORT_SPACING"})
+              clean=[r for i,r in enumerate(rows) if i not in bad_ohlc and i not in bad_ts and r["ts"] is not None]
+              clean.sort(key=lambda r:float(r["ts"]))
+              return {"window":w,"httpStatus":status,"rawRows":len(rows),"invalidOHLCRows":len(bad_ohlc),"timestampAnomalyRows":len(bad_ts),"negativeVolumeRows":sum(float(r["volume"])<0 for r in clean),"removedRows":len(rows)-len(clean),"cleanRows":clean,"timestampAnomalies":details}
 
-          for row in canonical:
-              ts = float(row["ts"])
+          results=[]; all_clean=[]
+          print(f"V25.7 mode: {MODE}")
+          for w in windows:
+              r=fetch(w); results.append(r); all_clean.extend(r["cleanRows"])
+              print(json.dumps({"window":w["id"],"rawRows":r["rawRows"],"invalidOHLCRows":r["invalidOHLCRows"],"timestampAnomalyRows":r["timestampAnomalyRows"],"negativeVolumeRows":r["negativeVolumeRows"],"cleanRows":len(r["cleanRows"])},indent=2))
 
-              if ts in seen:
-                  continue
+          all_clean.sort(key=lambda r:float(r["ts"]))
+          seen=set(); canonical=[]; cross_duplicates=0
+          for r in all_clean:
+              t=float(r["ts"])
+              if t in seen: cross_duplicates+=1; continue
+              seen.add(t); canonical.append(r)
 
-              seen.add(ts)
-              deduped.append(row)
+          remaining=[]
+          for i in range(1,len(canonical)):
+              d=float(canonical[i]["ts"])-float(canonical[i-1]["ts"])
+              if d <= 0 or d < 300: remaining.append({"index":i,"diffSeconds":d,"timestamp":canonical[i]["ts"]})
 
-          chronological = all(
-              float(deduped[i]["ts"]) >
-              float(deduped[i - 1]["ts"])
-              for i in range(1, len(deduped))
-          )
+          chronological=all(float(canonical[i]["ts"])>float(canonical[i-1]["ts"]) for i in range(1,len(canonical)))
+          duplicate=len({float(r["ts"]) for r in canonical}) != len(canonical)
+          all_valid=all(valid_ohlc(r) for r in canonical)
+          neg=sum(float(r["volume"])<0 for r in canonical)
+          raw_total=sum(r["rawRows"] for r in results)
+          invalid_total=sum(r["invalidOHLCRows"] for r in results)
+          anomaly_total=sum(r["timestampAnomalyRows"] for r in results)
+          integrity_pass=chronological and not duplicate and not remaining and all_valid
 
-          duplicate_timestamps = (
-              len({float(x["ts"]) for x in deduped})
-              != len(deduped)
-          )
-
-          all_ohlc_valid = all(
-              valid_ohlc(row)
-              for row in deduped
-          )
-
-          negative_volume_rows = sum(
-              1
-              for row in deduped
-              if float(row["volume"]) < 0
-          )
-
-          report = {
-              "success": True,
-              "version": "V25.7-GITHUB-ACTIONS-CONTROL-v1",
-              "status": "CONTROL_IMPORT_COMPLETE",
-              "mode": "HISTORICAL_DATA_ONLY",
-              "paperOnly": True,
-              "realOrders": False,
-              "brokerOrderEnabled": False,
-              "brokerOrderSent": False,
-
-              "source": {
-                  "provider": "Dhan",
-                  "endpoint": ENDPOINT,
-                  "securityId": "13",
-                  "exchangeSegment": "IDX_I",
-                  "instrument": "INDEX",
-                  "interval": "5",
-                  "oi": False
-              },
-
-              "window": WINDOW,
-
-              "approvedPolicy": {
-                  "invalidOHLC": "REMOVE",
-                  "timestampAnomalies": "REMOVE_ONLY_ANOMALOUS_ROWS",
-                  "negativeVolume": "RETAIN",
-                  "timestampRepair": False,
-                  "candleRepair": False,
-                  "syntheticCandles": False
-              },
-
-              "counts": {
-                  "rawRows": len(rows),
-                  "invalidOHLCRows": len(invalid_ohlc),
-                  "timestampAnomalyRows": len(timestamp_anomalies),
-                  "rowsAfterCleaning": len(canonical),
-                  "crossDuplicateRows": len(canonical) - len(deduped),
-                  "canonicalRows": len(deduped),
-                  "negativeVolumeRows": negative_volume_rows
-              },
-
-              "integrity": {
-                  "chronological": chronological,
-                  "duplicateTimestamps": duplicate_timestamps,
-                  "remainingTimestampAnomalies": 0,
-                  "remainingShortSpacingRows": 0,
-                  "allOHLCValid": all_ohlc_valid,
-                  "negativeVolumeRetained": negative_volume_rows,
-                  "rowCount": len(deduped)
-              },
-
-              "timestampAnomalies": anomaly_details,
-
-              "guard": {
-                  "learningRecordsGenerated": False,
-                  "learningDatasetCalled": False,
-                  "learningEngineCalled": False,
-                  "candidateDiscovery": False,
-                  "validation": False,
-                  "oos": False,
-                  "strategyModified": False,
-                  "realOrders": False
-              },
-
-              "canonicalRows": deduped
+          report={
+            "success":True,"version":"V25.7-GITHUB-ACTIONS-IMPORT-v2","status":"IMPORT_COMPLETE" if integrity_pass else "IMPORT_FAILED_INTEGRITY_GATE","mode":MODE,
+            "paperOnly":True,"realOrders":False,"brokerOrderEnabled":False,"brokerOrderSent":False,
+            "source":{"provider":"Dhan","endpoint":ENDPOINT,"securityId":"13","exchangeSegment":"IDX_I","instrument":"INDEX","interval":"5","oi":False},
+            "approvedPolicy":{"invalidOHLC":"REMOVE","timestampAnomalies":"REMOVE_ONLY_ANOMALOUS_ROWS","negativeVolume":"RETAIN","timestampRepair":False,"candleRepair":False,"syntheticCandles":False},
+            "counts":{"rawRows":raw_total,"invalidOHLCRows":invalid_total,"timestampAnomalyRows":anomaly_total,"rowsAfterWindowCleaning":len(all_clean),"crossWindowDuplicateRows":cross_duplicates,"canonicalRows":len(canonical),"removedRows":raw_total-len(canonical),"retainedPct":round(len(canonical)/raw_total*100,4) if raw_total else 0,"negativeVolumeRows":neg},
+            "windowResults":[{"window":r["window"],"httpStatus":r["httpStatus"],"rawRows":r["rawRows"],"invalidOHLCRows":r["invalidOHLCRows"],"timestampAnomalyRows":r["timestampAnomalyRows"],"negativeVolumeRows":r["negativeVolumeRows"],"removedRows":r["removedRows"],"cleanRows":len(r["cleanRows"]),"timestampAnomalies":r["timestampAnomalies"]} for r in results],
+            "integrity":{"chronological":chronological,"duplicateTimestamps":duplicate,"remainingTimestampAnomalies":len(remaining),"remainingShortSpacingRows":sum(1 for x in remaining if x["diffSeconds"]<300),"allOHLCValid":all_valid,"negativeVolumeRetained":neg,"rowCount":len(canonical)},
+            "remainingTimestampAnomalies":remaining,
+            "expectedS5Reference":{"rawRows":9392,"invalidOHLCRows":2,"timestampAnomalyRows":5,"canonicalRows":9385} if MODE=="full_s5" else None,
+            "guard":{"learningRecordsGenerated":False,"learningDatasetCalled":False,"learningEngineCalled":False,"candidateDiscovery":False,"validation":False,"oos":False,"strategyModified":False,"realOrders":False},
+            "canonicalRows":canonical
           }
-
-          if (
-              not chronological
-              or duplicate_timestamps
-              or not all_ohlc_valid
-          ):
-              report["status"] = "CONTROL_IMPORT_FAILED_INTEGRITY_GATE"
-
-          output = Path("v25_7_control_import.json")
-
-          output.write_text(
-              json.dumps(report, indent=2),
-              encoding="utf-8"
-          )
-
-          print(json.dumps({
-              "status": report["status"],
-              "rawRows": len(rows),
-              "invalidOHLCRows": len(invalid_ohlc),
-              "timestampAnomalyRows": len(timestamp_anomalies),
-              "canonicalRows": len(deduped),
-              "negativeVolumeRows": negative_volume_rows,
-              "chronological": chronological,
-              "duplicateTimestamps": duplicate_timestamps,
-              "allOHLCValid": all_ohlc_valid
-          }, indent=2))
-
-          if report["status"] != "CONTROL_IMPORT_COMPLETE":
-              raise SystemExit("CONTROL IMPORT FAILED INTEGRITY GATE.")
+          Path("v25_7_import.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
+          print(json.dumps({"status":report["status"],"integrityGate":"PASS" if integrity_pass else "FAIL","rawRows":raw_total,"invalidOHLCRows":invalid_total,"timestampAnomalyRows":anomaly_total,"crossWindowDuplicateRows":cross_duplicates,"canonicalRows":len(canonical),"negativeVolumeRows":neg,"chronological":chronological,"duplicateTimestamps":duplicate,"remainingTimestampAnomalies":len(remaining),"allOHLCValid":all_valid},indent=2))
+          if not integrity_pass: raise SystemExit("IMPORT FAILED INTEGRITY GATE.")
           PY
 
-      - name: Upload control-import JSON
+      - name: Upload import JSON
         uses: actions/upload-artifact@v4
         with:
-          name: v25-7-control-import
-          path: v25_7_control_import.json
+          name: v25-7-${{ inputs.mode }}-import
+          path: v25_7_import.json
           if-no-files-found: error
