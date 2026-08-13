@@ -165,6 +165,25 @@ if (source.transitionWindows.length < 1) {
   );
 }
 
+if (
+  !source.dataset ||
+  source.dataset.requiredVersion !== DATASET_VERSION
+) {
+  fail(
+    "V25.32 frozen dataset metadata is invalid."
+  );
+}
+
+if (
+  !Number.isFinite(Number(source.dataset.rowsRead)) ||
+  !Number.isFinite(Number(source.dataset.usableRows))
+) {
+  fail(
+    "V25.32 dataset row metadata is invalid."
+  );
+}
+
+
 /*
 -----------------------------------------------------------
 TRANSITION-DIRECTION ATTRIBUTION
@@ -378,6 +397,12 @@ if (
 ) {
   classification =
     "INSUFFICIENT_DIRECTIONAL_TRANSITION_EVIDENCE";
+} else if (
+  groups.BULL_TO_BEAR.length === 0 ||
+  groups.BEAR_TO_BULL.length === 0
+) {
+  classification =
+    "ONE_SIDED_TRANSITION_EVIDENCE";
 } else if (
   bullToBearRate !== null &&
   bearToBullRate !== null &&
