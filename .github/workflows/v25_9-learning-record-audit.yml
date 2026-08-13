@@ -1,0 +1,81 @@
+name: V25.9 Learning Record Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        run: |
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          checks = {
+              "status": data.get("status"),
+              "mode": data.get("mode"),
+              "canonicalRows": data.get("counts", {}).get("canonicalRows"),
+              "chronological": data.get("integrity", {}).get("chronological"),
+              "duplicateTimestamps": data.get("integrity", {}).get("duplicateTimestamps"),
+              "allOHLCValid": data.get("integrity", {}).get("allOHLCValid")
+          }
+
+          print(json.dumps(checks, indent=2))
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("Frozen V25.7 dataset is not IMPORT_COMPLETE.")
+          if data.get("mode") != "full_s5":
+              raise SystemExit("Frozen dataset is not full_s5.")
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+          if data.get("integrity", {}).get("chronological") is not True:
+              raise SystemExit("Frozen dataset failed chronological integrity.")
+          if data.get("integrity", {}).get("duplicateTimestamps") is not False:
+              raise SystemExit("Frozen dataset contains duplicate timestamps.")
+          if data.get("integrity", {}).get("allOHLCValid") is not True:
+              raise SystemExit("Frozen dataset contains invalid OHLC.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Run V25.9 learning record audit
+        run: |
+          node .github/scripts/v25_9-learning-record-audit.js
+
+      - name: Print V25.9 audit summary
+        run: |
+          if [ -f v25_9_learning_record_audit.json ]; then
+            cat v25_9_learning_record_audit.json
+          else
+            echo "V25.9 audit JSON was not generated."
+            exit 1
+          fi
+
+      - name: Upload V25.9 audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-9-learning-record-audit
+          path: v25_9_learning_record_audit.json
+          if-no-files-found: error
