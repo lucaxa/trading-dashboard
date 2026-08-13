@@ -1,0 +1,216 @@
+name: V25.23 Stable Evidence Extreme ATR Tail Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        run: |
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify rebuilt frozen V25.10 dataset
+        run: |
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: V25.10 dataset was not generated."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 dataset rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 dataset rows detected.")
+
+          if guard.get("learningEngineCalled") is not False:
+              raise SystemExit("Learning engine was called.")
+
+          if guard.get("candidateDiscovery") is not False:
+              raise SystemExit("Candidate discovery was enabled.")
+
+          if guard.get("validation") is not False:
+              raise SystemExit("Validation was enabled.")
+
+          if guard.get("oos") is not False:
+              raise SystemExit("OOS was enabled.")
+
+          if guard.get("strategyModified") is not False:
+              raise SystemExit("Strategy modification was enabled.")
+
+          if guard.get("realOrders") is not False:
+              raise SystemExit("Real orders flag is not false.")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          print("Rows:", dataset.get("rowCount"))
+          print("Features:", dataset.get("featureCount"))
+          print("SHA256:", dataset.get("sha256"))
+          PY
+
+      - name: Run V25.23 extreme ATR tail audit
+        run: |
+          node .github/scripts/v25_23-stable-evidence-extreme-atr-tail-audit.js
+
+      - name: Print V25.23 audit summary
+        run: |
+          node - <<'NODE'
+          const r = require('./v25_23_stable_evidence_extreme_atr_tail_audit.json');
+
+          console.log(JSON.stringify({
+            status: r.status,
+            auditPass: r.auditPass,
+            highQ4Rows: r.overallHighQ4.rows,
+            highQ4Thresholds: r.methodology.highQ4Thresholds,
+            overallSensitivity:
+              r.overallHighQ4.tailSensitivity.map(x => ({
+                view: x.view,
+                rows: x.rowsAfterExclusion,
+                excludedRows: x.excludedRows,
+                atrCutoff: x.atrCutoff,
+                rawPearson:
+                  x.analysis.outcomePearson.rawEmaSpread,
+                normalizedPearson:
+                  x.analysis.outcomePearson.normalizedEmaSpreadATR,
+                divergence:
+                  x.analysis.outcomePearson.normalizedMinusRaw
+              })),
+            chronologicalBlocks:
+              r.chronologicalBlocks.map(b => ({
+                block: b.block,
+                highQ4Rows: b.analysis.highQ4Rows,
+                sensitivity:
+                  b.analysis.tailSensitivity.map(x => ({
+                    view: x.view,
+                    rows: x.rowsAfterExclusion,
+                    rawPearson:
+                      x.analysis.outcomePearson.rawEmaSpread,
+                    normalizedPearson:
+                      x.analysis.outcomePearson.normalizedEmaSpreadATR,
+                    divergence:
+                      x.analysis.outcomePearson.normalizedMinusRaw
+                  }))
+              }))
+          }, null, 2));
+          NODE
+
+      - name: Verify V25.23 audit result
+        run: |
+          node - <<'NODE'
+          const r = require('./v25_23_stable_evidence_extreme_atr_tail_audit.json');
+
+          if (!r.success || !r.auditPass) process.exit(1);
+
+          if (!r.interpretation.extremeAtrSensitivityTested) process.exit(1);
+          if (!r.interpretation.chronologicalPersistenceTested) process.exit(1);
+          if (!r.interpretation.constantScalingCannotChangePearson) process.exit(1);
+          if (!r.interpretation.sourceRowsNeverRemoved &&
+              r.interpretation.sourceRowsNeverRemoved !== undefined) process.exit(1);
+
+          console.log('V25.23 audit verification PASS');
+          NODE
+
+      - name: Upload V25.23 audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-23-stable-evidence-extreme-atr-tail-audit
+          path: v25_23_stable_evidence_extreme_atr_tail_audit.json
+          if-no-files-found: error
+
+      - name: Save V25.23 progress checkpoint
+        run: |
+          cat > v25_23_progress_checkpoint.json <<'EOF'
+          {
+            "project": "TradeMind Pro",
+            "stage": "V25.23",
+            "status": "EXTREME_ATR_TAIL_INTEGRITY_AUDIT",
+            "source": "v25_10_learning_dataset.json rebuilt from frozen V25.7 full_s5 artifact",
+            "sourceFrozen": true,
+            "datasetModified": false,
+            "strategyModified": false,
+            "realOrders": false,
+            "nextDecision": "Determine whether HIGH_Q4 divergence is persistent or concentrated in the extreme ATR tail before any feature-selection or strategy work."
+          }
+          EOF
+
+      - name: Upload V25.23 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-23-progress-checkpoint
+          path: v25_23_progress_checkpoint.json
+          if-no-files-found: error
