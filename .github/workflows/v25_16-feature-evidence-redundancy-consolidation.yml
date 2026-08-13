@@ -14,10 +14,10 @@ jobs:
       - name: Download frozen V25.10 learning dataset
         uses: actions/download-artifact@v4
         with:
-          name: v25-10-frozen-learning-dataset
+          name: v25-10-learning-dataset
           path: .
           repository: ${{ github.repository }}
-          run-id: 317142666120
+          run-id: 31714266120
           github-token: ${{ github.token }}
 
       - name: Verify frozen V25.10 dataset
