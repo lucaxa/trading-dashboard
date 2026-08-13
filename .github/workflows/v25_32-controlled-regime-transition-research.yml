@@ -1,4 +1,4 @@
-name: V25.32 Controlled Regime Transition Research
+name: TradeMind Pro V25.32 Controlled Regime Transition Research
 
 on:
   workflow_dispatch:
@@ -26,97 +26,338 @@ jobs:
         run: |
           test -f .github/scripts/v25_32-controlled-regime-transition-research.js
 
-      - name: Locate frozen V25.10 dataset
-        id: locate_dataset
-        shell: bash
-        run: |
-          set -e
-          found=""
-          for p in \
-            "v25_10_learning_dataset.json" \
-            ".github/scripts/v25_10_learning_dataset.json" \
-            ".github/data/v25_10_learning_dataset.json" \
-            "data/v25_10_learning_dataset.json"
-          do
-            if [ -f "$p" ]; then
-              found="$p"
-              break
-            fi
-          done
+      # ----------------------------------------------------------
+      # Recreate the frozen V25.10 input deterministically.
+      #
+      # IMPORTANT:
+      # Do NOT recover V25.10 from a "latest V25.31" workflow.
+      # GitHub Actions artifacts are transient and workflow-name
+      # lookups can fail. V25.31 already proved the deterministic
+      # V25.7 -> V25.10 reconstruction path.
+      # ----------------------------------------------------------
 
-          if [ -n "$found" ]; then
-            echo "dataset_found=true" >> "$GITHUB_OUTPUT"
-            echo "dataset_path=$found" >> "$GITHUB_OUTPUT"
-            echo "Frozen V25.10 dataset found at $found"
-          else
-            echo "dataset_found=false" >> "$GITHUB_OUTPUT"
-            echo "Frozen V25.10 dataset is not present in the checked-out tree."
-          fi
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
 
-      - name: Recover frozen V25.10 dataset from latest V25.31 artifact
-        if: steps.locate_dataset.outputs.dataset_found != 'true'
+      - name: Verify frozen V25.7 dataset
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          mkdir -p .v25_recovery
-
-          RUN_ID="$(
-            gh run list \
-              --workflow "v25_31-controlled-independent-confirmation.yml" \
-              --status success \
-              --limit 1 \
-              --json databaseId \
-              --jq '.[0].databaseId'
-          )"
-
-          if [ -z "${RUN_ID:-}" ]; then
-            echo "Could not locate a successful V25.31 workflow run."
+          if [ ! -f v25_7_import.json ]; then
+            echo "ERROR: v25_7_import.json was not found."
+            find . -maxdepth 3 -type f | sort
             exit 1
           fi
 
-          echo "Using successful V25.31 run: $RUN_ID"
+          python3 - <<'PY'
+          import json
 
-          gh run download "$RUN_ID" \
-            --dir .v25_recovery
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
 
-          DATASET="$(
-            find .v25_recovery -type f \
-              -name 'v25_10_learning_dataset.json' \
-              -print -quit
-          )"
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
 
-          if [ -z "${DATASET:-}" ]; then
-            echo "V25.10 dataset was not found in the recovered V25.31 artifacts."
-            exit 1
-          fi
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
 
-          cp "$DATASET" ./v25_10_learning_dataset.json
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
 
-      - name: Verify frozen V25.10 dataset
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          print("Canonical rows:", data.get("counts", {}).get("canonicalRows"))
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
         shell: bash
         run: |
-          set -e
-          test -f v25_10_learning_dataset.json
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify frozen V25.10 learning dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: v25_10_learning_dataset.json was not generated."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 dataset rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 dataset rows detected.")
+
+          for key in [
+              "learningEngineCalled",
+              "candidateDiscovery",
+              "validation",
+              "oos",
+              "strategyModified",
+              "realOrders"
+          ]:
+              if guard.get(key) is not False:
+                  raise SystemExit(f"V25.10 guard failed: {key}")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          print("Rows:", dataset.get("rowCount"))
+          print("Features:", dataset.get("featureCount"))
+          print("SHA256:", dataset.get("sha256"))
+          PY
+
+      # ----------------------------------------------------------
+      # Recreate the complete evidence chain needed by V25.32.
+      # This prevents dependency on transient files from older
+      # workflow runs.
+      # ----------------------------------------------------------
+
+      - name: Run V25.18 mathematical identity evidence
+        run: |
+          node .github/scripts/v25_18-stable-evidence-mathematical-identity-audit.js
+
+      - name: Run V25.19 volatility conditioning evidence
+        run: |
+          node .github/scripts/v25_19-stable-evidence-volatility-conditioning-audit.js
+
+      - name: Run V25.20 persistence evidence
+        run: |
+          node .github/scripts/v25_20-stable-evidence-volatility-conditioned-persistence-audit.js
+
+      - name: Run V25.21 magnitude evidence
+        run: |
+          node .github/scripts/v25_21-stable-evidence-volatility-conditioned-magnitude-audit.js
+
+      - name: Run V25.22 ATR decomposition evidence
+        run: |
+          node .github/scripts/v25_22-stable-evidence-atr-normalization-decomposition-audit.js
+
+      - name: Run V25.23 extreme ATR tail evidence
+        run: |
+          node .github/scripts/v25_23-stable-evidence-extreme-atr-tail-integrity-audit.js
+
+      - name: Run V25.24 direction consistency evidence
+        run: |
+          node .github/scripts/v25_24-stable-evidence-atr-normalization-direction-consistency-audit.js
+
+      - name: Run V25.25 HIGH-Q4 temporal concentration evidence
+        run: |
+          node .github/scripts/v25_25-stable-evidence-high-q4-temporal-concentration-audit.js
+
+      - name: Run V25.26 HIGH-Q4 regime-state attribution evidence
+        run: |
+          node .github/scripts/v25_26-stable-evidence-high-q4-regime-state-attribution-audit.js
+
+      - name: Create V25.18-V25.26 evidence compatibility handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cp v25_20_stable_evidence_volatility_conditioned_persistence_audit.json \
+             v25_20_stable_evidence_volatility_conditioning_persistence_audit.json
+
+          cp v25_21_stable_evidence_volatility_conditioned_magnitude_audit.json \
+             v25_21_stable_evidence_volatility_conditioning_magnitude_audit.json
+
+          cp v25_23_stable_evidence_extreme_atr_tail_audit.json \
+             v25_23_stable_evidence_extreme_atr_tail_integrity_audit.json
+
+          echo "V25.18-V25.26 evidence compatibility handoff: PASS"
+
+      - name: Verify complete V25.18-V25.26 evidence chain
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = [
+              "v25_18_stable_evidence_mathematical_identity_audit.json",
+              "v25_19_stable_evidence_volatility_conditioning_audit.json",
+              "v25_20_stable_evidence_volatility_conditioning_persistence_audit.json",
+              "v25_21_stable_evidence_volatility_conditioning_magnitude_audit.json",
+              "v25_22_stable_evidence_atr_normalization_decomposition_audit.json",
+              "v25_23_stable_evidence_extreme_atr_tail_integrity_audit.json",
+              "v25_24_stable_evidence_atr_normalization_direction_consistency_audit.json",
+              "v25_25_stable_evidence_high_q4_temporal_concentration_audit.json",
+              "v25_26_stable_evidence_high_q4_regime_state_attribution_audit.json"
+          ]
+
+          for name in files:
+              path = Path(name)
+
+              if not path.exists():
+                  raise SystemExit(f"Missing evidence artifact: {name}")
+
+              with path.open("r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              if data.get("auditPass") is not True:
+                  raise SystemExit(f"{name}: auditPass is not true.")
+
+              policy = data.get("policy", {})
+
+              if policy.get("sourceFrozen") is not True:
+                  raise SystemExit(f"{name}: sourceFrozen is not true.")
+
+              for key in [
+                  "datasetModified",
+                  "featureEngineering",
+                  "featureSelection",
+                  "candidateDiscovery",
+                  "strategyDiscovery",
+                  "optimization",
+                  "modelFitting",
+                  "strategyValidation",
+                  "strategyModified",
+                  "realOrders"
+              ]:
+                  if policy.get(key) is not False:
+                      raise SystemExit(
+                          f"{name}: policy.{key} is not false."
+                      )
+
+          print("V25.18-V25.26 evidence-chain verification: PASS")
+          PY
+
+      # ----------------------------------------------------------
+      # Recreate V25.30 and V25.31 deterministically.
+      # ----------------------------------------------------------
+
+      - name: Run V25.30 controlled hypothesis evidence resolution
+        run: |
+          node .github/scripts/v25_30-controlled-hypothesis-evidence-resolution.js
+
+      - name: Verify V25.30 result
+        shell: bash
+        run: |
+          test -f v25_30_controlled_hypothesis_evidence_resolution.json
+
           node - <<'NODE'
           const fs = require("fs");
-          const raw = JSON.parse(fs.readFileSync("v25_10_learning_dataset.json", "utf8"));
-          const keys = ["rows","data","candles","dataset","records","items"];
-          const rows = Array.isArray(raw)
-            ? raw
-            : keys.map(k => raw && raw[k]).find(Array.isArray);
 
-          if (!rows || rows.length < 20) {
-            throw new Error("Frozen V25.10 dataset is invalid or contains fewer than 20 rows.");
-          }
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_30_controlled_hypothesis_evidence_resolution.json",
+              "utf8"
+            )
+          );
 
-          console.log(`Frozen V25.10 dataset verified: ${rows.length} rows`);
+          if (r.success !== true)
+            throw new Error("V25.30 success flag is not true.");
+
+          if (r.auditPass !== true)
+            throw new Error("V25.30 auditPass is not true.");
+
+          if (r.paperOnly !== true)
+            throw new Error("V25.30 paperOnly guard failed.");
+
+          if (r.realOrders !== false)
+            throw new Error("V25.30 realOrders guard failed.");
+
+          if (r.policy.sourceFrozen !== true)
+            throw new Error("V25.30 frozen-source guard failed.");
+
+          if (r.researchConclusion.decision !== "NO_FEATURE_SELECTION")
+            throw new Error(
+              "V25.30 feature-selection decision is invalid."
+            );
+
+          console.log("V25.30 result verification: PASS");
           NODE
 
-      - name: Run V25.32 controlled regime transition research
+      - name: Run V25.31 controlled independent confirmation
+        run: |
+          node .github/scripts/v25_31-controlled-independent-confirmation.js
+
+      - name: Verify V25.31 result
         shell: bash
+        run: |
+          test -f v25_31_controlled_independent_confirmation.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const result = JSON.parse(
+            fs.readFileSync(
+              "v25_31_controlled_independent_confirmation.json",
+              "utf8"
+            )
+          );
+
+          if (
+            result.status !==
+            "CONTROLLED_INDEPENDENT_CONFIRMATION_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.31 status.");
+          }
+
+          if (result.auditPass !== true) {
+            throw new Error("V25.31 auditPass is not true.");
+          }
+
+          if (result.decision !== "NO_FEATURE_SELECTION") {
+            throw new Error("V25.31 feature-selection guard failed.");
+          }
+
+          if (result.protocol.outOfSample !== false) {
+            throw new Error(
+              "V25.31 must not claim out-of-sample validation."
+            );
+          }
+
+          console.log("V25.31 verification PASS");
+          NODE
+
+      # ----------------------------------------------------------
+      # V25.32 research
+      # ----------------------------------------------------------
+
+      - name: Run V25.32 controlled regime transition research
         run: |
           node .github/scripts/v25_32-controlled-regime-transition-research.js
 
@@ -124,8 +365,10 @@ jobs:
         shell: bash
         run: |
           test -f v25_32_controlled_regime_transition_research.json
+
           node - <<'NODE'
           const fs = require("fs");
+
           const r = JSON.parse(
             fs.readFileSync(
               "v25_32_controlled_regime_transition_research.json",
@@ -133,35 +376,62 @@ jobs:
             )
           );
 
-          if (r.status !== "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE") {
+          if (
+            r.status !==
+            "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE"
+          ) {
             throw new Error("Unexpected V25.32 status.");
           }
 
           if (r.conclusion.featureSelection !== false) {
-            throw new Error("Feature selection must remain prohibited.");
+            throw new Error(
+              "Feature selection must remain prohibited."
+            );
           }
 
           if (r.conclusion.thresholdOptimization !== false) {
-            throw new Error("Threshold optimization must remain prohibited.");
+            throw new Error(
+              "Threshold optimization must remain prohibited."
+            );
           }
 
           if (r.conclusion.parameterOptimization !== false) {
-            throw new Error("Parameter optimization must remain prohibited.");
+            throw new Error(
+              "Parameter optimization must remain prohibited."
+            );
+          }
+
+          if (r.conclusion.pAndLRanking !== false) {
+            throw new Error(
+              "P&L ranking must remain prohibited."
+            );
           }
 
           if (r.conclusion.strategyPromotion !== false) {
-            throw new Error("Strategy promotion must remain prohibited.");
+            throw new Error(
+              "Strategy promotion must remain prohibited."
+            );
+          }
+
+          if (r.conclusion.predictiveClaim !== false) {
+            throw new Error(
+              "Predictive claims must remain prohibited."
+            );
           }
 
           if (r.conclusion.liveTrading !== false) {
-            throw new Error("Live trading must remain prohibited.");
+            throw new Error(
+              "Live trading must remain prohibited."
+            );
           }
 
           if (r.conclusion.brokerOrders !== false) {
-            throw new Error("Broker orders must remain prohibited.");
+            throw new Error(
+              "Broker orders must remain prohibited."
+            );
           }
 
-          console.log("V25.32 verification passed.");
+          console.log("V25.32 verification: PASS");
           NODE
 
       - name: Print V25.32 summary
@@ -169,6 +439,7 @@ jobs:
         run: |
           node - <<'NODE'
           const fs = require("fs");
+
           const r = JSON.parse(
             fs.readFileSync(
               "v25_32_controlled_regime_transition_research.json",
@@ -178,8 +449,22 @@ jobs:
 
           console.log("=== TRADEMIND PRO V25.32 ===");
           console.log("Status:", r.status);
-          console.log("Classification:", r.conclusion.classification);
-          console.log("Transitions:", r.transitionAnalysis.transitionCount);
+          console.log(
+            "Classification:",
+            r.conclusion.classification
+          );
+          console.log(
+            "Frozen dataset rows:",
+            r.dataset.rowsRead
+          );
+          console.log(
+            "Usable rows:",
+            r.dataset.usableRows
+          );
+          console.log(
+            "Transitions:",
+            r.transitionAnalysis.transitionCount
+          );
           console.log(
             "Interpretable transitions:",
             r.transitionAnalysis.interpretableTransitionCount
@@ -188,9 +473,18 @@ jobs:
             "Direction-changing transitions:",
             r.transitionAnalysis.directionChangedTransitionCount
           );
-          console.log("Optimization:", r.regimeMethod.optimization);
-          console.log("Feature selection:", r.conclusion.featureSelection);
-          console.log("Strategy promotion:", r.conclusion.strategyPromotion);
+          console.log(
+            "Optimization:",
+            r.regimeMethod.optimization
+          );
+          console.log(
+            "Feature selection:",
+            r.conclusion.featureSelection
+          );
+          console.log(
+            "Strategy promotion:",
+            r.conclusion.strategyPromotion
+          );
           NODE
 
       - name: Upload V25.32 research JSON
@@ -199,6 +493,7 @@ jobs:
           name: v25-32-controlled-regime-transition-research
           path: v25_32_controlled_regime_transition_research.json
           if-no-files-found: error
+          retention-days: 90
 
       - name: Save V25.32 progress checkpoint
         shell: bash
@@ -208,10 +503,15 @@ jobs:
             "version": "V25.32",
             "stage": "CONTROLLED_REGIME_TRANSITION_RESEARCH",
             "dataset": "V25.10",
+            "sourceReconstruction": "V25.7_FULL_S5_TO_V25.10",
             "mode": "controlled_descriptive_research",
             "featurePromotion": false,
-            "optimization": false,
+            "featureSelection": false,
+            "thresholdOptimization": false,
+            "parameterOptimization": false,
+            "pAndLRanking": false,
             "modelFitting": false,
+            "predictiveClaim": false,
             "liveTrading": false,
             "brokerOrders": false,
             "nextStage": "V25.33"
@@ -224,3 +524,4 @@ jobs:
           name: v25-32-progress-checkpoint
           path: v25_32_progress_checkpoint.json
           if-no-files-found: error
+          retention-days: 90
