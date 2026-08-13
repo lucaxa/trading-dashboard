@@ -1123,14 +1123,6 @@ const datasetSha256 =
         .update(datasetCanonicalJson, "utf8")
         .digest("hex");
 
-const learningDatasetPass =
-    learningRecordAuditPass &&
-    datasetRows === recordAudit.attempted &&
-    datasetInvalidRows === 0 &&
-    datasetDuplicateRows === 0 &&
-    expectedFeatureCount === 19;
-
-
 const learningRecordAuditPass =
     recordAudit.generated === recordAudit.attempted &&
     recordAudit.invalidFeatureVectorRows === 0 &&
@@ -1139,6 +1131,14 @@ const learningRecordAuditPass =
     recordAudit.sessionMismatchRows === 0 &&
     recordAudit.duplicateRecordRows === 0 &&
     recordAudit.sourceIndexMismatchRows === 0;
+
+
+const learningDatasetPass =
+    learningRecordAuditPass &&
+    datasetRows === recordAudit.attempted &&
+    datasetInvalidRows === 0 &&
+    datasetDuplicateRows === 0 &&
+    expectedFeatureCount === 19;
 
 // ==========================================================
 // FEATURE QUALITY DIAGNOSTICS
