@@ -1,7 +1,7 @@
 /*
 ============================================================
 TradeMind Pro
-V25.8.1 — FEATURE DIAGNOSTIC ENGINE
+V25.8.2 — FEATURE DIAGNOSTIC ENGINE
 ============================================================
 
 PURPOSE
@@ -750,12 +750,6 @@ function buildFeatures(index) {
             )
             : 0;
 
-    const volumeRatio =
-        previousVolume > 0
-            ? effectiveVolume /
-                previousVolume
-            : 0;
-
     const ema9Slope =
         ema9 -
         previousEMA9;
@@ -823,8 +817,7 @@ function buildFeatures(index) {
         bodyRatio,
         upperWickRatio,
         lowerWickRatio,
-        closeLocation,
-        volumeRatio
+        closeLocation
     };
 }
 
@@ -893,8 +886,7 @@ const featureNames = [
     "bodyRatio",
     "upperWickRatio",
     "lowerWickRatio",
-    "closeLocation",
-    "volumeRatio"
+    "closeLocation"
 ];
 
 const selectedCandles =
@@ -1185,8 +1177,17 @@ const featureDiagnosticPass =
 const report = {
     success: true,
 
+    featurePolicy: {
+        excludedConstantFeatures: [
+            "volumeRatio"
+        ],
+        reason:
+            "V25.8.1 found volumeRatio constant on the frozen V25.7 NIFTY INDEX dataset; it is excluded without modifying candles or relaxing the constant-feature gate.",
+        policyChangeOnly: true
+    },
+
     version:
-        "V25.8.1-FEATURE-DIAGNOSTIC",
+        "V25.8.2-FEATURE-DIAGNOSTIC",
 
     status:
         featureDiagnosticPass
@@ -1430,4 +1431,3 @@ console.log(
 if (!featureDiagnosticPass) {
     process.exitCode = 1;
 }
-
