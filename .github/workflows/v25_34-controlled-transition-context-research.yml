@@ -1,0 +1,448 @@
+name: TradeMind Pro V25.34 Controlled Transition Context Research
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  research:
+    name: V25.34 controlled transition context research
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify V25.34 script
+        run: |
+          test -f .github/scripts/v25_34-controlled-transition-context-research.js
+
+      # ----------------------------------------------------------
+      # Deterministic frozen-data reconstruction.
+      # Never depend on a transient V25.33 artifact download.
+      # ----------------------------------------------------------
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f v25_7_import.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify frozen V25.10 learning dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s v25_10_learning_dataset.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 rows detected.")
+
+          for key in [
+              "learningEngineCalled",
+              "candidateDiscovery",
+              "validation",
+              "oos",
+              "strategyModified",
+              "realOrders"
+          ]:
+              if guard.get(key) is not False:
+                  raise SystemExit(f"V25.10 guard failed: {key}")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          PY
+
+      # ----------------------------------------------------------
+      # Recreate V25.32 from the frozen V25.10 dataset.
+      # ----------------------------------------------------------
+
+      - name: Run V25.32 controlled regime transition research
+        run: |
+          node .github/scripts/v25_32-controlled-regime-transition-research.js
+
+      - name: Verify V25.32 source
+        shell: bash
+        run: |
+          test -s v25_32_controlled_regime_transition_research.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_32_controlled_regime_transition_research.json",
+              "utf8"
+            )
+          );
+
+          if (
+            r.status !==
+            "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.32 status.");
+          }
+
+          if (
+            !r.dataset ||
+            r.dataset.requiredVersion !== "V25.10"
+          ) {
+            throw new Error("V25.32 frozen dataset metadata is invalid.");
+          }
+
+          if (
+            !Array.isArray(r.transitionWindows) ||
+            r.transitionWindows.length < 1
+          ) {
+            throw new Error("V25.32 transition evidence is missing.");
+          }
+
+          if (r.conclusion.featureSelection !== false)
+            throw new Error("V25.32 feature selection guard failed.");
+
+          if (r.conclusion.thresholdOptimization !== false)
+            throw new Error("V25.32 threshold guard failed.");
+
+          if (r.conclusion.parameterOptimization !== false)
+            throw new Error("V25.32 parameter guard failed.");
+
+          if (r.conclusion.optimization !== false &&
+              r.regimeMethod?.optimization !== false)
+            throw new Error("V25.32 optimization guard failed.");
+
+          if (r.conclusion.strategyPromotion !== false)
+            throw new Error("V25.32 strategy promotion guard failed.");
+
+          if (r.conclusion.predictiveClaim !== false)
+            throw new Error("V25.32 predictive-claim guard failed.");
+
+          if (r.conclusion.liveTrading !== false)
+            throw new Error("V25.32 live-trading guard failed.");
+
+          if (r.conclusion.brokerOrders !== false)
+            throw new Error("V25.32 broker-order guard failed.");
+
+          console.log("V25.32 source verification: PASS");
+          NODE
+
+      # ----------------------------------------------------------
+      # Recreate V25.33 from V25.32.
+      # ----------------------------------------------------------
+
+      - name: Run V25.33 controlled transition direction attribution
+        run: |
+          node .github/scripts/v25_33-controlled-transition-direction-attribution.js
+
+      - name: Verify V25.33 source
+        shell: bash
+        run: |
+          test -s v25_33_controlled_transition_direction_attribution.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_33_controlled_transition_direction_attribution.json",
+              "utf8"
+            )
+          );
+
+          if (
+            r.status !==
+            "CONTROLLED_TRANSITION_DIRECTION_ATTRIBUTION_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.33 status.");
+          }
+
+          if (
+            !r.transitionUniverse ||
+            r.transitionUniverse.directionalTransitionCount < 1
+          ) {
+            throw new Error("V25.33 transition universe is empty.");
+          }
+
+          const c = r.controls || {};
+
+          for (const key of [
+            "featureSelection",
+            "thresholdSearch",
+            "parameterSearch",
+            "optimization",
+            "pAndLRanking",
+            "cherryPicking",
+            "strategyPromotion",
+            "predictiveClaim",
+            "liveTrading",
+            "brokerOrders"
+          ]) {
+            if (c[key] !== false) {
+              throw new Error(`V25.33 control failed: ${key}`);
+            }
+          }
+
+          if (
+            !r.attribution ||
+            !r.attribution.BULL_TO_BEAR ||
+            !r.attribution.BEAR_TO_BULL
+          ) {
+            throw new Error("V25.33 attribution is incomplete.");
+          }
+
+          console.log("V25.33 source verification: PASS");
+          NODE
+
+      # ----------------------------------------------------------
+      # V25.34
+      # ----------------------------------------------------------
+
+      - name: Run V25.34 controlled transition context research
+        run: |
+          node .github/scripts/v25_34-controlled-transition-context-research.js
+
+      - name: Verify V25.34 result
+        shell: bash
+        run: |
+          test -s v25_34_controlled_transition_context_research.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_34_controlled_transition_context_research.json",
+              "utf8"
+            )
+          );
+
+          if (
+            r.status !==
+            "CONTROLLED_TRANSITION_CONTEXT_RESEARCH_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.34 status.");
+          }
+
+          if (r.version !== "V25.34") {
+            throw new Error(`Unexpected version: ${r.version}`);
+          }
+
+          if (
+            !r.frozenDataset ||
+            r.frozenDataset.requiredVersion !== "V25.10"
+          ) {
+            throw new Error("V25.34 frozen dataset guard failed.");
+          }
+
+          if (
+            !r.transitionUniverse ||
+            r.transitionUniverse.alignedObservations < 1
+          ) {
+            throw new Error("V25.34 has no aligned observations.");
+          }
+
+          const c = r.controls || {};
+
+          for (const key of [
+            "featureSelection",
+            "thresholdSearch",
+            "parameterSearch",
+            "optimization",
+            "pAndLRanking",
+            "cherryPicking",
+            "newTradingFeatures",
+            "strategyPromotion",
+            "predictiveClaim",
+            "liveTrading",
+            "brokerOrders"
+          ]) {
+            if (c[key] !== false) {
+              throw new Error(`V25.34 control failed: ${key}`);
+            }
+          }
+
+          if (
+            !r.byDirection ||
+            !r.bySession ||
+            !r.sessionByDirection ||
+            !r.featureContext
+          ) {
+            throw new Error("V25.34 context evidence is incomplete.");
+          }
+
+          console.log("V25.34 result verification: PASS");
+          NODE
+
+      - name: Print V25.34 summary
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_34_controlled_transition_context_research.json",
+              "utf8"
+            )
+          );
+
+          console.log("=== TRADEMIND PRO V25.34 ===");
+          console.log("Status:", r.status);
+          console.log(
+            "Classification:",
+            r.descriptiveClassification
+          );
+          console.log(
+            "Aligned transition observations:",
+            r.transitionUniverse.alignedObservations
+          );
+          console.log(
+            "BULL -> BEAR:",
+            r.transitionUniverse.bullToBear
+          );
+          console.log(
+            "BEAR -> BULL:",
+            r.transitionUniverse.bearToBull
+          );
+
+          console.log(
+            "BULL -> BEAR direction-change rate:",
+            r.byDirection.BULL_TO_BEAR.directionChangedRate
+          );
+
+          console.log(
+            "BEAR -> BULL direction-change rate:",
+            r.byDirection.BEAR_TO_BULL.directionChangedRate
+          );
+
+          console.log(
+            "Session context:",
+            JSON.stringify(r.bySession)
+          );
+
+          console.log(
+            "Mean pre-transition persistence:",
+            JSON.stringify({
+              BULL_TO_BEAR:
+                r.byDirection.BULL_TO_BEAR
+                  .meanPreTransitionRegimePersistence,
+              BEAR_TO_BULL:
+                r.byDirection.BEAR_TO_BULL
+                  .meanPreTransitionRegimePersistence
+            })
+          );
+
+          console.log("Feature selection:", r.controls.featureSelection);
+          console.log("Optimization:", r.controls.optimization);
+          console.log("Strategy promotion:", r.controls.strategyPromotion);
+          NODE
+
+      - name: Upload V25.34 research JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-34-controlled-transition-context-research
+          path: v25_34_controlled_transition_context_research.json
+          if-no-files-found: error
+
+      - name: Save V25.34 progress checkpoint
+        shell: bash
+        run: |
+          cat > v25_34_progress_checkpoint.json <<'JSON'
+          {
+            "version": "V25.34",
+            "status": "COMPLETE",
+            "stage": "CONTROLLED_TRANSITION_CONTEXT_RESEARCH",
+            "source": "V25.33",
+            "nextStage": "V25.35_CONTROLLED_TRANSITION_TEMPORAL_REPLICATION",
+            "featureSelection": false,
+            "optimization": false,
+            "strategyPromotion": false,
+            "predictiveClaim": false,
+            "liveTrading": false,
+            "brokerOrders": false
+          }
+          JSON
+
+      - name: Upload V25.34 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-34-progress-checkpoint
+          path: v25_34_progress_checkpoint.json
+          if-no-files-found: error
