@@ -1,0 +1,87 @@
+name: V25.11 Frozen Learning Dataset Validation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frozen V25.10 learning dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-10-learning-dataset
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31714266120
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.10 dataset file
+        run: |
+          echo "Checking frozen V25.10 learning dataset..."
+
+          if [ ! -f v25_10_learning_dataset.json ]; then
+            echo "ERROR: v25_10_learning_dataset.json was not found."
+            echo "Files present:"
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+          echo "Frozen V25.10 learning dataset found."
+          echo "File size:"
+          wc -c v25_10_learning_dataset.json
+
+      - name: Run V25.11 frozen learning dataset validation
+        run: |
+          node .github/scripts/v25_11-frozen-learning-dataset-validation.js
+
+      - name: Print V25.11 validation summary
+        run: |
+          if [ -f v25_11_learning_dataset_validation.json ]; then
+            cat v25_11_learning_dataset_validation.json
+          else
+            echo "V25.11 validation JSON was not generated."
+            exit 1
+          fi
+
+      - name: Verify V25.11 validation result
+        run: |
+          python3 - <<'PY'
+          import json
+
+          with open(
+              "v25_11_learning_dataset_validation.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+          print(json.dumps(data.get("verdict", {}), indent=2))
+
+          if data.get("status") != "VALIDATION_COMPLETE":
+              raise SystemExit(
+                  "V25.11 frozen learning dataset validation failed."
+              )
+
+          verdict = data.get("verdict", {})
+
+          if verdict.get("validationPass") is not True:
+              raise SystemExit(
+                  "V25.11 validationPass is not true."
+              )
+
+          print(
+              "V25.11 frozen learning dataset validation: PASS"
+          )
+          PY
+
+      - name: Upload V25.11 validation JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-11-frozen-learning-dataset-validation
+          path: v25_11_learning_dataset_validation.json
+          if-no-files-found: error
