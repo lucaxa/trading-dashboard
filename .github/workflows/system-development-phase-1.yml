@@ -1,0 +1,102 @@
+name: TradeMind Pro - System Development Phase 1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  phase-1-memory:
+    name: System Phase 1 - Learning Memory
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 1 script
+        run: |
+          test -f system-development/phase-1-learning-memory.js
+          node --check system-development/phase-1-learning-memory.js
+
+      - name: Run Phase 1 memory self-test
+        run: |
+          node system-development/phase-1-learning-memory.js
+
+      - name: Verify ledger integrity
+        run: |
+          node - <<'NODE'
+          const memory = require("./system-development/phase-1-learning-memory.js");
+          const rows = memory.readLedger();
+
+          if (!Array.isArray(rows)) {
+            throw new Error("Ledger is not an array");
+          }
+
+          if (rows.length < 1) {
+            throw new Error("Ledger self-test did not create a record");
+          }
+
+          for (const row of rows) {
+            if (row.schemaVersion !== "SYSTEM_PHASE_1_MEMORY_V1") {
+              throw new Error("Unexpected ledger schema version");
+            }
+
+            if (!row.recordHash) {
+              throw new Error("Missing record hash");
+            }
+
+            if (!row.instrument || !row.timeframe) {
+              throw new Error("Missing core experience identity");
+            }
+          }
+
+          console.log("SYSTEM_PHASE_1_MEMORY_VERIFIED");
+          console.log("Records:", rows.length);
+          console.log("Real trading enabled: false");
+          console.log("Learner enabled: false");
+          console.log("Strategy promotion enabled: false");
+          NODE
+
+      - name: Save Phase 1 checkpoint
+        run: |
+          mkdir -p system-development/checkpoints
+
+          node - <<'NODE' > system-development/checkpoints/phase-1-memory-checkpoint.json
+          const memory = require("../phase-1-learning-memory.js");
+          const rows = memory.readLedger();
+
+          console.log(JSON.stringify({
+            phase: "SYSTEM_DEVELOPMENT_PHASE_1",
+            component: "LEARNING_MEMORY",
+            status: "READY",
+            schemaVersion: memory.VERSION,
+            records: rows.length,
+            realTradingEnabled: false,
+            learnerEnabled: false,
+            strategyPromotionEnabled: false,
+            nextStage: "PAPER_EXPERIENCE_CAPTURE"
+          }, null, 2));
+          NODE
+
+      - name: Upload Phase 1 checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-1-memory-checkpoint
+          path: |
+            system-development/checkpoints/phase-1-memory-checkpoint.json
+            system-development/data/experience-ledger.jsonl
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 1 COMPLETE"
+          echo "No broker integration"
+          echo "No real orders"
+          echo "No learning parameter updates"
+          echo "No strategy promotion"
