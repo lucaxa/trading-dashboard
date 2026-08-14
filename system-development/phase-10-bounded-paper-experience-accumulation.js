@@ -24,23 +24,6 @@
 
  Input:
    system-development/data/phase-10-paper-observations.json
-
- Each observation:
- {
-   "source": "LIVE_MARKET",
-   "timestamp": "ISO timestamp of completed candle",
-   "instrument": "NIFTY 50",
-   "timeframe": "5m",
-   "candle": { "o": 0, "h": 0, "l": 0, "c": 0 },
-   "decision": {
-      "action": "NO_TRADE" | "ENTER_LONG" | "ENTER_SHORT" | "EXIT",
-      "confidence": 0,
-      "rationale": "..."
-   }
- }
-
- The decision is NOT created by Phase 10.
- It must already have been produced by the frozen candidate layer.
 */
 
 "use strict";
@@ -264,15 +247,25 @@ function loadExistingLedger() {
     });
 }
 
-function process(rows, state, existingLedger) {
+/*
+ IMPORTANT FIX:
+ The original function was named "process", which shadowed Node's
+ global process object and caused process.env.PHASE8_MODEL_FILE to fail.
+ It is now explicitly named processObservations.
+*/
+function processObservations(rows, state, existingLedger) {
   const ledger = [];
   let tradeSeq = state.cumulativeClosedTrades + 1;
   let currentDate = state.sessionDate;
 
   for (const row of rows) {
-    if (state.lastTimestamp &&
-        Date.parse(row.timestamp) <= Date.parse(state.lastTimestamp)) {
-      fail(`Observation is not newer than stored checkpoint: ${row.timestamp}`);
+    if (
+      state.lastTimestamp &&
+      Date.parse(row.timestamp) <= Date.parse(state.lastTimestamp)
+    ) {
+      fail(
+        `Observation is not newer than stored checkpoint: ${row.timestamp}`
+      );
     }
 
     const date = row.timestamp.slice(0, 10);
@@ -293,8 +286,12 @@ function process(rows, state, existingLedger) {
       if (state.sessionTrades >= MAX_TRADES_PER_SESSION)
         fail("Maximum paper trades per session exceeded");
 
-      if (state.sessionPnl <= -(STARTING_CAPITAL * MAX_DAILY_LOSS_PCT / 100))
+      if (
+        state.sessionPnl <=
+        -(STARTING_CAPITAL * MAX_DAILY_LOSS_PCT / 100)
+      ) {
         fail("Maximum daily paper loss reached");
+      }
 
       state.position = action === "ENTER_LONG" ? "LONG" : "SHORT";
       state.entryPrice = row.close;
@@ -414,7 +411,7 @@ function main() {
   const existingLedger = loadExistingLedger();
 
   const { ledger, state: nextState } =
-    process(rows, state, existingLedger);
+    processObservations(rows, state, existingLedger);
 
   if (nextState.position !== "FLAT") {
     console.log(
@@ -527,6 +524,6 @@ module.exports = {
   validateModel,
   validateInput,
   readState,
-  process,
+  processObservations,
   main
 };
