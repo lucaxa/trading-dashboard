@@ -1,0 +1,220 @@
+name: TradeMind Pro - System Phase 8 Bounded Paper Trading Model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  bounded-paper-model:
+    name: System Phase 8 - Bounded Paper Trading Model
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start Phase 8
+        run: |
+          echo "Starting TradeMind Pro System Phase 8"
+          echo "Experimental paper-only product construction"
+          echo "No broker orders"
+          echo "No real trading"
+          echo "No strategy modification"
+          echo "No optimization"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 8 source
+        run: |
+          test -f system-development/phase-8-bounded-paper-trading-model.js
+          node --check system-development/phase-8-bounded-paper-trading-model.js
+
+      - name: Locate latest successful Phase 6 run
+        id: phase6
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(gh run list --repo "${{ github.repository }}" \
+            --workflow "system-development-phase-6.yml" \
+            --status success --limit 1 --json databaseId \
+            --jq '.[0].databaseId')"
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download Phase 6 candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.phase6.outputs.run_id }}
+        run: |
+          rm -rf phase6-artifact
+          mkdir phase6-artifact
+          gh run download "$RUN_ID" \
+            --repo "${{ github.repository }}" \
+            --name system-phase-6-candidate-strategy \
+            --dir phase6-artifact
+
+          mkdir -p system-development/data
+          mapfile -t FILES < <(
+            find phase6-artifact -type f \
+              -name "phase-6-candidate-strategy.json" -print
+          )
+          test "${#FILES[@]}" -eq 1
+          cp "${FILES[0]}" \
+            system-development/data/phase-6-candidate-strategy.json
+
+      - name: Locate latest successful Phase 7 run
+        id: phase7
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(gh run list --repo "${{ github.repository }}" \
+            --workflow "system-development-phase-7.yml" \
+            --status success --limit 1 --json databaseId \
+            --jq '.[0].databaseId')"
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download Phase 7 evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.phase7.outputs.run_id }}
+        run: |
+          rm -rf phase7-artifact
+          mkdir phase7-artifact
+          gh run download "$RUN_ID" \
+            --repo "${{ github.repository }}" \
+            --name system-phase-7-true-oos-validation \
+            --dir phase7-artifact
+
+          mapfile -t FILES < <(
+            find phase7-artifact -type f \
+              -name "phase-7-true-oos-validation.json" -print
+          )
+          test "${#FILES[@]}" -eq 1
+          cp "${FILES[0]}" \
+            system-development/data/phase-7-true-oos-validation.json
+
+      - name: Verify source state
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const p6 = JSON.parse(fs.readFileSync(
+            "system-development/data/phase-6-candidate-strategy.json"
+          ));
+          const p7 = JSON.parse(fs.readFileSync(
+            "system-development/data/phase-7-true-oos-validation.json"
+          ));
+
+          if (p6.candidate?.id !== "CANDIDATE_BASELINE_V1")
+            throw new Error("Invalid Phase 6 candidate");
+
+          if (p6.candidate?.parameterChanges?.length !== 0 ||
+              p6.candidate?.featureAdditions?.length !== 0 ||
+              p6.candidate?.learningModifiers?.length !== 0)
+            throw new Error("Phase 6 candidate was modified");
+
+          if (p7.status !== "NOT_VALIDATED" ||
+              p7.decision?.passed !== false)
+            throw new Error("Expected Phase 7 NOT_VALIDATED result");
+
+          if (p7.safety?.realTrading !== false ||
+              p7.safety?.brokerIntegration !== false)
+            throw new Error("Phase 7 safety boundary failed");
+
+          console.log("PHASE_6_AND_PHASE_7_VERIFIED");
+          NODE
+
+      - name: Run Phase 8 model construction
+        env:
+          PHASE6_INPUT_FILE: system-development/data/phase-6-candidate-strategy.json
+          PHASE7_INPUT_FILE: system-development/data/phase-7-true-oos-validation.json
+        run: |
+          node system-development/phase-8-bounded-paper-trading-model.js
+
+      - name: Verify Phase 8 model
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const file =
+            "system-development/data/phase-8-paper-trading-model.json";
+          const checkpoint =
+            "system-development/checkpoints/phase-8-paper-trading-model-checkpoint.json";
+
+          const d = JSON.parse(fs.readFileSync(file));
+          const c = JSON.parse(fs.readFileSync(checkpoint));
+
+          if (d.version !==
+              "SYSTEM_PHASE_8_BOUNDED_PAPER_TRADING_MODEL_V1")
+            throw new Error("Unexpected Phase 8 version");
+
+          if (d.status !== "PAPER_MODEL_CONSTRUCTED")
+            throw new Error("Phase 8 model not constructed");
+
+          if (d.candidate?.oosStatus !== "NOT_VALIDATED")
+            throw new Error("OOS failure was not preserved");
+
+          if (d.paperContract?.executionMode !== "PAPER_ONLY" ||
+              d.paperContract?.realTrading !== false ||
+              d.paperContract?.brokerOrders !== false)
+            throw new Error("Paper safety boundary failed");
+
+          if (d.learningBoundary?.experienceCapture !== true ||
+              d.learningBoundary?.learnerUpdate !== false ||
+              d.learningBoundary?.parameterOptimization !== false ||
+              d.learningBoundary?.strategyMutation !== false ||
+              d.learningBoundary?.promotion !== false)
+            throw new Error("Learning boundary failed");
+
+          if (d.productReadiness?.liveBrokerExecution !== false ||
+              d.productReadiness?.liveTrading !== false)
+            throw new Error("Live boundary failed");
+
+          if (d.nextStage !== "PAPER_FORWARD_VALIDATION")
+            throw new Error("Unexpected next stage");
+
+          if (JSON.stringify(d) !== JSON.stringify(c))
+            throw new Error("Output/checkpoint mismatch");
+
+          console.log("PHASE_8_MODEL_VERIFIED");
+          console.log("Paper execution: true");
+          console.log("Experience capture: true");
+          console.log("Learner updates: false");
+          console.log("Real trading: false");
+          console.log("Next stage:", d.nextStage);
+          NODE
+
+      - name: Print Phase 8 summary
+        run: |
+          cat system-development/checkpoints/phase-8-paper-trading-model-checkpoint.json
+
+      - name: Upload Phase 8 model
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-8-bounded-paper-trading-model
+          path: |
+            system-development/data/phase-8-paper-trading-model.json
+            system-development/checkpoints/phase-8-paper-trading-model-checkpoint.json
+          if-no-files-found: error
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 8 COMPLETE"
+          echo "Bounded paper model constructed"
+          echo "Phase 7 failure preserved"
+          echo "Experience capture: true"
+          echo "Learner updates: false"
+          echo "Strategy mutation: false"
+          echo "Strategy promotion: false"
+          echo "Broker orders: false"
+          echo "Real trading: false"
+          echo "Next stage: PAPER_FORWARD_VALIDATION"
