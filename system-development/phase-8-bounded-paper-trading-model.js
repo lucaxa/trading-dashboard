@@ -85,17 +85,41 @@ function validatePhase6(d) {
 }
 
 function validatePhase7(d) {
-  if (d.version !== "SYSTEM_PHASE_7_TRUE_OOS_VALIDATION_V1")
+  if (d.version !== "SYSTEM_PHASE_7_TRUE_OUT_OF_SAMPLE_VALIDATION_V1")
     fail("Unexpected Phase 7 version");
+
   if (d.status !== "NOT_VALIDATED")
     fail("Phase 8 requires recorded Phase 7 NOT_VALIDATED result");
+
   if (d.candidate?.id !== CANDIDATE_ID)
     fail("Phase 7 candidate mismatch");
-  if (d.decision?.passed !== false)
-    fail("Phase 7 decision is inconsistent");
+
+  /*
+   Phase 7 schema:
+   - decision is a string, not { passed: false }
+   - gate.pass carries the validation gate result
+   - safety uses paperOnly / realOrders / brokerIntegration /
+     parameterOptimization / featureSelection /
+     strategyModification / strategyPromotion / learningStateUpdates
+  */
   if (
-    d.safety?.realTrading !== false ||
-    d.safety?.brokerIntegration !== false
+    d.decision !==
+    "STOP_CANDIDATE_AND_DO_NOT_START_OPEN_ENDED_RESEARCH_LOOP"
+  )
+    fail("Phase 7 decision is inconsistent");
+
+  if (d.gate?.pass !== false)
+    fail("Phase 7 gate result is inconsistent");
+
+  if (
+    d.safety?.paperOnly !== true ||
+    d.safety?.realOrders !== false ||
+    d.safety?.brokerIntegration !== false ||
+    d.safety?.parameterOptimization !== false ||
+    d.safety?.featureSelection !== false ||
+    d.safety?.strategyModification !== false ||
+    d.safety?.strategyPromotion !== false ||
+    d.safety?.learningStateUpdates !== false
   ) fail("Phase 7 safety boundary failed");
 }
 
@@ -125,13 +149,13 @@ function main() {
 
     phase7Evidence: {
       status: p7.status,
-      actionableSignals: p7.metrics?.actionableSignals ?? null,
-      correct: p7.metrics?.correct ?? null,
-      incorrect: p7.metrics?.incorrect ?? null,
-      accuracy: p7.metrics?.accuracy ?? null,
+      actionableSignals: p7.evaluation?.actionableSignals ?? null,
+      correct: p7.evaluation?.correct ?? null,
+      incorrect: p7.evaluation?.incorrect ?? null,
+      accuracy: p7.evaluation?.accuracy ?? null,
       aggregateForwardPoints:
-        p7.metrics?.aggregateForwardPoints ?? null,
-      passed: p7.decision?.passed ?? false
+        p7.evaluation?.aggregateForwardPoints ?? null,
+      passed: p7.gate?.pass ?? false
     },
 
     paperContract: {
