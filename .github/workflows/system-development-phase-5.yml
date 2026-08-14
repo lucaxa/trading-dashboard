@@ -1,0 +1,338 @@
+name: TradeMind Pro - System Phase 5 Controlled Learning
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  controlled-learning:
+    name: System Phase 5 - Controlled Learning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start Phase 5
+        run: |
+          echo "Starting TradeMind Pro System Phase 5"
+          echo "Controlled historical learning only"
+          echo "No strategy modification"
+          echo "No parameter optimization"
+          echo "No strategy promotion"
+          echo "No broker integration"
+          echo "No real trading"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 5 source
+        run: |
+          test -f system-development/phase-5-controlled-learning.js
+          node --check system-development/phase-5-controlled-learning.js
+
+      - name: Download frozen Phase 4 learning-ready memory
+        uses: actions/download-artifact@v4
+        with:
+          name: system-phase-4-learning-ready-memory
+          path: .
+          repository: lucaxa/trading-dashboard
+          run-id: 31805854205
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: false
+
+      - name: Verify Phase 4 learning-ready source
+        run: |
+          test -f system-development/data/phase-4-learning-ready-experience.jsonl
+          test -f system-development/checkpoints/phase-4-learning-ready-experience-checkpoint.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/phase-4-learning-ready-experience.jsonl";
+
+          const checkpointFile =
+            "system-development/checkpoints/phase-4-learning-ready-experience-checkpoint.json";
+
+          const lines =
+            fs.readFileSync(file, "utf8")
+              .split(/\r?\n/)
+              .filter(Boolean);
+
+          if (lines.length !== 2412) {
+            throw new Error(
+              `Expected 2412 Phase 4 rows, got ${lines.length}`
+            );
+          }
+
+          const checkpoint =
+            JSON.parse(
+              fs.readFileSync(
+                checkpointFile,
+                "utf8"
+              )
+            );
+
+          if (checkpoint.status !== "READY") {
+            throw new Error(
+              "Phase 4 checkpoint is not READY"
+            );
+          }
+
+          if (checkpoint.records?.total !== 2412) {
+            throw new Error(
+              "Phase 4 checkpoint row count mismatch"
+            );
+          }
+
+          if (
+            checkpoint.safety?.learnerEnabled !== false ||
+            checkpoint.safety?.realTradingEnabled !== false ||
+            checkpoint.safety?.strategyPromotionEnabled !== false
+          ) {
+            throw new Error(
+              "Phase 4 safety gate failed"
+            );
+          }
+
+          const ids = new Set();
+          const hashes = new Set();
+
+          let previous = null;
+
+          for (const [index, line] of lines.entries()) {
+            const row = JSON.parse(line);
+
+            if (
+              row.schemaVersion !==
+              "SYSTEM_PHASE_4_LEARNING_READY_V1"
+            ) {
+              throw new Error(
+                `Unexpected Phase 4 schema at line ${index + 1}`
+              );
+            }
+
+            if (
+              !row.experienceId ||
+              ids.has(row.experienceId)
+            ) {
+              throw new Error(
+                `Duplicate/missing experienceId at line ${index + 1}`
+              );
+            }
+
+            ids.add(row.experienceId);
+
+            if (
+              !row.recordHash ||
+              hashes.has(row.recordHash)
+            ) {
+              throw new Error(
+                `Duplicate/missing recordHash at line ${index + 1}`
+              );
+            }
+
+            hashes.add(row.recordHash);
+
+            const timestamp =
+              Date.parse(row.timestamp);
+
+            if (
+              !Number.isFinite(timestamp) ||
+              (previous !== null &&
+                timestamp < previous)
+            ) {
+              throw new Error(
+                `Chronology failure at line ${index + 1}`
+              );
+            }
+
+            previous = timestamp;
+
+            if (
+              row.source?.dataset !==
+                "V25.7 frozen full_s5" ||
+              row.source?.phase !==
+                "SYSTEM_PHASE_3"
+            ) {
+              throw new Error(
+                `Unexpected source at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.provenance?.learningEnabled !== false ||
+              row.provenance?.strategyPromotionEnabled !== false ||
+              row.provenance?.realTradingEnabled !== false
+            ) {
+              throw new Error(
+                `Unsafe provenance at line ${index + 1}`
+              );
+            }
+          }
+
+          console.log(
+            "PHASE_4_SOURCE_VERIFIED"
+          );
+
+          console.log(
+            "Phase 4 rows:",
+            lines.length
+          );
+          NODE
+
+      - name: Run Phase 5 controlled learning
+        env:
+          INPUT_FILE: system-development/data/phase-4-learning-ready-experience.jsonl
+        run: |
+          node system-development/phase-5-controlled-learning.js
+
+      - name: Verify Phase 5 output
+        run: |
+          test -f system-development/data/phase-5-controlled-learning-evidence.json
+          test -f system-development/checkpoints/phase-5-controlled-learning-checkpoint.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const outputFile =
+            "system-development/data/phase-5-controlled-learning-evidence.json";
+
+          const checkpointFile =
+            "system-development/checkpoints/phase-5-controlled-learning-checkpoint.json";
+
+          const output =
+            JSON.parse(
+              fs.readFileSync(
+                outputFile,
+                "utf8"
+              )
+            );
+
+          const checkpoint =
+            JSON.parse(
+              fs.readFileSync(
+                checkpointFile,
+                "utf8"
+              )
+            );
+
+          if (
+            output.version !==
+            "SYSTEM_PHASE_5_CONTROLLED_LEARNING_V1"
+          ) {
+            throw new Error(
+              "Unexpected Phase 5 version"
+            );
+          }
+
+          if (output.status !== "READY") {
+            throw new Error(
+              "Phase 5 status is not READY"
+            );
+          }
+
+          if (
+            output.source?.rows !== 2412
+          ) {
+            throw new Error(
+              "Phase 5 source row count mismatch"
+            );
+          }
+
+          if (
+            output.temporalProtocol?.chronological !== true ||
+            output.temporalProtocol?.thresholdLearnedFromTrainingOnly !== true ||
+            output.temporalProtocol?.evaluationUsedOnce !== true
+          ) {
+            throw new Error(
+              "Phase 5 temporal protocol failed"
+            );
+          }
+
+          if (
+            output.learner?.featureSelectionEnabled !== false ||
+            output.learner?.parameterOptimizationEnabled !== false ||
+            output.learner?.strategyModificationEnabled !== false
+          ) {
+            throw new Error(
+              "Phase 5 learner boundary failed"
+            );
+          }
+
+          if (
+            output.safety?.controlledLearningExecutionEnabled !== true ||
+            output.safety?.learnerStateUpdatesEnabled !== false ||
+            output.safety?.parameterOptimizationEnabled !== false ||
+            output.safety?.featureSelectionEnabled !== false ||
+            output.safety?.strategyModificationEnabled !== false ||
+            output.safety?.strategyPromotionEnabled !== false ||
+            output.safety?.brokerIntegrationEnabled !== false ||
+            output.safety?.realTradingEnabled !== false
+          ) {
+            throw new Error(
+              "Phase 5 safety gate failed"
+            );
+          }
+
+          if (
+            checkpoint.status !==
+            "READY"
+          ) {
+            throw new Error(
+              "Phase 5 checkpoint is not READY"
+            );
+          }
+
+          console.log(
+            "PHASE_5_OUTPUT_VERIFIED"
+          );
+
+          console.log(
+            "Tested evidence:",
+            output.evidence?.tested
+          );
+
+          console.log(
+            "Stable retained evidence:",
+            output.evidence?.retainedStableEvidence
+          );
+
+          console.log(
+            "Next stage:",
+            output.nextStage
+          );
+          NODE
+
+      - name: Print Phase 5 summary
+        run: |
+          cat system-development/checkpoints/phase-5-controlled-learning-checkpoint.json
+
+      - name: Upload Phase 5 learning evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-5-controlled-learning-evidence
+          path: |
+            system-development/data/phase-5-controlled-learning-evidence.json
+            system-development/checkpoints/phase-5-controlled-learning-checkpoint.json
+          if-no-files-found: error
+          compression-level: 6
+          overwrite: false
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 5 COMPLETE"
+          echo "Controlled historical learning evidence created"
+          echo "Learner state updates: false"
+          echo "Parameter optimization: false"
+          echo "Feature selection: false"
+          echo "Strategy modification: false"
+          echo "Strategy promotion: false"
+          echo "Broker integration: false"
+          echo "Real orders: false"
