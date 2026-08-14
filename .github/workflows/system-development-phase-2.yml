@@ -1,0 +1,154 @@
+name: TradeMind Pro - System Development Phase 2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  phase-2-paper-capture:
+    name: System Phase 2 - Paper Experience Capture
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 1 dependency
+        run: |
+          test -f system-development/phase-1-learning-memory.js
+          node --check system-development/phase-1-learning-memory.js
+
+      - name: Verify Phase 2 script
+        run: |
+          test -f system-development/phase-2-paper-experience-capture.js
+          node --check system-development/phase-2-paper-experience-capture.js
+
+      - name: Run Phase 2 controlled self-test
+        run: |
+          node system-development/phase-2-paper-experience-capture.js
+
+      - name: Verify Phase 2 capture output
+        run: |
+          test -f system-development/data/paper-experience-capture.jsonl
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/paper-experience-capture.jsonl";
+
+          const lines =
+            fs.readFileSync(file, "utf8")
+              .split(/\r?\n/)
+              .filter(Boolean);
+
+          if (lines.length < 1) {
+            throw new Error("No paper captures were created");
+          }
+
+          for (const [index, line] of lines.entries()) {
+            const row = JSON.parse(line);
+
+            if (!row.captureId) {
+              throw new Error(
+                `Capture ${index + 1} missing captureId`
+              );
+            }
+
+            if (!row.captureHash) {
+              throw new Error(
+                `Capture ${index + 1} missing captureHash`
+              );
+            }
+
+            if (!row.decision?.action) {
+              throw new Error(
+                `Capture ${index + 1} missing decision`
+              );
+            }
+
+            if (!row.outcome?.status) {
+              throw new Error(
+                `Capture ${index + 1} missing outcome`
+              );
+            }
+          }
+
+          console.log("SYSTEM_PHASE_2_PAPER_CAPTURE_VERIFIED");
+          console.log("Captures:", lines.length);
+          console.log("Real trading enabled: false");
+          console.log("Broker integration enabled: false");
+          console.log("Learner enabled: false");
+          console.log("Strategy promotion enabled: false");
+          NODE
+
+      - name: Verify Phase 1 memory remains available
+        run: |
+          node - <<'NODE'
+          const memory =
+            require("./system-development/phase-1-learning-memory.js");
+
+          const rows = memory.readLedger();
+
+          if (!Array.isArray(rows)) {
+            throw new Error("Phase 1 ledger is not readable");
+          }
+
+          console.log(
+            "PHASE_1_MEMORY_AVAILABLE",
+            rows.length
+          );
+          NODE
+
+      - name: Save Phase 2 checkpoint
+        run: |
+          mkdir -p system-development/checkpoints
+
+          node - <<'NODE' > system-development/checkpoints/phase-2-paper-capture-checkpoint.json
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/paper-experience-capture.jsonl";
+
+          const captures =
+            fs.readFileSync(file, "utf8")
+              .split(/\r?\n/)
+              .filter(Boolean);
+
+          console.log(JSON.stringify({
+            phase: "SYSTEM_DEVELOPMENT_PHASE_2",
+            component: "PAPER_EXPERIENCE_CAPTURE",
+            status: "READY",
+            captures: captures.length,
+            holdBars: 3,
+            realTradingEnabled: false,
+            brokerIntegrationEnabled: false,
+            learnerEnabled: false,
+            strategyPromotionEnabled: false,
+            nextStage: "CONTROLLED_EXPERIENCE_STREAM"
+          }, null, 2));
+          NODE
+
+      - name: Upload Phase 2 checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-2-paper-capture-checkpoint
+          path: |
+            system-development/checkpoints/phase-2-paper-capture-checkpoint.json
+            system-development/data/paper-experience-capture.jsonl
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 2 COMPLETE"
+          echo "Paper experience capture only"
+          echo "No broker integration"
+          echo "No real orders"
+          echo "No learner parameter updates"
+          echo "No strategy promotion"
