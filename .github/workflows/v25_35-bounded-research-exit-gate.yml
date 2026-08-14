@@ -1,0 +1,452 @@
+name: TradeMind Pro V25.35 Bounded Research Exit Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exit-gate:
+    name: V25.35 bounded research exit gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify V25.35 script
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .github/scripts/v25_35-bounded-research-exit-gate.js
+          node --check .github/scripts/v25_35-bounded-research-exit-gate.js
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s v25_7_import.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("V25.7 dataset is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("V25.7 dataset is not full_s5.")
+
+          if data.get("counts", {}).get("canonicalRows") != 9385:
+              raise SystemExit("Unexpected V25.7 canonical row count.")
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp guard failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC validity guard failed.")
+
+          print("V25.7 frozen dataset verification: PASS")
+          PY
+
+      - name: Rebuild frozen V25.10 learning dataset
+        run: |
+          node .github/scripts/v25_10-learning-dataset-freeze.js
+
+      - name: Verify frozen V25.10 learning dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s v25_10_learning_dataset.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_10_learning_dataset.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          dataset = data.get("learningDataset", {})
+          audit = data.get("learningRecordAudit", {})
+          guard = data.get("guard", {})
+
+          if data.get("status") != "DATASET_FREEZE_COMPLETE":
+              raise SystemExit("V25.10 freeze did not complete.")
+
+          if dataset.get("frozen") is not True:
+              raise SystemExit("V25.10 frozen flag is not true.")
+
+          if dataset.get("rowCount") != 7791:
+              raise SystemExit(
+                  f"Unexpected V25.10 row count: {dataset.get('rowCount')}"
+              )
+
+          if dataset.get("featureCount") != 19:
+              raise SystemExit(
+                  f"Unexpected V25.10 feature count: {dataset.get('featureCount')}"
+              )
+
+          if audit.get("datasetInvalidRows") != 0:
+              raise SystemExit("Invalid V25.10 rows detected.")
+
+          if audit.get("datasetDuplicateRows") != 0:
+              raise SystemExit("Duplicate V25.10 rows detected.")
+
+          for key in [
+              "learningEngineCalled",
+              "candidateDiscovery",
+              "validation",
+              "oos",
+              "strategyModified",
+              "realOrders"
+          ]:
+              if guard.get(key) is not False:
+                  raise SystemExit(f"V25.10 guard failed: {key}")
+
+          print("V25.10 frozen learning dataset verification: PASS")
+          PY
+
+      - name: Run V25.32 controlled regime transition research
+        run: |
+          node .github/scripts/v25_32-controlled-regime-transition-research.js
+
+      - name: Verify V25.32 source
+        shell: bash
+        run: |
+          test -s v25_32_controlled_regime_transition_research.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_32_controlled_regime_transition_research.json",
+              "utf8"
+            )
+          );
+
+          if (
+            r.status !==
+            "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.32 status.");
+          }
+
+          if (
+            !Array.isArray(r.transitionWindows) ||
+            r.transitionWindows.length < 1
+          ) {
+            throw new Error("V25.32 transition evidence is missing.");
+          }
+
+          console.log("V25.32 source verification: PASS");
+          NODE
+
+      - name: Run V25.33 controlled transition direction attribution
+        run: |
+          node .github/scripts/v25_33-controlled-transition-direction-attribution.js
+
+      - name: Verify V25.33 source
+        shell: bash
+        run: |
+          test -s v25_33_controlled_transition_direction_attribution.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_33_controlled_transition_direction_attribution.json",
+              "utf8"
+            )
+          );
+
+          if (
+            r.status !==
+            "CONTROLLED_TRANSITION_DIRECTION_ATTRIBUTION_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.33 status.");
+          }
+
+          if (
+            !r.attribution ||
+            !r.attribution.BULL_TO_BEAR ||
+            !r.attribution.BEAR_TO_BULL
+          ) {
+            throw new Error("V25.33 attribution is incomplete.");
+          }
+
+          const c = r.controls || {};
+
+          for (const key of [
+            "featureSelection",
+            "thresholdSearch",
+            "parameterSearch",
+            "optimization",
+            "pAndLRanking",
+            "cherryPicking",
+            "strategyPromotion",
+            "predictiveClaim",
+            "liveTrading",
+            "brokerOrders"
+          ]) {
+            if (c[key] !== false) {
+              throw new Error(`V25.33 control failed: ${key}`);
+            }
+          }
+
+          console.log("V25.33 source verification: PASS");
+          NODE
+
+      - name: Preflight V25.32 and V25.33 compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const a = JSON.parse(
+            fs.readFileSync(
+              "v25_32_controlled_regime_transition_research.json",
+              "utf8"
+            )
+          );
+
+          const b = JSON.parse(
+            fs.readFileSync(
+              "v25_33_controlled_transition_direction_attribution.json",
+              "utf8"
+            )
+          );
+
+          const bullToBear = a.transitionWindows.filter(
+            w => w.from === "BULL" && w.to === "BEAR"
+          ).length;
+
+          const bearToBull = a.transitionWindows.filter(
+            w => w.from === "BEAR" && w.to === "BULL"
+          ).length;
+
+          const v33BullToBear =
+            Number(b.attribution.BULL_TO_BEAR.transitionCount);
+
+          const v33BearToBull =
+            Number(b.attribution.BEAR_TO_BULL.transitionCount);
+
+          if (
+            Number.isFinite(v33BullToBear) &&
+            bullToBear !== v33BullToBear
+          ) {
+            throw new Error(
+              `BULL_TO_BEAR mismatch: ${bullToBear} !== ${v33BullToBear}`
+            );
+          }
+
+          if (
+            Number.isFinite(v33BearToBull) &&
+            bearToBull !== v33BearToBull
+          ) {
+            throw new Error(
+              `BEAR_TO_BULL mismatch: ${bearToBull} !== ${v33BearToBull}`
+            );
+          }
+
+          console.log("V25.32/V25.33 compatibility: PASS");
+          NODE
+
+      - name: Create V25.34 controlled transition context result
+        run: |
+          node .github/scripts/v25_34-controlled-transition-context-research.js
+
+      - name: Verify V25.34 result
+        shell: bash
+        run: |
+          test -s v25_34_controlled_transition_context_research.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_34_controlled_transition_context_research.json",
+              "utf8"
+            )
+          );
+
+          if (
+            r.status !==
+            "CONTROLLED_TRANSITION_CONTEXT_RESEARCH_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.34 status.");
+          }
+
+          if (r.version !== "V25.34") {
+            throw new Error(`Unexpected version: ${r.version}`);
+          }
+
+          if (
+            r.sourceLineage?.primaryRowLevelSource?.version !== "V25.32" ||
+            r.sourceLineage?.independentConfirmation?.version !== "V25.33" ||
+            r.sourceLineage?.v25_32_v25_33_consistent !== true
+          ) {
+            throw new Error("V25.34 lineage verification failed.");
+          }
+
+          console.log("V25.34 result verification: PASS");
+          NODE
+
+      - name: Run V25.35 bounded research exit gate
+        run: |
+          node .github/scripts/v25_35-bounded-research-exit-gate.js
+
+      - name: Verify V25.35 exit decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s v25_35_bounded_research_exit_gate.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_35_bounded_research_exit_gate.json",
+              "utf8"
+            )
+          );
+
+          if (
+            r.status !==
+            "BOUNDED_RESEARCH_EXIT_GATE_COMPLETE"
+          ) {
+            throw new Error("Unexpected V25.35 status.");
+          }
+
+          if (
+            r.decision !==
+            "SYSTEM_DEVELOPMENT_ELIGIBLE"
+          ) {
+            throw new Error(
+              `V25.35 exit gate did not pass: ${r.decision}`
+            );
+          }
+
+          if (
+            r.researchExit?.researchLoopContinuation !== false
+          ) {
+            throw new Error(
+              "Research loop continuation is not disabled."
+            );
+          }
+
+          if (
+            r.researchExit?.noAutomaticNextResearchVersion !== true
+          ) {
+            throw new Error(
+              "Automatic next research version is not disabled."
+            );
+          }
+
+          console.log("V25.35 exit gate verification: PASS");
+          NODE
+
+      - name: Print V25.35 exit summary
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const r = JSON.parse(
+            fs.readFileSync(
+              "v25_35_bounded_research_exit_gate.json",
+              "utf8"
+            )
+          );
+
+          console.log("=== TRADEMIND PRO V25.35 ===");
+          console.log("Status:", r.status);
+          console.log("Decision:", r.decision);
+          console.log(
+            "System development eligible:",
+            r.researchExit.eligibleForSystemDevelopment
+          );
+          console.log(
+            "V25.34 observations:",
+            r.evidenceSummary.alignedObservations
+          );
+          console.log(
+            "BULL -> BEAR:",
+            r.evidenceSummary.bullToBear
+          );
+          console.log(
+            "BEAR -> BULL:",
+            r.evidenceSummary.bearToBull
+          );
+          console.log(
+            "Source consistency:",
+            r.evidenceSummary.sourceConsistency
+          );
+          console.log(
+            "Automatic research continuation:",
+            r.researchExit.researchLoopContinuation
+          );
+          console.log(
+            "Next stage:",
+            r.nextStage
+          );
+          NODE
+
+      - name: Upload V25.35 exit-gate JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-35-bounded-research-exit-gate
+          path: v25_35_bounded_research_exit_gate.json
+          if-no-files-found: error
+
+      - name: Save V25.35 progress checkpoint
+        shell: bash
+        run: |
+          cat > v25_35_progress_checkpoint.json <<'JSON'
+          {
+            "version": "V25.35",
+            "status": "COMPLETE",
+            "stage": "BOUNDED_RESEARCH_EXIT_GATE",
+            "automaticResearchContinuation": false,
+            "nextStage": "SYSTEM_DEVELOPMENT_PHASE_1",
+            "featureSelection": false,
+            "optimization": false,
+            "strategyPromotion": false,
+            "predictiveClaim": false,
+            "liveTrading": false,
+            "brokerOrders": false
+          }
+          JSON
+
+      - name: Upload V25.35 progress checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: v25-35-progress-checkpoint
+          path: v25_35_progress_checkpoint.json
+          if-no-files-found: error
