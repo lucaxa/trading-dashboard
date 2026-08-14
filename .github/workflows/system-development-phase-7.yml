@@ -1,0 +1,475 @@
+name: TradeMind Pro - System Phase 7 True Out-of-Sample Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  true-oos-validation:
+    name: System Phase 7 - True Out-of-Sample Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start Phase 7
+        run: |
+          echo "Starting TradeMind Pro System Phase 7"
+          echo "TRUE OUT-OF-SAMPLE VALIDATION"
+          echo "Candidate frozen"
+          echo "No parameter optimization"
+          echo "No feature selection"
+          echo "No strategy modification"
+          echo "No strategy promotion"
+          echo "No broker integration"
+          echo "No real trading"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 7 source
+        run: |
+          test -f system-development/phase-7-true-oos-validation.js
+          node --check system-development/phase-7-true-oos-validation.js
+
+      - name: Locate latest successful Phase 6 run
+        id: phase6-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RUN_ID="$(
+            gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow "system-development-phase-6.yml" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId'
+          )"
+
+          if [ -z "${RUN_ID}" ]; then
+            echo "ERROR: No successful Phase 6 workflow run found."
+            exit 1
+          fi
+
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "Using Phase 6 run: ${RUN_ID}"
+
+      - name: Download frozen Phase 6 candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHASE6_RUN_ID: ${{ steps.phase6-run.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf phase-6-artifact
+          mkdir -p phase-6-artifact
+
+          gh run download "${PHASE6_RUN_ID}" \
+            --repo "${{ github.repository }}" \
+            --name system-phase-6-candidate-strategy \
+            --dir phase-6-artifact
+
+          mapfile -t CANDIDATES < <(
+            find phase-6-artifact -type f \
+              -name "phase-6-candidate-strategy.json" \
+              -print
+          )
+
+          if [ "${#CANDIDATES[@]}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one Phase 6 candidate."
+            exit 1
+          fi
+
+          mkdir -p system-development/data
+          cp "${CANDIDATES[0]}" \
+            system-development/data/phase-6-candidate-strategy.json
+
+          rm -rf phase-6-artifact
+
+      - name: Verify frozen Phase 6 candidate
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/phase-6-candidate-strategy.json";
+
+          const x = JSON.parse(fs.readFileSync(file, "utf8"));
+
+          if (x.version !==
+              "SYSTEM_PHASE_6_CANDIDATE_STRATEGY_CONSTRUCTION_V1") {
+            throw new Error("Unexpected Phase 6 version");
+          }
+
+          if (x.status !== "CANDIDATE_CONSTRUCTED") {
+            throw new Error("Phase 6 candidate is not constructed");
+          }
+
+          if (x.candidate?.id !== "CANDIDATE_BASELINE_V1") {
+            throw new Error("Unexpected candidate id");
+          }
+
+          if (x.candidate?.type !== "EXISTING_STRATEGY_BASELINE") {
+            throw new Error("Candidate is not the frozen baseline");
+          }
+
+          if (x.candidate?.learningModifiers?.length !== 0 ||
+              x.candidate?.featureAdditions?.length !== 0 ||
+              x.candidate?.parameterChanges?.length !== 0) {
+            throw new Error("Candidate contains modifications");
+          }
+
+          if (x.candidate?.optimizationApplied !== false ||
+              x.candidate?.strategyCodeModified !== false) {
+            throw new Error("Candidate modification boundary failed");
+          }
+
+          if (x.provenance?.phase5EvidenceIntegrated !== false) {
+            throw new Error("Phase 5 evidence was integrated");
+          }
+
+          if (x.oosContract?.untouchedEvaluationRequired !== true ||
+              x.oosContract?.parameterOptimizationAllowed !== false ||
+              x.oosContract?.featureSelectionAllowed !== false ||
+              x.oosContract?.candidateModificationDuringOOS !== false) {
+            throw new Error("OOS contract failed");
+          }
+
+          console.log("PHASE_6_CANDIDATE_VERIFIED");
+          console.log("Candidate:", x.candidate.id);
+          console.log("Build commit:", x.provenance?.buildCommit);
+          NODE
+
+      - name: Freeze production strategy source at Phase 6 build commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BUILD_COMMIT="$(
+            node -p \
+              "require('./system-development/data/phase-6-candidate-strategy.json').provenance.buildCommit"
+          )"
+
+          if [ -z "${BUILD_COMMIT}" ] ||
+             [ "${BUILD_COMMIT}" = "undefined" ]; then
+            echo "ERROR: Phase 6 candidate has no build commit."
+            exit 1
+          fi
+
+          echo "Phase 6 build commit: ${BUILD_COMMIT}"
+
+          git cat-file -e "${BUILD_COMMIT}^{commit}" 2>/dev/null || {
+            echo "ERROR: Build commit is not available in this checkout."
+            exit 1
+          }
+
+          git show "${BUILD_COMMIT}:strategy.js" > \
+            system-development/data/phase-7-frozen-strategy.js
+
+          test -s system-development/data/phase-7-frozen-strategy.js
+
+          node --check system-development/data/phase-7-frozen-strategy.js
+
+          echo "Frozen strategy SHA256:"
+          sha256sum system-development/data/phase-7-frozen-strategy.js
+
+      - name: Retrieve untouched OOS holdout
+        env:
+          DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DHAN_ACCESS_TOKEN:-}" ]; then
+            echo "ERROR: DHAN_ACCESS_TOKEN secret is missing."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+
+          ENDPOINT = "https://api.dhan.co/v2/charts/intraday"
+          TOKEN = os.environ["DHAN_ACCESS_TOKEN"]
+
+          # V25.7 full_s5 ended at 2022-06-26.
+          # Phase 7 begins strictly after that frozen training period.
+          WINDOW = {
+              "id": "PHASE7-OOS-A",
+              "fromDate": "2022-06-27 00:00:00",
+              "toDate": "2022-08-26 00:00:00"
+          }
+
+          payload = {
+              "securityId": "13",
+              "exchangeSegment": "IDX_I",
+              "instrument": "INDEX",
+              "interval": "5",
+              "oi": False,
+              "fromDate": WINDOW["fromDate"],
+              "toDate": WINDOW["toDate"]
+          }
+
+          req = urllib.request.Request(
+              ENDPOINT,
+              data=json.dumps(payload).encode(),
+              headers={
+                  "Content-Type": "application/json",
+                  "access-token": TOKEN
+              },
+              method="POST"
+          )
+
+          with urllib.request.urlopen(req, timeout=60) as response:
+              status = response.status
+              raw = response.read().decode()
+
+          if not 200 <= status < 300:
+              raise SystemExit(
+                  f"Dhan HTTP {status}: {raw[:2000]}"
+              )
+
+          try:
+              data = json.loads(raw)
+          except Exception:
+              raise SystemExit(
+                  f"Dhan returned non-JSON data: {raw[:1000]}"
+              )
+
+          keys = ("timestamp", "open", "high", "low", "close", "volume")
+          arrays = [data.get(k, []) for k in keys]
+
+          if not all(isinstance(x, list) for x in arrays):
+              raise SystemExit("Dhan response arrays are malformed.")
+
+          n = min(map(len, arrays))
+          rows = []
+
+          for i in range(n):
+              try:
+                  row = {
+                      "sourceWindow": WINDOW["id"],
+                      "sourceIndex": i,
+                      "ts": float(arrays[0][i]),
+                      "open": float(arrays[1][i]),
+                      "high": float(arrays[2][i]),
+                      "low": float(arrays[3][i]),
+                      "close": float(arrays[4][i]),
+                      "volume": float(arrays[5][i])
+                  }
+              except Exception:
+                  continue
+
+              if (
+                  row["high"] < max(row["open"], row["close"]) or
+                  row["low"] > min(row["open"], row["close"]) or
+                  row["high"] < row["low"]
+              ):
+                  continue
+
+              rows.append(row)
+
+          rows.sort(key=lambda r: r["ts"])
+
+          canonical = []
+          seen = set()
+
+          for row in rows:
+              if row["ts"] in seen:
+                  continue
+              seen.add(row["ts"])
+              canonical.append(row)
+
+          if len(canonical) < 50:
+              raise SystemExit(
+                  f"OOS holdout too small after cleaning: {len(canonical)}"
+              )
+
+          for i in range(1, len(canonical)):
+              diff = canonical[i]["ts"] - canonical[i-1]["ts"]
+              if diff <= 0:
+                  raise SystemExit(
+                      f"OOS chronology failure at {i}"
+                  )
+
+          report = {
+              "status": "OOS_HOLDOUT_READY",
+              "version": "SYSTEM_PHASE_7_DHAN_OOS_HOLDOUT_V1",
+              "paperOnly": True,
+              "realOrders": False,
+              "usedByPhases1to6": False,
+              "source": {
+                  "provider": "Dhan",
+                  "endpoint": ENDPOINT,
+                  "securityId": "13",
+                  "exchangeSegment": "IDX_I",
+                  "instrument": "INDEX",
+                  "interval": "5"
+              },
+              "window": WINDOW,
+              "counts": {
+                  "rawRows": n,
+                  "cleanRows": len(rows),
+                  "canonicalRows": len(canonical)
+              },
+              "canonicalRows": canonical
+          }
+
+          Path(
+              "system-development/data/phase-7-oos-holdout.json"
+          ).write_text(
+              json.dumps(report, indent=2),
+              encoding="utf-8"
+          )
+
+          print(json.dumps({
+              "status": report["status"],
+              "rawRows": n,
+              "canonicalRows": len(canonical),
+              "firstTimestamp": canonical[0]["ts"],
+              "lastTimestamp": canonical[-1]["ts"]
+          }, indent=2))
+          PY
+
+      - name: Verify OOS holdout isolation
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const x = JSON.parse(
+            fs.readFileSync(
+              "system-development/data/phase-7-oos-holdout.json",
+              "utf8"
+            )
+          );
+
+          if (x.status !== "OOS_HOLDOUT_READY") {
+            throw new Error("OOS holdout is not READY");
+          }
+
+          if (x.usedByPhases1to6 !== false) {
+            throw new Error("OOS holdout is marked as previously used");
+          }
+
+          if (x.canonicalRows?.length < 50) {
+            throw new Error("OOS holdout is too small");
+          }
+
+          for (let i = 1; i < x.canonicalRows.length; i++) {
+            if (Number(x.canonicalRows[i].ts) <=
+                Number(x.canonicalRows[i - 1].ts)) {
+              throw new Error("OOS chronology failure");
+            }
+          }
+
+          console.log("OOS_HOLDOUT_ISOLATION_VERIFIED");
+          console.log("Rows:", x.canonicalRows.length);
+          NODE
+
+      - name: Run Phase 7 true OOS validation
+        env:
+          CANDIDATE_INPUT_FILE: system-development/data/phase-6-candidate-strategy.json
+          OOS_INPUT_FILE: system-development/data/phase-7-oos-holdout.json
+          STRATEGY_INPUT_FILE: system-development/data/phase-7-frozen-strategy.js
+        run: |
+          node system-development/phase-7-true-oos-validation.js
+
+      - name: Verify Phase 7 result
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const resultFile =
+            "system-development/data/phase-7-true-oos-validation.json";
+
+          const checkpointFile =
+            "system-development/checkpoints/phase-7-true-oos-validation-checkpoint.json";
+
+          const result = JSON.parse(
+            fs.readFileSync(resultFile, "utf8")
+          );
+
+          const checkpoint = JSON.parse(
+            fs.readFileSync(checkpointFile, "utf8")
+          );
+
+          if (result.version !==
+              "SYSTEM_PHASE_7_TRUE_OUT_OF_SAMPLE_VALIDATION_V1") {
+            throw new Error("Unexpected Phase 7 version");
+          }
+
+          if (!["VALIDATED", "NOT_VALIDATED"].includes(result.status)) {
+            throw new Error("Invalid Phase 7 status");
+          }
+
+          if (result.frozenStrategy?.modifiedDuringOos !== false) {
+            throw new Error("Frozen strategy modification detected");
+          }
+
+          if (result.evaluation?.noTradeManagementInvented !== true) {
+            throw new Error("Unexpected OOS evaluation mode");
+          }
+
+          if (result.safety?.paperOnly !== true ||
+              result.safety?.realOrders !== false ||
+              result.safety?.brokerIntegration !== false ||
+              result.safety?.parameterOptimization !== false ||
+              result.safety?.featureSelection !== false ||
+              result.safety?.strategyModification !== false ||
+              result.safety?.strategyPromotion !== false ||
+              result.safety?.learningStateUpdates !== false) {
+            throw new Error("Phase 7 safety boundary failed");
+          }
+
+          if (JSON.stringify(result) !== JSON.stringify(checkpoint)) {
+            throw new Error("Phase 7 result/checkpoint mismatch");
+          }
+
+          console.log("PHASE_7_RESULT_VERIFIED");
+          console.log("Status:", result.status);
+          console.log("Actionable signals:", result.evaluation.actionableSignals);
+          console.log("Accuracy:", result.evaluation.accuracy);
+          console.log("Forward points:", result.evaluation.aggregateForwardPoints);
+          console.log("Decision:", result.decision);
+          NODE
+
+      - name: Print Phase 7 summary
+        run: |
+          cat system-development/checkpoints/phase-7-true-oos-validation-checkpoint.json
+
+      - name: Upload Phase 7 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-7-true-oos-validation
+          path: |
+            system-development/data/phase-7-oos-holdout.json
+            system-development/data/phase-7-frozen-strategy.js
+            system-development/data/phase-7-true-oos-validation.json
+            system-development/checkpoints/phase-7-true-oos-validation-checkpoint.json
+          if-no-files-found: error
+          compression-level: 6
+          overwrite: false
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 7 COMPLETE"
+          echo "True untouched chronological OOS validation complete"
+          echo "No parameter optimization"
+          echo "No feature selection"
+          echo "No strategy modification"
+          echo "No strategy promotion"
+          echo "No broker integration"
+          echo "No real trading"
+          echo "A failure is terminal for this candidate"
+          echo "A pass advances only to bounded paper validation"
