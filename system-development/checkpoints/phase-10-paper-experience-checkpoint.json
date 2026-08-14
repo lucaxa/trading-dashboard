@@ -1,0 +1,67 @@
+{
+  "phase": "SYSTEM_DEVELOPMENT_PHASE_10",
+  "component": "BOUNDED_PAPER_EXPERIENCE_ACCUMULATION",
+  "version": "SYSTEM_PHASE_10_BOUNDED_PAPER_EXPERIENCE_ACCUMULATION_V2",
+  "status": "CONTROLLED_PIPELINE_TEST_CAPTURED",
+  "candidate": {
+    "id": "CANDIDATE_BASELINE_V1",
+    "sourcePhase": "SYSTEM_PHASE_6",
+    "oosStatus": "NOT_VALIDATED",
+    "strategyModification": false
+  },
+  "source": {
+    "mode": "CONTROLLED_TEST",
+    "genuineMarketEvidence": false,
+    "controlledSmoke": true,
+    "inputObservations": 3
+  },
+  "capture": {
+    "newObservations": 3,
+    "newEntries": 1,
+    "newExits": 1,
+    "totalObservations": 0,
+    "totalEntries": 0,
+    "totalExits": 0,
+    "cumulativeClosedTrades": 1,
+    "cumulativeWins": 1,
+    "cumulativeLosses": 0,
+    "cumulativeGrossPnl": 10,
+    "openPosition": "FLAT"
+  },
+  "sourceBoundary": {
+    "sourceRequired": "LIVE_MARKET",
+    "controlledTestExplicit": true,
+    "instrument": "NIFTY 50",
+    "timeframe": "5m",
+    "completedCandleRequired": true,
+    "chronological": true,
+    "placeholderTimestampRejected": true,
+    "duplicateReplayBlocked": true
+  },
+  "safety": {
+    "executionMode": "PAPER_ONLY",
+    "realTrading": false,
+    "brokerOrders": false,
+    "strategyModification": false,
+    "parameterOptimization": false,
+    "featureSelection": false,
+    "learnerUpdates": false,
+    "modelWeightUpdate": false,
+    "promotion": false,
+    "maxOpenPositions": 1,
+    "maxTradesPerSession": 5,
+    "maxDailyLossPct": 1
+  },
+  "learning": {
+    "experienceCapture": true,
+    "learnerUpdate": false,
+    "modelWeightUpdate": false,
+    "strategyMutation": false,
+    "promotion": false
+  },
+  "nextStage": "ACCUMULATE_BOUNDED_FORWARD_PAPER_EXPERIENCE_BEFORE_ANY_LEARNING_UPDATE",
+  "integrity": {
+    "sha256": "19d732818607d04a240e7d0641329a28af9cc3363df9a8689376490a81bea50b",
+    "bytes": 1752
+  }
+}
