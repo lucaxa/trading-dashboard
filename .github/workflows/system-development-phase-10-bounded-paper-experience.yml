@@ -28,22 +28,21 @@ jobs:
       - name: Verify Phase 10 source
         run: node --check system-development/phase-10-bounded-paper-experience-accumulation.js
 
-      # IMPORTANT:
-      # Phase 8 writes its model as an Actions artifact rather than as a
-      # repository file. Phase 10 therefore must retrieve the latest
-      # successful Phase 8 artifact before trying to consume the model.
-
       - name: Locate latest successful Phase 8 run
         id: phase8
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
           RUN_ID="$(gh run list \
             --repo "${{ github.repository }}" \
             --workflow "system-development-phase-8-FIXED-V2.yml" \
-            --status success --limit 1 --json databaseId \
+            --status success \
+            --limit 1 \
+            --json databaseId \
             --jq '.[0].databaseId')"
+
           test -n "$RUN_ID"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
@@ -89,45 +88,160 @@ jobs:
           if (
             d.version !==
             "SYSTEM_PHASE_8_BOUNDED_PAPER_TRADING_MODEL_V1"
-          )
+          ) {
             throw new Error("Unexpected Phase 8 version");
+          }
 
-          if (d.status !== "PAPER_MODEL_CONSTRUCTED")
+          if (d.status !== "PAPER_MODEL_CONSTRUCTED") {
             throw new Error("Phase 8 model is not constructed");
+          }
 
-          if (d.candidate?.id !== "CANDIDATE_BASELINE_V1")
+          if (d.candidate?.id !== "CANDIDATE_BASELINE_V1") {
             throw new Error("Unexpected Phase 8 candidate ID");
+          }
 
-          if (d.candidate?.oosStatus !== "NOT_VALIDATED")
+          if (d.candidate?.oosStatus !== "NOT_VALIDATED") {
             throw new Error(
               "Phase 7 NOT_VALIDATED was not preserved"
             );
+          }
 
           if (
             d.paperContract?.executionMode !== "PAPER_ONLY" ||
             d.paperContract?.realTrading !== false ||
             d.paperContract?.brokerOrders !== false
-          )
+          ) {
             throw new Error(
               "Phase 8 paper safety boundary failed"
             );
+          }
 
           if (
             d.learningBoundary?.learnerUpdate !== false ||
             d.learningBoundary?.strategyMutation !== false ||
             d.learningBoundary?.promotion !== false
-          )
+          ) {
             throw new Error(
               "Phase 8 learning boundary failed"
             );
+          }
 
           console.log(
             "PHASE_8_ARTIFACT_AND_BOUNDARY_VERIFIED"
           );
           NODE
 
+      # Phase 10 requires a real-looking, internally coherent completed candle
+      # for the CI smoke test. This is explicitly CONTROLLED_SMOKE and is never
+      # represented as live-market evidence.
+      - name: Create controlled Phase 10 smoke observation
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const path =
+            "system-development/data/phase-10-paper-observations.json";
+
+          const timestamp = new Date(
+            "2026-08-14T09:20:00.000Z"
+          ).toISOString();
+
+          const observation = {
+            source: "CONTROLLED_SMOKE",
+            timestamp,
+            instrument: "NIFTY 50",
+            timeframe: "5m",
+            candle: {
+              o: 25000,
+              h: 25020,
+              l: 24990,
+              c: 25010
+            },
+            decision: {
+              action: "NO_TRADE",
+              confidence: null,
+              rationale: "CONTROLLED_PHASE_10_SMOKE_ONLY"
+            }
+          };
+
+          fs.writeFileSync(
+            path,
+            JSON.stringify([observation], null, 2) + "\n"
+          );
+
+          console.log(
+            "CONTROLLED_PHASE_10_SMOKE_INPUT_CREATED"
+          );
+          NODE
+
       - name: Verify Phase 10 input exists
         run: test -f system-development/data/phase-10-paper-observations.json
+
+      - name: Verify Phase 10 input is controlled smoke only
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const rows = JSON.parse(
+            fs.readFileSync(
+              "system-development/data/phase-10-paper-observations.json",
+              "utf8"
+            )
+          );
+
+          if (!Array.isArray(rows) || rows.length !== 1) {
+            throw new Error(
+              "Expected exactly one controlled Phase 10 smoke observation"
+            );
+          }
+
+          const row = rows[0];
+
+          if (row.source !== "CONTROLLED_SMOKE") {
+            throw new Error(
+              "Phase 10 CI input is not explicitly controlled smoke data"
+            );
+          }
+
+          if (
+            !row.timestamp ||
+            row.timestamp.includes("REPLACE_WITH") ||
+            Number.isNaN(Date.parse(row.timestamp))
+          ) {
+            throw new Error("Controlled smoke timestamp is invalid");
+          }
+
+          const { o, h, l, c } = row.candle || {};
+
+          for (const [name, value] of Object.entries({ o, h, l, c })) {
+            if (!Number.isFinite(value) || value <= 0) {
+              throw new Error(
+                `Controlled smoke candle ${name} is invalid`
+              );
+            }
+          }
+
+          if (h < Math.max(o, c)) {
+            throw new Error("Controlled smoke high is invalid");
+          }
+
+          if (l > Math.min(o, c)) {
+            throw new Error("Controlled smoke low is invalid");
+          }
+
+          if (
+            row.decision?.rationale !==
+            "CONTROLLED_PHASE_10_SMOKE_ONLY"
+          ) {
+            throw new Error(
+              "Controlled smoke rationale is invalid"
+            );
+          }
+
+          console.log(
+            "PHASE_10_CONTROLLED_SMOKE_INPUT_VERIFIED"
+          );
+          NODE
 
       - name: Run Phase 10 bounded experience capture
         run: node system-development/phase-10-bounded-paper-experience-accumulation.js
