@@ -40,11 +40,70 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: system-phase-4-learning-ready-memory
-          path: .
-          repository: lucaxa/trading-dashboard
+          path: phase-4-artifact
+          repository: ${{ github.repository }}
           run-id: 31805854205
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           merge-multiple: false
+
+      - name: Normalize frozen Phase 4 artifact layout
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DATA_TARGET="system-development/data/phase-4-learning-ready-experience.jsonl"
+          CHECKPOINT_TARGET="system-development/checkpoints/phase-4-learning-ready-experience-checkpoint.json"
+
+          mkdir -p "$(dirname "$DATA_TARGET")"
+          mkdir -p "$(dirname "$CHECKPOINT_TARGET")"
+
+          echo "Downloaded Phase 4 artifact contents:"
+          find phase-4-artifact -type f -print | sort
+
+          mapfile -t DATA_FILES < <(
+            find phase-4-artifact -type f \
+              -name "phase-4-learning-ready-experience.jsonl" \
+              -print
+          )
+
+          mapfile -t CHECKPOINT_FILES < <(
+            find phase-4-artifact -type f \
+              -name "phase-4-learning-ready-experience-checkpoint.json" \
+              -print
+          )
+
+          if [ "${#DATA_FILES[@]}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one Phase 4 learning-ready JSONL file."
+            echo "Matches found: ${#DATA_FILES[@]}"
+            printf '%s\n' "${DATA_FILES[@]:-<none>}"
+            exit 1
+          fi
+
+          if [ "${#CHECKPOINT_FILES[@]}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one Phase 4 checkpoint file."
+            echo "Matches found: ${#CHECKPOINT_FILES[@]}"
+            printf '%s\n' "${CHECKPOINT_FILES[@]:-<none>}"
+            exit 1
+          fi
+
+          DATA_SOURCE="${DATA_FILES[0]}"
+          CHECKPOINT_SOURCE="${CHECKPOINT_FILES[0]}"
+
+          if [ "$(realpath "$DATA_SOURCE")" != "$(realpath "$DATA_TARGET")" ]; then
+            cp "$DATA_SOURCE" "$DATA_TARGET"
+          fi
+
+          if [ "$(realpath "$CHECKPOINT_SOURCE")" != "$(realpath "$CHECKPOINT_TARGET")" ]; then
+            cp "$CHECKPOINT_SOURCE" "$CHECKPOINT_TARGET"
+          fi
+
+          echo "Canonical Phase 4 data path:"
+          ls -lh "$DATA_TARGET"
+
+          echo "Canonical Phase 4 checkpoint path:"
+          ls -lh "$CHECKPOINT_TARGET"
+
+          rm -rf phase-4-artifact
 
       - name: Verify Phase 4 learning-ready source
         run: |
