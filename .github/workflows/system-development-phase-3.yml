@@ -1,0 +1,328 @@
+name: TradeMind Pro - System Development Phase 3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  phase-3-historical-experience:
+    name: System Phase 3 - Controlled Historical Experience Stream
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up job
+        run: |
+          echo "Starting TradeMind Pro System Phase 3"
+          echo "Historical paper experience only"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 1 memory source
+        run: |
+          test -f system-development/phase-1-learning-memory.js
+          node --check system-development/phase-1-learning-memory.js
+
+      - name: Verify Phase 2 capture source
+        run: |
+          test -f system-development/phase-2-paper-experience-capture.js
+          node --check system-development/phase-2-paper-experience-capture.js
+
+      - name: Verify Phase 3 script
+        run: |
+          test -f system-development/phase-3-historical-experience-stream.js
+          node --check system-development/phase-3-historical-experience-stream.js
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen historical source
+        run: |
+          test -f v25_7_import.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("v25_7_import.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("status") != "IMPORT_COMPLETE":
+              raise SystemExit("Frozen source is not IMPORT_COMPLETE.")
+
+          if data.get("mode") != "full_s5":
+              raise SystemExit("Frozen source is not full_s5.")
+
+          rows = data.get("canonicalRows")
+
+          if not isinstance(rows, list):
+              raise SystemExit("canonicalRows is not an array.")
+
+          if len(rows) != 9385:
+              raise SystemExit(
+                  f"Expected 9385 canonical rows, got {len(rows)}."
+              )
+
+          integrity = data.get("integrity", {})
+
+          if integrity.get("chronological") is not True:
+              raise SystemExit("Chronological integrity failed.")
+
+          if integrity.get("duplicateTimestamps") is not False:
+              raise SystemExit("Duplicate timestamp check failed.")
+
+          if integrity.get("allOHLCValid") is not True:
+              raise SystemExit("OHLC integrity failed.")
+
+          print("FROZEN V25.7 HISTORICAL SOURCE VERIFIED")
+          print("canonicalRows:", len(rows))
+          PY
+
+      - name: Run Phase 3 controlled historical stream
+        env:
+          INPUT_FILE: v25_7_import.json
+        run: |
+          node system-development/phase-3-historical-experience-stream.js
+
+      - name: Verify Phase 3 output
+        run: |
+          test -f system-development/data/phase-3-historical-experience.jsonl
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/phase-3-historical-experience.jsonl";
+
+          const lines =
+            fs.readFileSync(file, "utf8")
+              .split(/\r?\n/)
+              .filter(Boolean);
+
+          if (lines.length === 0) {
+            throw new Error("Phase 3 output is empty");
+          }
+
+          const allowed = new Set([
+            "NO_TRADE",
+            "PAPER_LONG",
+            "PAPER_SHORT"
+          ]);
+
+          const ids = new Set();
+
+          for (const [index, line] of lines.entries()) {
+            const row = JSON.parse(line);
+
+            if (!row.experienceId) {
+              throw new Error(
+                `Missing experienceId at line ${index + 1}`
+              );
+            }
+
+            if (ids.has(row.experienceId)) {
+              throw new Error(
+                `Duplicate experienceId at line ${index + 1}`
+              );
+            }
+
+            ids.add(row.experienceId);
+
+            if (!allowed.has(row.decision?.action)) {
+              throw new Error(
+                `Invalid decision at line ${index + 1}`
+              );
+            }
+
+            if (!row.outcome?.status) {
+              throw new Error(
+                `Missing outcome at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.source?.dataset !==
+              "V25.7 frozen full_s5"
+            ) {
+              throw new Error(
+                `Unexpected source at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.context?.source !==
+              "SYSTEM_PHASE_3"
+            ) {
+              throw new Error(
+                `Unexpected context source at line ${index + 1}`
+              );
+            }
+          }
+
+          console.log("PHASE_3_OUTPUT_VERIFIED");
+          console.log("Experience rows:", lines.length);
+          console.log("Real trading: false");
+          console.log("Broker integration: false");
+          console.log("Learner updates: false");
+          console.log("Strategy promotion: false");
+          NODE
+
+      - name: Reconcile Phase 3 decisions and outcomes
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/phase-3-historical-experience.jsonl";
+
+          const rows =
+            fs.readFileSync(file, "utf8")
+              .split(/\r?\n/)
+              .filter(Boolean)
+              .map(JSON.parse);
+
+          const counts = {
+            NO_TRADE: 0,
+            PAPER_LONG: 0,
+            PAPER_SHORT: 0,
+            WIN: 0,
+            LOSS: 0,
+            FLAT: 0,
+            NO_TRADE_OUTCOME: 0
+          };
+
+          for (const row of rows) {
+            counts[row.decision.action]++;
+
+            if (row.outcome.status === "NO_TRADE") {
+              counts.NO_TRADE_OUTCOME++;
+            }
+
+            if (row.outcome.status === "WIN") {
+              counts.WIN++;
+            }
+
+            if (row.outcome.status === "LOSS") {
+              counts.LOSS++;
+            }
+
+            if (row.outcome.status === "FLAT") {
+              counts.FLAT++;
+            }
+          }
+
+          if (
+            counts.NO_TRADE +
+            counts.PAPER_LONG +
+            counts.PAPER_SHORT !==
+            rows.length
+          ) {
+            throw new Error(
+              "Decision count reconciliation failed"
+            );
+          }
+
+          if (
+            counts.NO_TRADE !==
+            counts.NO_TRADE_OUTCOME
+          ) {
+            throw new Error(
+              "NO_TRADE outcome reconciliation failed"
+            );
+          }
+
+          console.log(
+            JSON.stringify(
+              {
+                status: "PHASE_3_RECONCILIATION_PASS",
+                rows: rows.length,
+                ...counts
+              },
+              null,
+              2
+            )
+          );
+          NODE
+
+      - name: Save Phase 3 checkpoint
+        run: |
+          mkdir -p system-development/checkpoints
+
+          node - <<'NODE' > system-development/checkpoints/phase-3-historical-experience-checkpoint.json
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/phase-3-historical-experience.jsonl";
+
+          const rows =
+            fs.readFileSync(file, "utf8")
+              .split(/\r?\n/)
+              .filter(Boolean)
+              .map(JSON.parse);
+
+          const summary = {
+            phase: "SYSTEM_DEVELOPMENT_PHASE_3",
+            component: "CONTROLLED_HISTORICAL_EXPERIENCE_STREAM",
+            status: "READY",
+            source: "V25.7 frozen full_s5",
+            sourceRows: 9385,
+            experienceRows: rows.length,
+            paperLong: rows.filter(
+              x => x.decision.action === "PAPER_LONG"
+            ).length,
+            paperShort: rows.filter(
+              x => x.decision.action === "PAPER_SHORT"
+            ).length,
+            noTrade: rows.filter(
+              x => x.decision.action === "NO_TRADE"
+            ).length,
+            wins: rows.filter(
+              x => x.outcome.status === "WIN"
+            ).length,
+            losses: rows.filter(
+              x => x.outcome.status === "LOSS"
+            ).length,
+            flats: rows.filter(
+              x => x.outcome.status === "FLAT"
+            ).length,
+            holdBars: 3,
+            realTradingEnabled: false,
+            brokerIntegrationEnabled: false,
+            learnerEnabled: false,
+            strategyPromotionEnabled: false,
+            nextStage: "CONTROLLED_LEARNING_LAYER"
+          };
+
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
+
+      - name: Upload Phase 3 checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-3-historical-experience
+          path: |
+            system-development/data/phase-3-historical-experience.jsonl
+            system-development/checkpoints/phase-3-historical-experience-checkpoint.json
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 3 COMPLETE"
+          echo "Historical paper experience only"
+          echo "No live data dependency"
+          echo "No broker integration"
+          echo "No real orders"
+          echo "No learner updates"
+          echo "No strategy promotion"
