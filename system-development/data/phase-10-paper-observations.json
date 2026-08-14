@@ -1,0 +1,19 @@
+[
+  {
+    "source": "LIVE_MARKET",
+    "timestamp": "REPLACE_WITH_COMPLETED_CANDLE_ISO_TIMESTAMP",
+    "instrument": "NIFTY 50",
+    "timeframe": "5m",
+    "candle": {
+      "o": 0,
+      "h": 0,
+      "l": 0,
+      "c": 0
+    },
+    "decision": {
+      "action": "NO_TRADE",
+      "confidence": null,
+      "rationale": "REPLACE_WITH_FROZEN_CANDIDATE_DECISION"
+    }
+  }
+]
