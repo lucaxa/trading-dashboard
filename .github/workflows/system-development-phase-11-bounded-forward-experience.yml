@@ -1,0 +1,229 @@
+name: System Phase 11 - Bounded Forward Paper Experience
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  phase-11:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start Phase 11
+        run: echo "Starting bounded forward paper experience"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 11 source
+        run: node --check system-development/phase-11-bounded-forward-experience.js
+
+      - name: Locate latest successful Phase 8 run
+        id: phase8
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow "system-development-phase-8-FIXED-V2.yml" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')"
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download Phase 8 model
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.phase8.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          rm -rf phase8-artifact
+          mkdir phase8-artifact
+
+          gh run download "$RUN_ID" \
+            --repo "${{ github.repository }}" \
+            --name system-phase-8-bounded-paper-trading-model \
+            --dir phase8-artifact
+
+          mkdir -p system-development/data
+
+          mapfile -t FILES < <(
+            find phase8-artifact -type f \
+              -name "phase-8-paper-trading-model.json" -print
+          )
+
+          test "${#FILES[@]}" -eq 1
+
+          cp "${FILES[0]}" \
+            system-development/data/phase-8-paper-trading-model.json
+
+      - name: Verify Phase 8 frozen boundary
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const d = JSON.parse(
+            fs.readFileSync(
+              "system-development/data/phase-8-paper-trading-model.json",
+              "utf8"
+            )
+          );
+
+          if (d.version !== "SYSTEM_PHASE_8_BOUNDED_PAPER_TRADING_MODEL_V1")
+            throw new Error("Unexpected Phase 8 version");
+
+          if (d.status !== "PAPER_MODEL_CONSTRUCTED")
+            throw new Error("Phase 8 model is not constructed");
+
+          if (d.candidate?.id !== "CANDIDATE_BASELINE_V1")
+            throw new Error("Unexpected candidate ID");
+
+          if (d.candidate?.oosStatus !== "NOT_VALIDATED")
+            throw new Error("Phase 7 NOT_VALIDATED was not preserved");
+
+          if (
+            d.paperContract?.executionMode !== "PAPER_ONLY" ||
+            d.paperContract?.realTrading !== false ||
+            d.paperContract?.brokerOrders !== false
+          )
+            throw new Error("Phase 8 paper safety boundary failed");
+
+          if (
+            d.learningBoundary?.learnerUpdate !== false ||
+            d.learningBoundary?.strategyMutation !== false ||
+            d.learningBoundary?.promotion !== false
+          )
+            throw new Error("Phase 8 learning boundary failed");
+
+          console.log("PHASE_8_FROZEN_BOUNDARY_VERIFIED");
+          NODE
+
+      - name: Verify genuine forward input exists
+        run: |
+          test -f system-development/data/phase-11-live-observations.json
+
+      - name: Verify no placeholder or synthetic input
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const rows = JSON.parse(
+            fs.readFileSync(
+              "system-development/data/phase-11-live-observations.json",
+              "utf8"
+            )
+          );
+
+          if (!Array.isArray(rows) || rows.length === 0)
+            throw new Error("No Phase 11 forward observations supplied");
+
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+
+            if (r.source !== "LIVE_MARKET")
+              throw new Error(`Observation ${i} is not LIVE_MARKET`);
+
+            if (r.synthetic === true || r.historical === true)
+              throw new Error(`Observation ${i} is synthetic/historical`);
+
+            if (r.completedCandle !== true)
+              throw new Error(`Observation ${i} is not a completed candle`);
+
+            if (!r.timestamp ||
+                r.timestamp.includes("REPLACE_WITH") ||
+                Number.isNaN(Date.parse(r.timestamp)))
+              throw new Error(`Observation ${i} timestamp is invalid`);
+          }
+
+          console.log("GENUINE_FORWARD_INPUT_CONTRACT_VERIFIED");
+          NODE
+
+      - name: Run Phase 11
+        run: node system-development/phase-11-bounded-forward-experience.js
+
+      - name: Verify Phase 11 result
+        run: |
+          test -f system-development/data/phase-11-forward-experience.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const d = JSON.parse(
+            fs.readFileSync(
+              "system-development/data/phase-11-forward-experience.json",
+              "utf8"
+            )
+          );
+
+          if (d.status !== "FORWARD_PAPER_EXPERIENCE_CAPTURED")
+            throw new Error(`Unexpected Phase 11 status: ${d.status}`);
+
+          if (d.source?.mode !== "LIVE_MARKET" ||
+              d.source?.genuineMarketEvidence !== true)
+            throw new Error("Phase 11 source boundary failed");
+
+          if (d.candidate?.oosStatus !== "NOT_VALIDATED")
+            throw new Error("Phase 7 NOT_VALIDATED was not preserved");
+
+          if (
+            d.safety?.realTrading !== false ||
+            d.safety?.brokerOrders !== false ||
+            d.safety?.learnerUpdates !== false ||
+            d.safety?.promotion !== false ||
+            d.safety?.strategyModification !== false
+          )
+            throw new Error("Phase 11 safety boundary failed");
+
+          console.log("PHASE_11_RESULT_VERIFIED");
+          console.log(JSON.stringify(d, null, 2));
+          NODE
+
+      - name: Upload Phase 11 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-11-forward-paper-experience
+          path: |
+            system-development/data/phase-11-forward-experience.json
+            system-development/data/phase-11-forward-experience-ledger.jsonl
+            system-development/checkpoints/phase-11-forward-position-state.json
+            system-development/checkpoints/phase-11-forward-experience-checkpoint.json
+
+      - name: Save Phase 11 checkpoint
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            system-development/data/phase-11-forward-experience.json \
+            system-development/data/phase-11-forward-experience-ledger.jsonl \
+            system-development/checkpoints/phase-11-forward-position-state.json \
+            system-development/checkpoints/phase-11-forward-experience-checkpoint.json
+
+          git diff --cached --quiet || \
+            git commit -m "Add Phase 11 forward paper experience checkpoint"
+
+      - name: Push Phase 11 checkpoint
+        run: git push
+
+      - name: Final safety assertion
+        run: |
+          echo "PHASE 11 SAFETY ASSERTION"
+          echo "PAPER ONLY"
+          echo "REAL ORDERS: DISABLED"
+          echo "BROKER ORDERS: DISABLED"
+          echo "LEARNER UPDATES: DISABLED"
+          echo "STRATEGY MUTATION: DISABLED"
+          echo "PROMOTION: DISABLED"
