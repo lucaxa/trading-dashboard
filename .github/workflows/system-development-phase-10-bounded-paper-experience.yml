@@ -1,0 +1,114 @@
+name: System Phase 10 - Bounded Paper Experience Accumulation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  phase-10:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start Phase 10
+        run: echo "Starting bounded paper experience accumulation"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 10 source
+        run: node --check system-development/phase-10-bounded-paper-experience-accumulation.js
+
+      - name: Verify Phase 8 model exists
+        run: test -f system-development/data/phase-8-paper-trading-model.json
+
+      - name: Verify Phase 10 input exists
+        run: test -f system-development/data/phase-10-paper-observations.json
+
+      - name: Run Phase 10 bounded experience capture
+        run: node system-development/phase-10-bounded-paper-experience-accumulation.js
+
+      - name: Verify Phase 10 result
+        run: |
+          test -f system-development/data/phase-10-paper-experience.json
+          node - <<'NODE'
+          const fs = require("fs");
+          const d = JSON.parse(
+            fs.readFileSync(
+              "system-development/data/phase-10-paper-experience.json",
+              "utf8"
+            )
+          );
+          if (d.status !== "PAPER_EXPERIENCE_CAPTURED") {
+            throw new Error("Unexpected Phase 10 status");
+          }
+          if (d.candidate?.oosStatus !== "NOT_VALIDATED") {
+            throw new Error("Phase 7 NOT_VALIDATED was not preserved");
+          }
+          if (d.safety?.realTrading !== false ||
+              d.safety?.brokerOrders !== false ||
+              d.safety?.learnerUpdates !== false ||
+              d.safety?.promotion !== false) {
+            throw new Error("Phase 10 safety boundary failed");
+          }
+          console.log(JSON.stringify(d, null, 2));
+          NODE
+
+      - name: Print Phase 10 summary
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const d = JSON.parse(
+            fs.readFileSync(
+              "system-development/data/phase-10-paper-experience.json",
+              "utf8"
+            )
+          );
+          console.log("=== TRADEMIND PRO PHASE 10 ===");
+          console.log("STATUS:", d.status);
+          console.log("NEW OBSERVATIONS:", d.capture.newObservations);
+          console.log("NEW ENTRIES:", d.capture.newEntries);
+          console.log("NEW EXITS:", d.capture.newExits);
+          console.log("TOTAL CLOSED TRADES:", d.capture.cumulativeClosedTrades);
+          console.log("CUMULATIVE GROSS PNL:", d.capture.cumulativeGrossPnl);
+          console.log("OPEN POSITION:", d.capture.openPosition);
+          console.log("REAL TRADING:", d.safety.realTrading);
+          console.log("LEARNER UPDATE:", d.safety.learnerUpdates);
+          NODE
+
+      - name: Upload Phase 10 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-10-bounded-paper-experience
+          path: |
+            system-development/data/phase-10-paper-experience.json
+            system-development/data/phase-10-paper-experience-ledger.jsonl
+            system-development/checkpoints/phase-10-paper-position-state.json
+            system-development/checkpoints/phase-10-paper-experience-checkpoint.json
+
+      - name: Save Phase 10 checkpoint
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add system-development/data/phase-10-paper-experience.json \
+                  system-development/data/phase-10-paper-experience-ledger.jsonl \
+                  system-development/checkpoints/phase-10-paper-position-state.json \
+                  system-development/checkpoints/phase-10-paper-experience-checkpoint.json
+          git diff --cached --quiet || git commit -m "Add Phase 10 paper experience checkpoint"
+
+      - name: Push Phase 10 checkpoint
+        run: git push
+
+      - name: Final safety assertion
+        run: |
+          test ! -f system-development/data/real-orders.json
+          echo "Phase 10 safety assertion passed: PAPER ONLY"
