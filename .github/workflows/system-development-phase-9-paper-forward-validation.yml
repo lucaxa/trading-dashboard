@@ -1,0 +1,232 @@
+name: TradeMind Pro - System Phase 9 Bounded Paper Forward Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  paper-forward-validation:
+    name: System Phase 9 - Bounded Paper Forward Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start Phase 9
+        run: |
+          echo "Starting TradeMind Pro System Phase 9"
+          echo "Bounded paper forward validation"
+          echo "Maximum sessions: 2"
+          echo "Maximum trades/session: 5"
+          echo "Real trading: false"
+          echo "Broker orders: false"
+          echo "Strategy modification: false"
+          echo "Optimization: false"
+          echo "Promotion: false"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 9 source
+        run: |
+          test -f system-development/phase-9-paper-forward-validation.js
+          node --check system-development/phase-9-paper-forward-validation.js
+
+      - name: Locate latest successful Phase 8 run
+        id: phase8
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow "system-development-phase-8-FIXED-V2.yml" \
+            --status success --limit 1 --json databaseId \
+            --jq '.[0].databaseId')"
+          test -n "$RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download Phase 8 model
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.phase8.outputs.run_id }}
+        run: |
+          rm -rf phase8-artifact
+          mkdir phase8-artifact
+          gh run download "$RUN_ID" \
+            --repo "${{ github.repository }}" \
+            --name system-phase-8-bounded-paper-trading-model \
+            --dir phase8-artifact
+
+          mkdir -p system-development/data
+          mapfile -t FILES < <(
+            find phase8-artifact -type f \
+              -name "phase-8-paper-trading-model.json" -print
+          )
+          test "${#FILES[@]}" -eq 1
+          cp "${FILES[0]}" \
+            system-development/data/phase-8-paper-trading-model.json
+
+      - name: Verify Phase 8 boundary
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const d = JSON.parse(fs.readFileSync(
+            "system-development/data/phase-8-paper-trading-model.json"
+          ));
+
+          if (d.version !==
+              "SYSTEM_PHASE_8_BOUNDED_PAPER_TRADING_MODEL_V1")
+            throw new Error("Unexpected Phase 8 version");
+
+          if (d.status !== "PAPER_MODEL_CONSTRUCTED")
+            throw new Error("Phase 8 model is not constructed");
+
+          if (d.candidate?.oosStatus !== "NOT_VALIDATED")
+            throw new Error("Phase 7 NOT_VALIDATED status was not preserved");
+
+          if (d.paperContract?.executionMode !== "PAPER_ONLY" ||
+              d.paperContract?.realTrading !== false ||
+              d.paperContract?.brokerOrders !== false)
+            throw new Error("Paper safety boundary failed");
+
+          if (d.learningBoundary?.learnerUpdate !== false ||
+              d.learningBoundary?.strategyMutation !== false ||
+              d.learningBoundary?.promotion !== false)
+            throw new Error("Learning boundary failed");
+
+          console.log("PHASE_8_BOUNDARY_VERIFIED");
+          NODE
+
+      - name: Create controlled Phase 9 smoke input
+        run: |
+          mkdir -p system-development/data
+          cat > system-development/data/phase-9-paper-forward-input.json <<'JSON'
+          [
+            {
+              "timestamp": "2026-08-17T09:15:00+05:30",
+              "instrument": "NIFTY 50",
+              "timeframe": "5m",
+              "candle": {"o": 25000, "h": 25005, "l": 24995, "c": 25000},
+              "decision": {
+                "action": "NO_TRADE",
+                "confidence": 0,
+                "rationale": "CONTROLLED_PHASE_9_SMOKE_INPUT"
+              }
+            },
+            {
+              "timestamp": "2026-08-17T09:20:00+05:30",
+              "instrument": "NIFTY 50",
+              "timeframe": "5m",
+              "candle": {"o": 25000, "h": 25015, "l": 24998, "c": 25010},
+              "decision": {
+                "action": "ENTER_LONG",
+                "confidence": 0.50,
+                "rationale": "CONTROLLED_PHASE_9_SMOKE_INPUT"
+              }
+            },
+            {
+              "timestamp": "2026-08-17T09:25:00+05:30",
+              "instrument": "NIFTY 50",
+              "timeframe": "5m",
+              "candle": {"o": 25010, "h": 25025, "l": 25005, "c": 25020},
+              "decision": {
+                "action": "EXIT",
+                "confidence": 0.50,
+                "rationale": "CONTROLLED_PHASE_9_SMOKE_INPUT"
+              }
+            }
+          ]
+          JSON
+
+      - name: Run Phase 9 controlled forward harness
+        env:
+          PHASE8_MODEL_FILE: system-development/data/phase-8-paper-trading-model.json
+          PHASE9_INPUT_FILE: system-development/data/phase-9-paper-forward-input.json
+        run: |
+          node system-development/phase-9-paper-forward-validation.js
+
+      - name: Verify Phase 9 result
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const file =
+            "system-development/data/phase-9-paper-forward-validation.json";
+          const checkpoint =
+            "system-development/checkpoints/phase-9-paper-forward-validation-checkpoint.json";
+
+          const d = JSON.parse(fs.readFileSync(file));
+          const c = JSON.parse(fs.readFileSync(checkpoint));
+
+          if (d.version !==
+              "SYSTEM_PHASE_9_BOUNDED_PAPER_FORWARD_VALIDATION_V1")
+            throw new Error("Unexpected Phase 9 version");
+
+          if (d.status !== "PAPER_FORWARD_PIPELINE_VALIDATED")
+            throw new Error("Phase 9 pipeline not validated");
+
+          if (d.candidate?.oosStatus !== "NOT_VALIDATED")
+            throw new Error("Phase 7 status changed");
+
+          if (d.safety?.executionMode !== "PAPER_ONLY" ||
+              d.safety?.realTrading !== false ||
+              d.safety?.brokerOrders !== false ||
+              d.safety?.strategyModification !== false ||
+              d.safety?.parameterOptimization !== false ||
+              d.safety?.featureSelection !== false ||
+              d.safety?.learnerUpdates !== false ||
+              d.safety?.promotion !== false)
+            throw new Error("Phase 9 safety boundary failed");
+
+          if (d.window?.maxSessions !== 2)
+            throw new Error("Unexpected session bound");
+
+          if (d.nextStage !==
+              "BOUNDED_PAPER_EXPERIENCE_ACCUMULATION")
+            throw new Error("Unexpected next stage");
+
+          if (JSON.stringify(d) !== JSON.stringify(c))
+            throw new Error("Output/checkpoint mismatch");
+
+          console.log("PHASE_9_RESULT_VERIFIED");
+          console.log("Paper-only: true");
+          console.log("Real trading: false");
+          console.log("Learner updates: false");
+          console.log("Promotion: false");
+          console.log("Next stage:", d.nextStage);
+          NODE
+
+      - name: Print Phase 9 summary
+        run: |
+          cat system-development/checkpoints/phase-9-paper-forward-validation-checkpoint.json
+
+      - name: Upload Phase 9 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-9-bounded-paper-forward-validation
+          path: |
+            system-development/data/phase-9-paper-forward-validation.json
+            system-development/data/phase-9-paper-forward-ledger.jsonl
+            system-development/checkpoints/phase-9-paper-forward-validation-checkpoint.json
+          if-no-files-found: error
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 9 COMPLETE"
+          echo "Bounded paper forward pipeline validated"
+          echo "Phase 7 NOT_VALIDATED status preserved"
+          echo "Experience capture: true"
+          echo "Learner updates: false"
+          echo "Strategy mutation: false"
+          echo "Strategy promotion: false"
+          echo "Broker orders: false"
+          echo "Real trading: false"
+          echo "Next stage: BOUNDED_PAPER_EXPERIENCE_ACCUMULATION"
