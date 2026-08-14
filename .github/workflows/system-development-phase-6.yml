@@ -1,0 +1,370 @@
+name: TradeMind Pro - System Phase 6 Candidate Strategy Construction
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  candidate-construction:
+    name: System Phase 6 - Candidate Strategy Construction
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start Phase 6
+        run: |
+          echo "Starting TradeMind Pro System Phase 6"
+          echo "Bounded candidate construction only"
+          echo "No feature mining"
+          echo "No parameter optimization"
+          echo "No strategy modification"
+          echo "No strategy promotion"
+          echo "No broker integration"
+          echo "No real trading"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 6 source
+        run: |
+          test -f system-development/phase-6-candidate-strategy.js
+          node --check system-development/phase-6-candidate-strategy.js
+
+      - name: Locate latest successful Phase 5 run
+        id: phase5-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RUN_ID="$(
+            gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow "system-development-phase-5.yml" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId'
+          )"
+
+          if [ -z "${RUN_ID}" ]; then
+            echo "ERROR: No successful Phase 5 workflow run found."
+            exit 1
+          fi
+
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "Using successful Phase 5 run: ${RUN_ID}"
+
+      - name: Download frozen Phase 5 learning evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHASE5_RUN_ID: ${{ steps.phase5-run.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf phase-5-artifact
+          mkdir -p phase-5-artifact
+
+          gh run download "${PHASE5_RUN_ID}" \
+            --repo "${{ github.repository }}" \
+            --name system-phase-5-controlled-learning-evidence \
+            --dir phase-5-artifact
+
+          echo "Downloaded Phase 5 artifact contents:"
+          find phase-5-artifact -type f -print | sort
+
+      - name: Normalize Phase 5 evidence layout
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TARGET="system-development/data/phase-5-controlled-learning-evidence.json"
+          mkdir -p "$(dirname "$TARGET")"
+
+          mapfile -t MATCHES < <(
+            find phase-5-artifact -type f \
+              -name "phase-5-controlled-learning-evidence.json" \
+              -print
+          )
+
+          if [ "${#MATCHES[@]}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one Phase 5 evidence file."
+            echo "Matches found: ${#MATCHES[@]}"
+            printf '%s\n' "${MATCHES[@]:-<none>}"
+            exit 1
+          fi
+
+          cp "${MATCHES[0]}" "$TARGET"
+
+          echo "Canonical Phase 5 evidence:"
+          ls -lh "$TARGET"
+
+          rm -rf phase-5-artifact
+
+      - name: Verify Phase 5 evidence
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/phase-5-controlled-learning-evidence.json";
+
+          const data =
+            JSON.parse(
+              fs.readFileSync(file, "utf8")
+            );
+
+          if (
+            data.version !==
+            "SYSTEM_PHASE_5_CONTROLLED_LEARNING_V1"
+          ) {
+            throw new Error(
+              "Unexpected Phase 5 version"
+            );
+          }
+
+          if (
+            data.status !== "READY"
+          ) {
+            throw new Error(
+              "Phase 5 status is not READY"
+            );
+          }
+
+          if (
+            data.source?.rows !== 2412
+          ) {
+            throw new Error(
+              "Phase 5 source row count mismatch"
+            );
+          }
+
+          if (
+            data.evidence?.tested !== 8
+          ) {
+            throw new Error(
+              `Expected 8 tested evidence records, got ${data.evidence?.tested}`
+            );
+          }
+
+          if (
+            data.evidence?.retainedStableEvidence !== 0
+          ) {
+            throw new Error(
+              "Phase 5 retained stable evidence is non-zero; baseline construction must stop."
+            );
+          }
+
+          if (
+            data.safety?.strategyModificationEnabled !== false ||
+            data.safety?.strategyPromotionEnabled !== false ||
+            data.safety?.brokerIntegrationEnabled !== false ||
+            data.safety?.realTradingEnabled !== false
+          ) {
+            throw new Error(
+              "Phase 5 safety boundary failed"
+            );
+          }
+
+          console.log(
+            "PHASE_5_EVIDENCE_VERIFIED"
+          );
+
+          console.log(
+            "Stable retained evidence:",
+            data.evidence.retainedStableEvidence
+          );
+          NODE
+
+      - name: Run Phase 6 candidate construction
+        env:
+          PHASE5_INPUT_FILE: system-development/data/phase-5-controlled-learning-evidence.json
+          CANDIDATE_BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          node system-development/phase-6-candidate-strategy.js
+
+      - name: Verify Phase 6 candidate
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const outputFile =
+            "system-development/data/phase-6-candidate-strategy.json";
+
+          const checkpointFile =
+            "system-development/checkpoints/phase-6-candidate-strategy-checkpoint.json";
+
+          const output =
+            JSON.parse(
+              fs.readFileSync(
+                outputFile,
+                "utf8"
+              )
+            );
+
+          const checkpoint =
+            JSON.parse(
+              fs.readFileSync(
+                checkpointFile,
+                "utf8"
+              )
+            );
+
+          if (
+            output.version !==
+            "SYSTEM_PHASE_6_CANDIDATE_STRATEGY_CONSTRUCTION_V1"
+          ) {
+            throw new Error(
+              "Unexpected Phase 6 version"
+            );
+          }
+
+          if (
+            output.status !==
+            "CANDIDATE_CONSTRUCTED"
+          ) {
+            throw new Error(
+              "Phase 6 candidate was not constructed"
+            );
+          }
+
+          if (
+            output.candidate?.id !==
+            "CANDIDATE_BASELINE_V1"
+          ) {
+            throw new Error(
+              "Unexpected candidate identity"
+            );
+          }
+
+          if (
+            output.candidate?.type !==
+            "EXISTING_STRATEGY_BASELINE"
+          ) {
+            throw new Error(
+              "Candidate is not the frozen existing baseline"
+            );
+          }
+
+          if (
+            output.candidate?.learningModifiers?.length !== 0 ||
+            output.candidate?.featureAdditions?.length !== 0 ||
+            output.candidate?.parameterChanges?.length !== 0
+          ) {
+            throw new Error(
+              "Candidate contains unapproved modifications"
+            );
+          }
+
+          if (
+            output.candidate?.optimizationApplied !== false ||
+            output.candidate?.strategyCodeModified !== false
+          ) {
+            throw new Error(
+              "Candidate modification boundary failed"
+            );
+          }
+
+          if (
+            output.provenance?.phase5EvidenceIntegrated !== false
+          ) {
+            throw new Error(
+              "Phase 5 evidence was silently integrated"
+            );
+          }
+
+          if (
+            output.oosContract?.untouchedEvaluationRequired !== true ||
+            output.oosContract?.parameterOptimizationAllowed !== false ||
+            output.oosContract?.featureSelectionAllowed !== false ||
+            output.oosContract?.candidateModificationDuringOOS !== false
+          ) {
+            throw new Error(
+              "OOS contract failed"
+            );
+          }
+
+          if (
+            output.safety?.paperOnly !== true ||
+            output.safety?.strategyPromotion !== false ||
+            output.safety?.brokerIntegration !== false ||
+            output.safety?.realTrading !== false
+          ) {
+            throw new Error(
+              "Phase 6 safety gate failed"
+            );
+          }
+
+          if (
+            output.nextStage !==
+            "TRUE_OUT_OF_SAMPLE_VALIDATION"
+          ) {
+            throw new Error(
+              "Unexpected Phase 6 next stage"
+            );
+          }
+
+          if (
+            JSON.stringify(output) !==
+            JSON.stringify(checkpoint)
+          ) {
+            throw new Error(
+              "Phase 6 output/checkpoint mismatch"
+            );
+          }
+
+          console.log(
+            "PHASE_6_CANDIDATE_VERIFIED"
+          );
+
+          console.log(
+            "Candidate:",
+            output.candidate.id
+          );
+
+          console.log(
+            "Candidate type:",
+            output.candidate.type
+          );
+
+          console.log(
+            "Next stage:",
+            output.nextStage
+          );
+          NODE
+
+      - name: Print Phase 6 summary
+        run: |
+          cat system-development/checkpoints/phase-6-candidate-strategy-checkpoint.json
+
+      - name: Upload Phase 6 candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-6-candidate-strategy
+          path: |
+            system-development/data/phase-6-candidate-strategy.json
+            system-development/checkpoints/phase-6-candidate-strategy-checkpoint.json
+          if-no-files-found: error
+          compression-level: 6
+          overwrite: false
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 6 COMPLETE"
+          echo "One bounded baseline candidate constructed"
+          echo "Feature mining: false"
+          echo "Parameter optimization: false"
+          echo "Strategy modification: false"
+          echo "Strategy promotion: false"
+          echo "Broker integration: false"
+          echo "Real orders: false"
+          echo "Next stage: TRUE_OUT_OF_SAMPLE_VALIDATION"
