@@ -1,41 +1,41 @@
 /*
 ===========================================================
  TradeMind Pro
- V25.34 — CONTROLLED TRANSITION CONTEXT RESEARCH
+ V25.34 — APPROACH 3
+ CONTROLLED TRANSITION CONTEXT RESEARCH
 ===========================================================
 
 PURPOSE
 -------
-Determine whether the descriptive transition behavior identified
-in V25.32/V25.33 varies with NON-OPTIMIZED context surrounding
-the transition.
+Use V25.32 transitionWindows[] as the row-level transition
+evidence and V25.33 as an independent aggregate confirmation.
 
-Context dimensions are fixed in advance:
-- market-session clock context
-- pre-transition regime persistence
-- existing frozen feature snapshot at transition
+IMPORTANT SOURCE-LINEAGE RULE
+-----------------------------
+V25.33 does NOT contain transitionWindows[].
+V25.32 does.
 
-This is descriptive research only.
+Therefore:
+  V25.32 = PRIMARY ROW-LEVEL SOURCE
+  V25.33 = INDEPENDENT DIRECTIONAL CONFIRMATION
+
+This script must never attempt to read transitionWindows[]
+from V25.33.
 
 RESEARCH CONTROLS
 -----------------
 - Frozen V25.10 learning dataset only.
-- V25.33 transition attribution is the source evidence.
-- No feature creation for trading.
+- No feature selection.
 - No threshold search.
-- No parameter optimization.
+- No parameter search.
+- No optimization.
 - No P&L ranking.
 - No cherry-picking.
+- No new trading features.
 - No strategy promotion.
 - No predictive claim.
 - No live trading.
 - No broker orders.
-
-IMPORTANT
----------
-V25.34 does NOT search for a profitable transition context.
-It describes whether transition observations occur under
-different pre-defined contexts.
 
 OUTPUT
 ------
@@ -51,9 +51,11 @@ const crypto = require("crypto");
 
 const VERSION = "V25.34";
 const DATASET_VERSION = "V25.10";
-const SOURCE_VERSION = "V25.33";
 
-const SOURCE_NAME =
+const V25_32_NAME =
+  "v25_32_controlled_regime_transition_research.json";
+
+const V25_33_NAME =
   "v25_33_controlled_transition_direction_attribution.json";
 
 const DATASET_NAME =
@@ -86,13 +88,6 @@ function num(v) {
   return null;
 }
 
-function sha256File(file) {
-  return crypto
-    .createHash("sha256")
-    .update(fs.readFileSync(file))
-    .digest("hex");
-}
-
 function mean(values) {
   return values.length
     ? values.reduce((a, b) => a + b, 0) / values.length
@@ -108,8 +103,11 @@ function median(values) {
     : (a[m - 1] + a[m]) / 2;
 }
 
-function sum(values) {
-  return values.reduce((a, b) => a + b, 0);
+function sha256File(file) {
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(file))
+    .digest("hex");
 }
 
 function getRecords(raw) {
@@ -148,11 +146,14 @@ function getTimestamp(row, index) {
     row.ts ??
     row.time ??
     row.datetime ??
-    row.date ??
-    row.dateTime;
+    row.dateTime ??
+    row.date;
 
   const n = num(raw);
-  if (n !== null) return n < 100000000000 ? n * 1000 : n;
+
+  if (n !== null) {
+    return n < 100000000000 ? n * 1000 : n;
+  }
 
   const parsed = Date.parse(String(raw ?? ""));
   return Number.isFinite(parsed) ? parsed : index;
@@ -160,6 +161,7 @@ function getTimestamp(row, index) {
 
 function istParts(timestamp) {
   const d = new Date(timestamp + 5.5 * 60 * 60 * 1000);
+
   return {
     date: d.toISOString().slice(0, 10),
     hour: d.getUTCHours(),
@@ -167,49 +169,112 @@ function istParts(timestamp) {
   };
 }
 
+function pickFeature(features, names) {
+  for (const name of names) {
+    const value = num(features?.[name]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
 /*
 -----------------------------------------------------------
-LOAD V25.33 SOURCE
+LOAD PRIMARY V25.32 SOURCE
 -----------------------------------------------------------
 */
 
-const sourcePath = firstExisting([
-  path.resolve(SOURCE_NAME),
-  path.resolve(process.cwd(), SOURCE_NAME),
-  path.resolve(__dirname, SOURCE_NAME)
+const v25_32_path = firstExisting([
+  path.resolve(V25_32_NAME),
+  path.resolve(process.cwd(), V25_32_NAME),
+  path.resolve(__dirname, V25_32_NAME)
 ]);
 
-if (!sourcePath) {
-  fail(`V25.33 source not found: ${SOURCE_NAME}`);
+if (!v25_32_path) {
+  fail(`V25.32 source not found: ${V25_32_NAME}`);
 }
 
-const source = loadJson(sourcePath);
+const v25_32 = loadJson(v25_32_path);
 
-if (source.version !== SOURCE_VERSION) {
-  fail(`Expected ${SOURCE_VERSION}, received ${source.version || "unknown"}.`);
+if (v25_32.version !== "V25.32") {
+  fail(
+    `Expected V25.32 source, received ${v25_32.version || "unknown"}.`
+  );
 }
 
 if (
-  source.status !==
+  v25_32.status !==
+  "CONTROLLED_REGIME_TRANSITION_RESEARCH_COMPLETE"
+) {
+  fail("V25.32 source is not a completed transition research result.");
+}
+
+if (!Array.isArray(v25_32.transitionWindows)) {
+  fail("V25.32 does not contain transitionWindows[].");
+}
+
+if (v25_32.transitionWindows.length < 1) {
+  fail("V25.32 contains no transition windows.");
+}
+
+/*
+-----------------------------------------------------------
+LOAD INDEPENDENT V25.33 CONFIRMATION
+-----------------------------------------------------------
+*/
+
+const v25_33_path = firstExisting([
+  path.resolve(V25_33_NAME),
+  path.resolve(process.cwd(), V25_33_NAME),
+  path.resolve(__dirname, V25_33_NAME)
+]);
+
+if (!v25_33_path) {
+  fail(`V25.33 source not found: ${V25_33_NAME}`);
+}
+
+const v25_33 = loadJson(v25_33_path);
+
+if (v25_33.version !== "V25.33") {
+  fail(
+    `Expected V25.33 source, received ${v25_33.version || "unknown"}.`
+  );
+}
+
+if (
+  v25_33.status !==
   "CONTROLLED_TRANSITION_DIRECTION_ATTRIBUTION_COMPLETE"
 ) {
   fail("V25.33 source is not a completed attribution result.");
 }
 
+if (!v25_33.attribution) {
+  fail("V25.33 attribution object is missing.");
+}
+
 if (
-  !source.controls ||
-  source.controls.featureSelection !== false ||
-  source.controls.thresholdSearch !== false ||
-  source.controls.parameterSearch !== false ||
-  source.controls.optimization !== false ||
-  source.controls.pAndLRanking !== false ||
-  source.controls.cherryPicking !== false ||
-  source.controls.strategyPromotion !== false ||
-  source.controls.predictiveClaim !== false ||
-  source.controls.liveTrading !== false ||
-  source.controls.brokerOrders !== false
+  !v25_33.attribution.BULL_TO_BEAR ||
+  !v25_33.attribution.BEAR_TO_BULL
 ) {
-  fail("V25.33 research controls are invalid.");
+  fail("V25.33 directional attribution is incomplete.");
+}
+
+const v25_33_controls = v25_33.controls || {};
+
+for (const key of [
+  "featureSelection",
+  "thresholdSearch",
+  "parameterSearch",
+  "optimization",
+  "pAndLRanking",
+  "cherryPicking",
+  "strategyPromotion",
+  "predictiveClaim",
+  "liveTrading",
+  "brokerOrders"
+]) {
+  if (v25_33_controls[key] !== false) {
+    fail(`V25.33 control failed: ${key}`);
+  }
 }
 
 /*
@@ -229,7 +294,6 @@ if (!datasetPath) {
 }
 
 const dataset = loadJson(datasetPath);
-
 const records = getRecords(dataset);
 
 if (!records || records.length < 20) {
@@ -245,7 +309,7 @@ if (
 
 /*
 -----------------------------------------------------------
-NORMALIZE RECORDS
+NORMALIZE DATASET
 -----------------------------------------------------------
 */
 
@@ -271,15 +335,23 @@ const normalized = records.map((row, index) => {
     minute: ist.minute,
     ema9,
     ema21,
-    futureReturn: num(l.futureReturn ?? row.futureReturn),
+    futureReturn: num(
+      l.futureReturn ??
+      row.futureReturn ??
+      row.future_return
+    ),
     features: f
   };
 });
 
 function regimeAt(row) {
-  if (row.ema9 === null || row.ema21 === null) return "UNKNOWN";
+  if (row.ema9 === null || row.ema21 === null) {
+    return "UNKNOWN";
+  }
+
   if (row.ema9 > row.ema21) return "BULL";
   if (row.ema9 < row.ema21) return "BEAR";
+
   return "UNKNOWN";
 }
 
@@ -287,16 +359,7 @@ const states = normalized.map(regimeAt);
 
 /*
 -----------------------------------------------------------
-SESSION CONTEXT
------------------------------------------------------------
-
-Fixed market-clock descriptions.
-No data-driven thresholds are searched.
-
-OPEN      09:15 - 10:30
-MIDDAY    10:35 - 13:30
-LATE      13:35 - 15:15
-OTHER     outside these fixed windows
+FIXED SESSION CONTEXT
 -----------------------------------------------------------
 */
 
@@ -318,17 +381,6 @@ function sessionContext(hour, minute) {
   return "OTHER";
 }
 
-/*
------------------------------------------------------------
-PRE-TRANSITION PERSISTENCE
------------------------------------------------------------
-
-Count consecutive identical regime observations immediately
-before the transition. This is descriptive state history,
-not an optimized threshold.
------------------------------------------------------------
-*/
-
 function persistenceBefore(index, fromState) {
   let count = 0;
 
@@ -340,40 +392,39 @@ function persistenceBefore(index, fromState) {
   return count;
 }
 
-function pickFeature(features, names) {
-  for (const name of names) {
-    const value = num(features?.[name]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
 /*
 -----------------------------------------------------------
-BUILD TRANSITION CONTEXT OBSERVATIONS
+ALIGN V25.32 TRANSITION WINDOWS TO V25.10
 -----------------------------------------------------------
 */
 
-const sourceWindows = Array.isArray(source.transitionWindows)
-  ? source.transitionWindows
-  : [];
-
-if (!sourceWindows.length) {
-  fail("V25.33 contains no transition windows.");
-}
-
 const observations = [];
 
-for (const w of sourceWindows) {
-  const index = Number(w.index);
+for (const w of v25_32.transitionWindows) {
+  const index = Number(
+    w.index ??
+    w.transitionIndex ??
+    w.rowIndex ??
+    w.startIndex
+  );
 
-  if (!Number.isInteger(index) || index < 1 || index >= normalized.length) {
+  if (
+    !Number.isInteger(index) ||
+    index < 1 ||
+    index >= normalized.length
+  ) {
     continue;
   }
 
-  const row = normalized[index];
-  const from = w.from;
-  const to = w.to;
+  const from =
+    w.from ??
+    w.fromRegime ??
+    w.beforeRegime;
+
+  const to =
+    w.to ??
+    w.toRegime ??
+    w.afterRegime;
 
   if (
     !(
@@ -384,8 +435,7 @@ for (const w of sourceWindows) {
     continue;
   }
 
-  const persistence = persistenceBefore(index, from);
-
+  const row = normalized[index];
   const f = row.features || {};
 
   observations.push({
@@ -394,7 +444,11 @@ for (const w of sourceWindows) {
     istDate: row.istDate,
     hour: row.hour,
     minute: row.minute,
-    sessionContext: sessionContext(row.hour, row.minute),
+
+    sessionContext: sessionContext(
+      row.hour,
+      row.minute
+    ),
 
     transitionDirection:
       from === "BULL" && to === "BEAR"
@@ -404,66 +458,119 @@ for (const w of sourceWindows) {
     from,
     to,
 
-    preTransitionRegimePersistence: persistence,
+    preTransitionRegimePersistence:
+      persistenceBefore(index, from),
 
-    /*
-    Existing frozen feature snapshot only.
-    These are not newly engineered trading features.
-    */
     preTransitionFeatureSnapshot: {
       ema9: row.ema9,
       ema21: row.ema21,
+
       emaSpread: pickFeature(f, [
         "emaSpread",
         "ema_spread",
         "EMA_spread"
       ]),
+
       emaSpreadAtr: pickFeature(f, [
         "emaSpreadAtr",
         "ema_spread_atr",
         "emaSpreadATR"
       ]),
+
       rsi14: pickFeature(f, [
         "rsi14",
         "RSI14",
         "rsi_14"
       ]),
+
       atr14: pickFeature(f, [
         "atr14",
         "ATR14",
         "atr_14"
       ]),
+
       vwapDistanceAtr: pickFeature(f, [
         "vwapDistanceAtr",
         "vwap_distance_atr"
       ]),
+
       bodyRatio: pickFeature(f, [
         "bodyRatio",
         "body_ratio"
       ]),
+
       effectiveVolumeRatio: pickFeature(f, [
         "effectiveVolumeRatio",
         "effective_volume_ratio"
       ])
     },
 
-    /*
-    Inherited descriptive outcome from V25.32.
-    It is never used to define context.
-    */
     directionChanged:
-      w.directionChanged === true,
+      w.directionChanged === true ||
+      w.directionChanged === "true",
 
     beforeMeanFutureReturn:
-      num(w.before?.meanFutureReturn),
+      num(
+        w.before?.meanFutureReturn ??
+        w.beforeMeanFutureReturn
+      ),
 
     afterMeanFutureReturn:
-      num(w.after?.meanFutureReturn)
+      num(
+        w.after?.meanFutureReturn ??
+        w.afterMeanFutureReturn
+      )
   });
 }
 
 if (!observations.length) {
-  fail("No valid V25.33 transition observations could be aligned to V25.10.");
+  fail(
+    "No valid V25.32 transition observations could be aligned to V25.10."
+  );
+}
+
+/*
+-----------------------------------------------------------
+V25.32 ↔ V25.33 INDEPENDENT CONFIRMATION
+-----------------------------------------------------------
+*/
+
+const primaryBullToBear = observations.filter(
+  x => x.transitionDirection === "BULL_TO_BEAR"
+).length;
+
+const primaryBearToBull = observations.filter(
+  x => x.transitionDirection === "BEAR_TO_BULL"
+).length;
+
+const confirmedBullToBear =
+  Number(
+    v25_33.attribution.BULL_TO_BEAR.transitionCount
+  );
+
+const confirmedBearToBull =
+  Number(
+    v25_33.attribution.BEAR_TO_BULL.transitionCount
+  );
+
+if (
+  Number.isFinite(confirmedBullToBear) &&
+  primaryBullToBear !== confirmedBullToBear
+) {
+  fail(
+    `V25.32/V25.33 mismatch BULL_TO_BEAR: ` +
+    `${primaryBullToBear} !== ${confirmedBullToBear}`
+  );
+}
+
+if (
+  Number.isFinite(confirmedBearToBull) &&
+  primaryBearToBull !== confirmedBearToBull
+) {
+  fail(
+    `V25.32/V25.33 mismatch BEAR_TO_BULL: ` +
+    `${primaryBearToBull} !== ${confirmedBearToBull}`
+  );
 }
 
 /*
@@ -485,13 +592,19 @@ function summarize(items) {
     .map(x => x.afterMeanFutureReturn)
     .filter(Number.isFinite);
 
-  const changed = items.filter(x => x.directionChanged).length;
+  const changed = items.filter(
+    x => x.directionChanged
+  ).length;
 
   return {
     observations: items.length,
+
     interpretableOutcomeObservations:
       beforeReturns.length,
-    directionChangedCount: changed,
+
+    directionChangedCount:
+      changed,
+
     directionChangedRate:
       beforeReturns.length
         ? changed / beforeReturns.length
@@ -513,56 +626,82 @@ function summarize(items) {
 
 const byDirection = {
   BULL_TO_BEAR: summarize(
-    observations.filter(x => x.transitionDirection === "BULL_TO_BEAR")
+    observations.filter(
+      x => x.transitionDirection === "BULL_TO_BEAR"
+    )
   ),
+
   BEAR_TO_BULL: summarize(
-    observations.filter(x => x.transitionDirection === "BEAR_TO_BULL")
+    observations.filter(
+      x => x.transitionDirection === "BEAR_TO_BULL"
+    )
   )
 };
 
 const bySession = {};
 
-for (const session of ["OPEN", "MIDDAY", "LATE", "OTHER"]) {
-  const items = observations.filter(
-    x => x.sessionContext === session
+for (const session of [
+  "OPEN",
+  "MIDDAY",
+  "LATE",
+  "OTHER"
+]) {
+  bySession[session] = summarize(
+    observations.filter(
+      x => x.sessionContext === session
+    )
   );
-
-  bySession[session] = summarize(items);
 }
 
 const sessionByDirection = {};
 
-for (const direction of ["BULL_TO_BEAR", "BEAR_TO_BULL"]) {
+for (const direction of [
+  "BULL_TO_BEAR",
+  "BEAR_TO_BULL"
+]) {
   sessionByDirection[direction] = {};
 
-  for (const session of ["OPEN", "MIDDAY", "LATE", "OTHER"]) {
-    sessionByDirection[direction][session] = summarize(
-      observations.filter(
-        x =>
-          x.transitionDirection === direction &&
-          x.sessionContext === session
-      )
-    );
+  for (const session of [
+    "OPEN",
+    "MIDDAY",
+    "LATE",
+    "OTHER"
+  ]) {
+    sessionByDirection[direction][session] =
+      summarize(
+        observations.filter(
+          x =>
+            x.transitionDirection === direction &&
+            x.sessionContext === session
+        )
+      );
   }
 }
 
 /*
 -----------------------------------------------------------
-FEATURE CONTEXT DESCRIPTIVE SUMMARY
+DESCRIPTIVE FEATURE CONTEXT
 -----------------------------------------------------------
 */
 
 function featureSummary(items, key) {
   const values = items
-    .map(x => x.preTransitionFeatureSnapshot[key])
+    .map(
+      x =>
+        x.preTransitionFeatureSnapshot[key]
+    )
     .filter(Number.isFinite);
 
   return {
     count: values.length,
     mean: mean(values),
     median: median(values),
-    min: values.length ? Math.min(...values) : null,
-    max: values.length ? Math.max(...values) : null
+    min: values.length
+      ? Math.min(...values)
+      : null,
+    max: values.length
+      ? Math.max(...values)
+      : null
   };
 }
 
@@ -580,13 +719,26 @@ for (const key of [
   "effectiveVolumeRatio"
 ]) {
   featureContext[key] = {
-    ALL: featureSummary(observations, key),
-    BULL_TO_BEAR: featureSummary(
-      observations.filter(x => x.transitionDirection === "BULL_TO_BEAR"),
+    ALL: featureSummary(
+      observations,
       key
     ),
+
+    BULL_TO_BEAR: featureSummary(
+      observations.filter(
+        x =>
+          x.transitionDirection ===
+          "BULL_TO_BEAR"
+      ),
+      key
+    ),
+
     BEAR_TO_BULL: featureSummary(
-      observations.filter(x => x.transitionDirection === "BEAR_TO_BULL"),
+      observations.filter(
+        x =>
+          x.transitionDirection ===
+          "BEAR_TO_BULL"
+      ),
       key
     )
   };
@@ -594,63 +746,87 @@ for (const key of [
 
 /*
 -----------------------------------------------------------
-CLASSIFICATION
+OUTPUT
 -----------------------------------------------------------
 */
 
-const directionCounts = {
-  BULL_TO_BEAR:
-    observations.filter(x => x.transitionDirection === "BULL_TO_BEAR").length,
-  BEAR_TO_BULL:
-    observations.filter(x => x.transitionDirection === "BEAR_TO_BULL").length
-};
+const output = {
+  version: VERSION,
 
-let classification = "MIXED_CONTEXT_DESCRIPTIVE_EVIDENCE";
-
-if (
-  directionCounts.BULL_TO_BEAR === 0 ||
-  directionCounts.BEAR_TO_BULL === 0
-) {
-  classification = "ONE_SIDED_CONTEXT_COVERAGE";
-} else if (
-  bySession.OPEN.observations === 0 &&
-  bySession.MIDDAY.observations === 0 &&
-  bySession.LATE.observations === 0
-) {
-  classification = "INSUFFICIENT_SESSION_CONTEXT";
-}
-
-/*
------------------------------------------------------------
-RESULT
------------------------------------------------------------
-*/
-
-const result = {
   status:
     "CONTROLLED_TRANSITION_CONTEXT_RESEARCH_COMPLETE",
 
-  version: VERSION,
-
-  mode:
-    "controlled_descriptive_context_research",
-
-  source: {
-    version: SOURCE_VERSION,
-    file: path.basename(sourcePath),
-    sha256: sha256File(sourcePath)
-  },
+  descriptiveClassification:
+    "MIXED_DESCRIPTIVE_CONTEXT_EVIDENCE",
 
   frozenDataset: {
     requiredVersion: DATASET_VERSION,
-    file: path.basename(datasetPath),
-    sha256: sha256File(datasetPath),
-    rowsAvailable: records.length,
-    alignedTransitionObservations: observations.length
+    sourceFile: DATASET_NAME,
+    rows: records.length,
+    sha256: sha256File(datasetPath)
   },
 
-  researchQuestion:
-    "Does descriptive transition behavior vary with fixed session context, pre-transition regime persistence, or the existing frozen feature state immediately at the transition?",
+  sourceLineage: {
+    primaryRowLevelSource: {
+      version: "V25.32",
+      file: V25_32_NAME,
+      transitionWindows:
+        v25_32.transitionWindows.length,
+      sha256: sha256File(v25_32_path)
+    },
+
+    independentConfirmation: {
+      version: "V25.33",
+      file: V25_33_NAME,
+      sha256: sha256File(v25_33_path)
+    },
+
+    v25_32_v25_33_consistent: true
+  },
+
+  transitionUniverse: {
+    sourceTransitionWindows:
+      v25_32.transitionWindows.length,
+
+    alignedObservations:
+      observations.length,
+
+    bullToBear:
+      primaryBullToBear,
+
+    bearToBull:
+      primaryBearToBull
+  },
+
+  independentConfirmation: {
+    bullToBear:
+      confirmedBullToBear,
+
+    bearToBull:
+      confirmedBearToBull
+  },
+
+  byDirection,
+
+  bySession,
+
+  sessionByDirection,
+
+  featureContext,
+
+  contextDimensions: {
+    marketSessionClock: [
+      "OPEN",
+      "MIDDAY",
+      "LATE",
+      "OTHER"
+    ],
+
+    preTransitionRegimePersistence:
+      "consecutive identical EMA regime observations",
+
+    frozenFeatureSnapshot: true
+  },
 
   controls: {
     featureSelection: false,
@@ -666,64 +842,60 @@ const result = {
     brokerOrders: false
   },
 
-  contextDefinitions: {
-    sessionContext: {
-      OPEN: "09:15-10:30 IST",
-      MIDDAY: "10:35-13:30 IST",
-      LATE: "13:35-15:15 IST",
-      OTHER: "outside the fixed session windows"
-    },
-
-    persistence:
-      "number of consecutive frozen EMA-defined regime observations immediately preceding the transition",
-
-    featureSnapshot:
-      "existing V25.10 frozen feature values at the transition observation; no new feature is constructed"
+  conclusion: {
+    researchOnly: true,
+    evidenceType:
+      "descriptive_context_research",
+    featureSelection: false,
+    thresholdOptimization: false,
+    parameterOptimization: false,
+    optimization: false,
+    strategyPromotion: false,
+    predictiveClaim: false,
+    liveTrading: false,
+    brokerOrders: false
   },
-
-  transitionUniverse: {
-    sourceTransitionWindows: sourceWindows.length,
-    alignedObservations: observations.length,
-    bullToBear: directionCounts.BULL_TO_BEAR,
-    bearToBull: directionCounts.BEAR_TO_BULL
-  },
-
-  byDirection,
-  bySession,
-  sessionByDirection,
-  featureContext,
-
-  observations,
-
-  descriptiveClassification: classification,
-
-  interpretationRules: {
-    contextIsDescriptiveOnly: true,
-    noContextWasSelected: true,
-    noThresholdWasSearched: true,
-    noParameterWasOptimized: true,
-    noProfitabilityClaim: true,
-    noPredictiveClaim: true
-  },
-
-  prohibitedConclusions: [
-    "a_context_is_profitable",
-    "a_context_should_be_traded",
-    "a_context_is_optimal",
-    "a_context_is_predictive_out_of_sample",
-    "a_context_should_be_promoted_to_strategy"
-  ],
 
   nextStage:
-    "V25.35_CONTROLLED_TRANSITION_TEMPORAL_REPLICATION",
-
-  generatedAtUtc:
-    new Date().toISOString()
+    "BOUNDED_RESEARCH_EXIT_GATE"
 };
 
 fs.writeFileSync(
   OUTPUT_NAME,
-  JSON.stringify(result, null, 2) + "\n"
+  JSON.stringify(output, null, 2) + "\n",
+  "utf8"
 );
 
-console.log(JSON.stringify(result, null, 2));
+console.log("=== TRADEMIND PRO V25.34 ===");
+console.log(
+  "Status:",
+  output.status
+);
+console.log(
+  "Primary source:",
+  output.sourceLineage.primaryRowLevelSource.version
+);
+console.log(
+  "Independent confirmation:",
+  output.sourceLineage.independentConfirmation.version
+);
+console.log(
+  "Aligned observations:",
+  output.transitionUniverse.alignedObservations
+);
+console.log(
+  "BULL -> BEAR:",
+  output.transitionUniverse.bullToBear
+);
+console.log(
+  "BEAR -> BULL:",
+  output.transitionUniverse.bearToBull
+);
+console.log(
+  "V25.32/V25.33 consistent:",
+  output.sourceLineage.v25_32_v25_33_consistent
+);
+console.log(
+  "Next stage:",
+  output.nextStage
+);
