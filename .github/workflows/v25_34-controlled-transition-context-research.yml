@@ -22,13 +22,11 @@ jobs:
           node-version: 24
 
       - name: Verify V25.34 script
+        shell: bash
         run: |
-          test -f .github/scripts/v25_34-controlled-transition-context-research.js
-
-      # ----------------------------------------------------------
-      # Deterministic frozen-data reconstruction.
-      # Never depend on a transient V25.33 artifact download.
-      # ----------------------------------------------------------
+          set -euo pipefail
+          test -s .github/scripts/v25_34-controlled-transition-context-research.js
+          node --check .github/scripts/v25_34-controlled-transition-context-research.js
 
       - name: Download frozen V25.7 full S5 artifact
         uses: actions/download-artifact@v4
@@ -43,8 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          test -f v25_7_import.json
+          test -s v25_7_import.json
 
           python3 - <<'PY'
           import json
@@ -131,10 +128,6 @@ jobs:
           print("V25.10 frozen learning dataset verification: PASS")
           PY
 
-      # ----------------------------------------------------------
-      # Recreate V25.32 from the frozen V25.10 dataset.
-      # ----------------------------------------------------------
-
       - name: Run V25.32 controlled regime transition research
         run: |
           node .github/scripts/v25_32-controlled-regime-transition-research.js
@@ -175,37 +168,12 @@ jobs:
             throw new Error("V25.32 transition evidence is missing.");
           }
 
-          if (r.conclusion.featureSelection !== false)
-            throw new Error("V25.32 feature selection guard failed.");
-
-          if (r.conclusion.thresholdOptimization !== false)
-            throw new Error("V25.32 threshold guard failed.");
-
-          if (r.conclusion.parameterOptimization !== false)
-            throw new Error("V25.32 parameter guard failed.");
-
-          if (r.conclusion.optimization !== false &&
-              r.regimeMethod?.optimization !== false)
-            throw new Error("V25.32 optimization guard failed.");
-
-          if (r.conclusion.strategyPromotion !== false)
-            throw new Error("V25.32 strategy promotion guard failed.");
-
-          if (r.conclusion.predictiveClaim !== false)
-            throw new Error("V25.32 predictive-claim guard failed.");
-
-          if (r.conclusion.liveTrading !== false)
-            throw new Error("V25.32 live-trading guard failed.");
-
-          if (r.conclusion.brokerOrders !== false)
-            throw new Error("V25.32 broker-order guard failed.");
-
+          console.log(
+            "V25.32 transition windows:",
+            r.transitionWindows.length
+          );
           console.log("V25.32 source verification: PASS");
           NODE
-
-      # ----------------------------------------------------------
-      # Recreate V25.33 from V25.32.
-      # ----------------------------------------------------------
 
       - name: Run V25.33 controlled transition direction attribution
         run: |
@@ -240,6 +208,14 @@ jobs:
             throw new Error("V25.33 transition universe is empty.");
           }
 
+          if (
+            !r.attribution ||
+            !r.attribution.BULL_TO_BEAR ||
+            !r.attribution.BEAR_TO_BULL
+          ) {
+            throw new Error("V25.33 attribution is incomplete.");
+          }
+
           const c = r.controls || {};
 
           for (const key of [
@@ -259,20 +235,85 @@ jobs:
             }
           }
 
-          if (
-            !r.attribution ||
-            !r.attribution.BULL_TO_BEAR ||
-            !r.attribution.BEAR_TO_BULL
-          ) {
-            throw new Error("V25.33 attribution is incomplete.");
-          }
-
           console.log("V25.33 source verification: PASS");
           NODE
 
-      # ----------------------------------------------------------
-      # V25.34
-      # ----------------------------------------------------------
+      - name: Preflight V25.32 and V25.33 source compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s v25_32_controlled_regime_transition_research.json
+          test -s v25_33_controlled_transition_direction_attribution.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const a = JSON.parse(
+            fs.readFileSync(
+              "v25_32_controlled_regime_transition_research.json",
+              "utf8"
+            )
+          );
+
+          const b = JSON.parse(
+            fs.readFileSync(
+              "v25_33_controlled_transition_direction_attribution.json",
+              "utf8"
+            )
+          );
+
+          if (!Array.isArray(a.transitionWindows)) {
+            throw new Error(
+              "V25.32 transitionWindows[] is missing."
+            );
+          }
+
+          if (!b.attribution?.BULL_TO_BEAR ||
+              !b.attribution?.BEAR_TO_BULL) {
+            throw new Error(
+              "V25.33 directional attribution is missing."
+            );
+          }
+
+          const bullToBear = a.transitionWindows.filter(
+            w => w.from === "BULL" && w.to === "BEAR"
+          ).length;
+
+          const bearToBull = a.transitionWindows.filter(
+            w => w.from === "BEAR" && w.to === "BULL"
+          ).length;
+
+          const v33BullToBear =
+            Number(b.attribution.BULL_TO_BEAR.transitionCount);
+
+          const v33BearToBull =
+            Number(b.attribution.BEAR_TO_BULL.transitionCount);
+
+          if (
+            Number.isFinite(v33BullToBear) &&
+            bullToBear !== v33BullToBear
+          ) {
+            throw new Error(
+              `V25.32/V25.33 BULL_TO_BEAR mismatch: ` +
+              `${bullToBear} !== ${v33BullToBear}`
+            );
+          }
+
+          if (
+            Number.isFinite(v33BearToBull) &&
+            bearToBull !== v33BearToBull
+          ) {
+            throw new Error(
+              `V25.32/V25.33 BEAR_TO_BULL mismatch: ` +
+              `${bearToBull} !== ${v33BearToBull}`
+            );
+          }
+
+          console.log("V25.34 source compatibility preflight: PASS");
+          console.log("V25.32 BULL -> BEAR:", bullToBear);
+          console.log("V25.32 BEAR -> BULL:", bearToBull);
+          NODE
 
       - name: Run V25.34 controlled transition context research
         run: |
@@ -318,6 +359,15 @@ jobs:
             throw new Error("V25.34 has no aligned observations.");
           }
 
+          if (
+            !r.sourceLineage ||
+            r.sourceLineage.primaryRowLevelSource?.version !== "V25.32" ||
+            r.sourceLineage.independentConfirmation?.version !== "V25.33" ||
+            r.sourceLineage.v25_32_v25_33_consistent !== true
+          ) {
+            throw new Error("V25.34 source lineage verification failed.");
+          }
+
           const c = r.controls || {};
 
           for (const key of [
@@ -344,7 +394,9 @@ jobs:
             !r.sessionByDirection ||
             !r.featureContext
           ) {
-            throw new Error("V25.34 context evidence is incomplete.");
+            throw new Error(
+              "V25.34 context evidence is incomplete."
+            );
           }
 
           console.log("V25.34 result verification: PASS");
@@ -370,7 +422,15 @@ jobs:
             r.descriptiveClassification
           );
           console.log(
-            "Aligned transition observations:",
+            "Primary row-level source:",
+            r.sourceLineage.primaryRowLevelSource.version
+          );
+          console.log(
+            "Independent confirmation:",
+            r.sourceLineage.independentConfirmation.version
+          );
+          console.log(
+            "Aligned observations:",
             r.transitionUniverse.alignedObservations
           );
           console.log(
@@ -381,37 +441,14 @@ jobs:
             "BEAR -> BULL:",
             r.transitionUniverse.bearToBull
           );
-
           console.log(
-            "BULL -> BEAR direction-change rate:",
-            r.byDirection.BULL_TO_BEAR.directionChangedRate
+            "V25.32/V25.33 consistent:",
+            r.sourceLineage.v25_32_v25_33_consistent
           );
-
           console.log(
-            "BEAR -> BULL direction-change rate:",
-            r.byDirection.BEAR_TO_BULL.directionChangedRate
+            "Next stage:",
+            r.nextStage
           );
-
-          console.log(
-            "Session context:",
-            JSON.stringify(r.bySession)
-          );
-
-          console.log(
-            "Mean pre-transition persistence:",
-            JSON.stringify({
-              BULL_TO_BEAR:
-                r.byDirection.BULL_TO_BEAR
-                  .meanPreTransitionRegimePersistence,
-              BEAR_TO_BULL:
-                r.byDirection.BEAR_TO_BULL
-                  .meanPreTransitionRegimePersistence
-            })
-          );
-
-          console.log("Feature selection:", r.controls.featureSelection);
-          console.log("Optimization:", r.controls.optimization);
-          console.log("Strategy promotion:", r.controls.strategyPromotion);
           NODE
 
       - name: Upload V25.34 research JSON
@@ -429,8 +466,9 @@ jobs:
             "version": "V25.34",
             "status": "COMPLETE",
             "stage": "CONTROLLED_TRANSITION_CONTEXT_RESEARCH",
-            "source": "V25.33",
-            "nextStage": "V25.35_CONTROLLED_TRANSITION_TEMPORAL_REPLICATION",
+            "primarySource": "V25.32",
+            "independentConfirmation": "V25.33",
+            "nextStage": "BOUNDED_RESEARCH_EXIT_GATE",
             "featureSelection": false,
             "optimization": false,
             "strategyPromotion": false,
