@@ -1,309 +1,1017 @@
-name: System Phase 10 - Bounded Paper Experience Accumulation
+/*
+===========================================================
+ TradeMind Pro
+ SYSTEM PHASE 10 — BOUNDED PAPER EXPERIENCE ACCUMULATION
+ V2 — CLEAN REPLACEMENT FILE
+===========================================================
 
-on:
-  workflow_dispatch:
+Purpose
+-------
+Capture bounded paper experience from the frozen Phase 8
+candidate without changing the strategy or enabling trading.
 
-permissions:
-  contents: write
-  actions: read
+This version fixes the Phase 10 failure modes observed in CI:
 
-jobs:
-  phase-10:
-    runs-on: ubuntu-latest
+1. Does not shadow Node's global `process`.
+2. Rejects placeholder timestamps clearly.
+3. Validates complete OHLC data.
+4. Requires chronological observations.
+5. Blocks replay against the persisted checkpoint.
+6. Preserves Phase 7 NOT_VALIDATED.
+7. Preserves PAPER_ONLY / no-broker / no-learning boundaries.
+8. Supports an EXPLICIT controlled smoke mode for CI.
+9. Does not silently convert fake data into LIVE_MARKET data.
 
-    steps:
-      - name: Start Phase 10
-        run: echo "Starting bounded paper experience accumulation"
+Normal mode:
+  PHASE10_INPUT_FILE =
+  system-development/data/phase-10-paper-observations.json
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+Controlled CI smoke mode:
+  PHASE10_CONTROLLED_SMOKE=true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
+In controlled smoke mode, the input file is ignored and a
+small deterministic test stream is generated in memory.
 
-      - name: Verify Phase 10 source
-        run: node --check system-development/phase-10-bounded-paper-experience-accumulation.js
+IMPORTANT:
+Controlled smoke mode is a PIPELINE TEST only. It is not
+market evidence and must never be counted as genuine live
+market experience.
+===========================================================
+*/
 
-      - name: Locate latest successful Phase 8 run
-        id: phase8
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
+"use strict";
 
-          RUN_ID="$(gh run list \
-            --repo "${{ github.repository }}" \
-            --workflow "system-development-phase-8-FIXED-V2.yml" \
-            --status success \
-            --limit 1 \
-            --json databaseId \
-            --jq '.[0].databaseId')"
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 
-          test -n "$RUN_ID"
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+const VERSION =
+  "SYSTEM_PHASE_10_BOUNDED_PAPER_EXPERIENCE_ACCUMULATION_V2";
 
-      - name: Download Phase 8 model
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ steps.phase8.outputs.run_id }}
-        run: |
-          set -euo pipefail
+const MODEL_VERSION =
+  "SYSTEM_PHASE_8_BOUNDED_PAPER_TRADING_MODEL_V1";
 
-          rm -rf phase8-artifact
-          mkdir phase8-artifact
+const CANDIDATE_ID = "CANDIDATE_BASELINE_V1";
 
-          gh run download "$RUN_ID" \
-            --repo "${{ github.repository }}" \
-            --name system-phase-8-bounded-paper-trading-model \
-            --dir phase8-artifact
+const MODEL_FILE =
+  process.env.PHASE8_MODEL_FILE ||
+  "system-development/data/phase-8-paper-trading-model.json";
 
-          mkdir -p system-development/data
+const INPUT_FILE =
+  process.env.PHASE10_INPUT_FILE ||
+  "system-development/data/phase-10-paper-observations.json";
 
-          mapfile -t FILES < <(
-            find phase8-artifact -type f \
-              -name "phase-8-paper-trading-model.json" -print
+const OUT_DIR = path.resolve(
+  process.env.TRADEMIND_PHASE10_DIR ||
+    "system-development/data"
+);
+
+const CHECK_DIR = path.resolve(
+  process.env.TRADEMIND_PHASE10_CHECKPOINT_DIR ||
+    "system-development/checkpoints"
+);
+
+const OUT_FILE = path.join(
+  OUT_DIR,
+  "phase-10-paper-experience.json"
+);
+
+const LEDGER_FILE = path.join(
+  OUT_DIR,
+  "phase-10-paper-experience-ledger.jsonl"
+);
+
+const STATE_FILE = path.join(
+  CHECK_DIR,
+  "phase-10-paper-position-state.json"
+);
+
+const CHECK_FILE = path.join(
+  CHECK_DIR,
+  "phase-10-paper-experience-checkpoint.json"
+);
+
+const MAX_TRADES_PER_SESSION = 5;
+const MAX_OPEN_POSITIONS = 1;
+const MAX_DAILY_LOSS_PCT = 1.0;
+const STARTING_CAPITAL = 100000;
+
+const CONTROLLED_SMOKE =
+  String(process.env.PHASE10_CONTROLLED_SMOKE || "")
+    .toLowerCase() === "true";
+
+function fail(message) {
+  throw new Error(message);
+}
+
+function readJson(file, label) {
+  if (!fs.existsSync(file)) {
+    fail(`${label} not found: ${file}`);
+  }
+
+  try {
+    return JSON.parse(
+      fs.readFileSync(file, "utf8")
+    );
+  } catch (error) {
+    fail(`Invalid ${label}: ${error.message}`);
+  }
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), {
+    recursive: true
+  });
+
+  fs.writeFileSync(
+    file,
+    JSON.stringify(value, null, 2) + "\n",
+    "utf8"
+  );
+}
+
+function finite(value, name) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    fail(`${name} must be finite`);
+  }
+
+  return number;
+}
+
+function hash(text) {
+  return crypto
+    .createHash("sha256")
+    .update(text, "utf8")
+    .digest("hex");
+}
+
+function validateModel(model) {
+  if (model.version !== MODEL_VERSION) {
+    fail("Unexpected Phase 8 model version");
+  }
+
+  if (model.status !== "PAPER_MODEL_CONSTRUCTED") {
+    fail("Phase 8 model is not constructed");
+  }
+
+  if (model.candidate?.id !== CANDIDATE_ID) {
+    fail("Unexpected Phase 8 candidate ID");
+  }
+
+  if (model.candidate?.oosStatus !== "NOT_VALIDATED") {
+    fail(
+      "Phase 7 NOT_VALIDATED status was not preserved"
+    );
+  }
+
+  if (
+    model.paperContract?.executionMode !==
+    "PAPER_ONLY"
+  ) {
+    fail("Paper-only execution boundary failed");
+  }
+
+  if (model.paperContract?.realTrading !== false) {
+    fail("Real-trading boundary failed");
+  }
+
+  if (model.paperContract?.brokerOrders !== false) {
+    fail("Broker-order boundary failed");
+  }
+
+  if (model.learningBoundary?.learnerUpdate !== false) {
+    fail("Learner-update boundary failed");
+  }
+
+  if (
+    model.learningBoundary?.strategyMutation !== false
+  ) {
+    fail("Strategy-mutation boundary failed");
+  }
+
+  if (model.learningBoundary?.promotion !== false) {
+    fail("Promotion boundary failed");
+  }
+}
+
+function controlledSmokeRows() {
+  return [
+    {
+      source: "CONTROLLED_TEST",
+      timestamp: "2026-08-17T09:15:00+05:30",
+      instrument: "NIFTY 50",
+      timeframe: "5m",
+      candle: {
+        o: 25000,
+        h: 25005,
+        l: 24995,
+        c: 25000
+      },
+      decision: {
+        action: "NO_TRADE",
+        confidence: 0,
+        rationale: "CONTROLLED_PHASE_10_SMOKE"
+      }
+    },
+    {
+      source: "CONTROLLED_TEST",
+      timestamp: "2026-08-17T09:20:00+05:30",
+      instrument: "NIFTY 50",
+      timeframe: "5m",
+      candle: {
+        o: 25000,
+        h: 25015,
+        l: 24998,
+        c: 25010
+      },
+      decision: {
+        action: "ENTER_LONG",
+        confidence: 0.5,
+        rationale: "CONTROLLED_PHASE_10_SMOKE"
+      }
+    },
+    {
+      source: "CONTROLLED_TEST",
+      timestamp: "2026-08-17T09:25:00+05:30",
+      instrument: "NIFTY 50",
+      timeframe: "5m",
+      candle: {
+        o: 25010,
+        h: 25025,
+        l: 25005,
+        c: 25020
+      },
+      decision: {
+        action: "EXIT",
+        confidence: 0.5,
+        rationale: "CONTROLLED_PHASE_10_SMOKE"
+      }
+    }
+  ];
+}
+
+function validateTimestamp(value, index) {
+  const timestamp = String(value || "");
+
+  if (!timestamp) {
+    fail(`Observation ${index} timestamp is missing`);
+  }
+
+  if (
+    timestamp.includes("REPLACE_WITH") ||
+    timestamp.includes("YYYY") ||
+    timestamp.includes("TIMESTAMP")
+  ) {
+    fail(
+      `Observation ${index} contains a placeholder timestamp`
+    );
+  }
+
+  const milliseconds = Date.parse(timestamp);
+
+  if (!Number.isFinite(milliseconds)) {
+    fail(`Observation ${index} timestamp is invalid`);
+  }
+
+  return timestamp;
+}
+
+function validateInput(rows, sourceMode) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    fail("Phase 10 input must be a non-empty array");
+  }
+
+  const allowedActions = new Set([
+    "NO_TRADE",
+    "ENTER_LONG",
+    "ENTER_SHORT",
+    "EXIT"
+  ]);
+
+  const normalized = rows.map((row, index) => {
+    if (!row || typeof row !== "object") {
+      fail(`Observation ${index} is invalid`);
+    }
+
+    if (sourceMode === "LIVE_MARKET") {
+      if (row.source !== "LIVE_MARKET") {
+        fail(
+          `Observation ${index} must have source LIVE_MARKET`
+        );
+      }
+    } else {
+      if (row.source !== "CONTROLLED_TEST") {
+        fail(
+          `Observation ${index} must have source CONTROLLED_TEST`
+        );
+      }
+    }
+
+    const timestamp = validateTimestamp(
+      row.timestamp,
+      index
+    );
+
+    if (String(row.instrument) !== "NIFTY 50") {
+      fail(
+        `Observation ${index} instrument must be NIFTY 50`
+      );
+    }
+
+    if (String(row.timeframe) !== "5m") {
+      fail(
+        `Observation ${index} timeframe must be 5m`
+      );
+    }
+
+    if (!row.candle || typeof row.candle !== "object") {
+      fail(
+        `Observation ${index} candle is required`
+      );
+    }
+
+    const open = finite(
+      row.candle.o,
+      `Observation ${index} open`
+    );
+
+    const high = finite(
+      row.candle.h,
+      `Observation ${index} high`
+    );
+
+    const low = finite(
+      row.candle.l,
+      `Observation ${index} low`
+    );
+
+    const close = finite(
+      row.candle.c,
+      `Observation ${index} close`
+    );
+
+    if (high < Math.max(open, close)) {
+      fail(
+        `Observation ${index} high is below open/close`
+      );
+    }
+
+    if (low > Math.min(open, close)) {
+      fail(
+        `Observation ${index} low is above open/close`
+      );
+    }
+
+    if (low > high) {
+      fail(
+        `Observation ${index} low is above high`
+      );
+    }
+
+    const action = String(
+      row.decision?.action || ""
+    );
+
+    if (!allowedActions.has(action)) {
+      fail(
+        `Observation ${index} unsupported action ${action}`
+      );
+    }
+
+    const confidence =
+      row.decision?.confidence == null
+        ? null
+        : finite(
+            row.decision.confidence,
+            `Observation ${index} confidence`
+          );
+
+    if (
+      confidence !== null &&
+      (confidence < 0 || confidence > 1)
+    ) {
+      fail(
+        `Observation ${index} confidence must be between 0 and 1`
+      );
+    }
+
+    return {
+      source: row.source,
+      timestamp,
+      instrument: "NIFTY 50",
+      timeframe: "5m",
+      candle: {
+        o: open,
+        h: high,
+        l: low,
+        c: close
+      },
+      close,
+      decision: {
+        action,
+        confidence,
+        rationale:
+          row.decision?.rationale == null
+            ? null
+            : String(row.decision.rationale)
+      }
+    };
+  });
+
+  for (let index = 1; index < normalized.length; index++) {
+    const previous = Date.parse(
+      normalized[index - 1].timestamp
+    );
+
+    const current = Date.parse(
+      normalized[index].timestamp
+    );
+
+    if (current <= previous) {
+      fail(
+        "Observations must be strictly chronological"
+      );
+    }
+  }
+
+  return normalized;
+}
+
+function loadState() {
+  if (!fs.existsSync(STATE_FILE)) {
+    return {
+      version:
+        "SYSTEM_PHASE_10_POSITION_STATE_V2",
+      position: "FLAT",
+      entryPrice: null,
+      entryTimestamp: null,
+      tradeId: null,
+      sessionDate: null,
+      sessionTrades: 0,
+      sessionPnl: 0,
+      cumulativeClosedTrades: 0,
+      cumulativeWins: 0,
+      cumulativeLosses: 0,
+      cumulativeGrossPnl: 0,
+      lastTimestamp: null,
+      lastObservationHash: null
+    };
+  }
+
+  const state = readJson(
+    STATE_FILE,
+    "Phase 10 position state"
+  );
+
+  if (
+    state.version !==
+    "SYSTEM_PHASE_10_POSITION_STATE_V2"
+  ) {
+    fail(
+      "Unexpected Phase 10 position-state version"
+    );
+  }
+
+  if (
+    !["FLAT", "LONG", "SHORT"].includes(
+      state.position
+    )
+  ) {
+    fail("Invalid Phase 10 position state");
+  }
+
+  return state;
+}
+
+function loadLedger() {
+  if (!fs.existsSync(LEDGER_FILE)) {
+    return [];
+  }
+
+  const text = fs.readFileSync(
+    LEDGER_FILE,
+    "utf8"
+  ).trim();
+
+  if (!text) {
+    return [];
+  }
+
+  return text.split(/\r?\n/).map(
+    (line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch (error) {
+        fail(
+          `Invalid Phase 10 ledger row ${index}`
+        );
+      }
+    }
+  );
+}
+
+function processObservations(
+  rows,
+  state,
+  sourceMode
+) {
+  const newLedger = [];
+
+  let tradeSequence =
+    state.cumulativeClosedTrades + 1;
+
+  for (const row of rows) {
+    const rowMilliseconds = Date.parse(
+      row.timestamp
+    );
+
+    if (
+      state.lastTimestamp &&
+      rowMilliseconds <=
+        Date.parse(state.lastTimestamp)
+    ) {
+      fail(
+        `Observation is not newer than checkpoint: ${row.timestamp}`
+      );
+    }
+
+    const date = row.timestamp.slice(0, 10);
+
+    if (state.sessionDate !== date) {
+      state.sessionDate = date;
+      state.sessionTrades = 0;
+      state.sessionPnl = 0;
+    }
+
+    const action = row.decision.action;
+
+    if (
+      action === "ENTER_LONG" ||
+      action === "ENTER_SHORT"
+    ) {
+      if (state.position !== "FLAT") {
+        fail(
+          `Entry received while position is ${state.position}`
+        );
+      }
+
+      if (
+        state.sessionTrades >=
+        MAX_TRADES_PER_SESSION
+      ) {
+        fail(
+          "Maximum paper trades per session exceeded"
+        );
+      }
+
+      const dailyLossLimit =
+        -STARTING_CAPITAL *
+        (MAX_DAILY_LOSS_PCT / 100);
+
+      if (state.sessionPnl <= dailyLossLimit) {
+        fail("Maximum daily paper loss reached");
+      }
+
+      state.position =
+        action === "ENTER_LONG"
+          ? "LONG"
+          : "SHORT";
+
+      state.entryPrice = row.close;
+      state.entryTimestamp = row.timestamp;
+      state.tradeId =
+        `P10-${date}-${String(tradeSequence).padStart(4, "0")}`;
+
+      state.sessionTrades += 1;
+      tradeSequence += 1;
+
+      newLedger.push({
+        type: "ENTRY",
+        source: sourceMode,
+        paperTradeId: state.tradeId,
+        timestamp: row.timestamp,
+        instrument: "NIFTY 50",
+        timeframe: "5m",
+        candidateId: CANDIDATE_ID,
+        action,
+        entryPrice: row.close,
+        exitPrice: null,
+        quantity: 1,
+        status: "OPEN",
+        grossPnl: 0,
+        executionMode: "PAPER_ONLY",
+        realOrderSent: false,
+        brokerOrderSent: false,
+        confidence: row.decision.confidence,
+        rationale: row.decision.rationale
+      });
+
+      state.lastTimestamp = row.timestamp;
+      continue;
+    }
+
+    if (action === "EXIT") {
+      if (state.position === "FLAT") {
+        fail(
+          "EXIT received while paper position is flat"
+        );
+      }
+
+      const pnl =
+        state.position === "LONG"
+          ? row.close - state.entryPrice
+          : state.entryPrice - row.close;
+
+      state.sessionPnl += pnl;
+      state.cumulativeGrossPnl += pnl;
+      state.cumulativeClosedTrades += 1;
+
+      if (pnl > 0) {
+        state.cumulativeWins += 1;
+      }
+
+      if (pnl < 0) {
+        state.cumulativeLosses += 1;
+      }
+
+      newLedger.push({
+        type: "EXIT",
+        source: sourceMode,
+        paperTradeId: state.tradeId,
+        timestamp: row.timestamp,
+        instrument: "NIFTY 50",
+        timeframe: "5m",
+        candidateId: CANDIDATE_ID,
+        action: "EXIT",
+        entryPrice: state.entryPrice,
+        exitPrice: row.close,
+        quantity: 1,
+        status: "CLOSED",
+        grossPnl: pnl,
+        executionMode: "PAPER_ONLY",
+        realOrderSent: false,
+        brokerOrderSent: false,
+        confidence: row.decision.confidence,
+        rationale: row.decision.rationale
+      });
+
+      state.position = "FLAT";
+      state.entryPrice = null;
+      state.entryTimestamp = null;
+      state.tradeId = null;
+      state.lastTimestamp = row.timestamp;
+
+      continue;
+    }
+
+    newLedger.push({
+      type: "OBSERVATION",
+      source: sourceMode,
+      paperTradeId: null,
+      timestamp: row.timestamp,
+      instrument: "NIFTY 50",
+      timeframe: "5m",
+      candidateId: CANDIDATE_ID,
+      action: "NO_TRADE",
+      close: row.close,
+      status: "OBSERVED",
+      grossPnl: 0,
+      executionMode: "PAPER_ONLY",
+      realOrderSent: false,
+      brokerOrderSent: false,
+      confidence: row.decision.confidence,
+      rationale: row.decision.rationale
+    });
+
+    state.lastTimestamp = row.timestamp;
+  }
+
+  return {
+    state,
+    newLedger
+  };
+}
+
+function buildResult(
+  rows,
+  newLedger,
+  allLedger,
+  state,
+  sourceMode
+) {
+  const allObservations =
+    allLedger.filter(
+      item => item.type === "OBSERVATION"
+    );
+
+  const allEntries =
+    allLedger.filter(
+      item => item.type === "ENTRY"
+    );
+
+  const allExits =
+    allLedger.filter(
+      item => item.type === "EXIT"
+    );
+
+  const newEntries =
+    newLedger.filter(
+      item => item.type === "ENTRY"
+    );
+
+  const newExits =
+    newLedger.filter(
+      item => item.type === "EXIT"
+    );
+
+  return {
+    phase: "SYSTEM_DEVELOPMENT_PHASE_10",
+    component:
+      "BOUNDED_PAPER_EXPERIENCE_ACCUMULATION",
+    version: VERSION,
+    status:
+      sourceMode === "CONTROLLED_TEST"
+        ? "CONTROLLED_PIPELINE_TEST_CAPTURED"
+        : "PAPER_EXPERIENCE_CAPTURED",
+
+    candidate: {
+      id: CANDIDATE_ID,
+      sourcePhase: "SYSTEM_PHASE_6",
+      oosStatus: "NOT_VALIDATED",
+      strategyModification: false
+    },
+
+    source: {
+      mode: sourceMode,
+      genuineMarketEvidence:
+        sourceMode === "LIVE_MARKET",
+      controlledSmoke:
+        sourceMode === "CONTROLLED_TEST",
+      inputObservations: rows.length
+    },
+
+    capture: {
+      newObservations: rows.length,
+      newEntries: newEntries.length,
+      newExits: newExits.length,
+      totalObservations:
+        allObservations.length,
+      totalEntries: allEntries.length,
+      totalExits: allExits.length,
+      cumulativeClosedTrades:
+        state.cumulativeClosedTrades,
+      cumulativeWins: state.cumulativeWins,
+      cumulativeLosses: state.cumulativeLosses,
+      cumulativeGrossPnl:
+        state.cumulativeGrossPnl,
+      openPosition: state.position
+    },
+
+    sourceBoundary: {
+      sourceRequired: "LIVE_MARKET",
+      controlledTestExplicit:
+        sourceMode === "CONTROLLED_TEST",
+      instrument: "NIFTY 50",
+      timeframe: "5m",
+      completedCandleRequired: true,
+      chronological: true,
+      placeholderTimestampRejected: true,
+      duplicateReplayBlocked: true
+    },
+
+    safety: {
+      executionMode: "PAPER_ONLY",
+      realTrading: false,
+      brokerOrders: false,
+      strategyModification: false,
+      parameterOptimization: false,
+      featureSelection: false,
+      learnerUpdates: false,
+      modelWeightUpdate: false,
+      promotion: false,
+      maxOpenPositions:
+        MAX_OPEN_POSITIONS,
+      maxTradesPerSession:
+        MAX_TRADES_PER_SESSION,
+      maxDailyLossPct:
+        MAX_DAILY_LOSS_PCT
+    },
+
+    learning: {
+      experienceCapture: true,
+      learnerUpdate: false,
+      modelWeightUpdate: false,
+      strategyMutation: false,
+      promotion: false
+    },
+
+    nextStage:
+      "ACCUMULATE_BOUNDED_FORWARD_PAPER_EXPERIENCE_BEFORE_ANY_LEARNING_UPDATE"
+  };
+}
+
+function main() {
+  fs.mkdirSync(OUT_DIR, {
+    recursive: true
+  });
+
+  fs.mkdirSync(CHECK_DIR, {
+    recursive: true
+  });
+
+  const model = readJson(
+    MODEL_FILE,
+    "Phase 8 model"
+  );
+
+  validateModel(model);
+
+  const sourceMode = CONTROLLED_SMOKE
+    ? "CONTROLLED_TEST"
+    : "LIVE_MARKET";
+
+  const rawRows = CONTROLLED_SMOKE
+    ? controlledSmokeRows()
+    : readJson(
+        INPUT_FILE,
+        "Phase 10 observations"
+      );
+
+  const rows = validateInput(
+    rawRows,
+    sourceMode
+  );
+
+  const state = loadState();
+
+  const existingLedger = loadLedger();
+
+  const processed =
+    processObservations(
+      rows,
+      state,
+      sourceMode
+    );
+
+  const newLedger =
+    processed.newLedger;
+
+  const nextState =
+    processed.state;
+
+  let allLedger;
+
+  if (sourceMode === "CONTROLLED_TEST") {
+    allLedger = existingLedger;
+  } else {
+    allLedger =
+      existingLedger.concat(newLedger);
+
+    if (newLedger.length > 0) {
+      fs.appendFileSync(
+        LEDGER_FILE,
+        newLedger
+          .map(item =>
+            JSON.stringify(item)
           )
+          .join("\n") + "\n",
+        "utf8"
+      );
+    }
 
-          test "${#FILES[@]}" -eq 1
+    writeJson(
+      STATE_FILE,
+      nextState
+    );
+  }
 
-          cp "${FILES[0]}" \
-            system-development/data/phase-8-paper-trading-model.json
+  const result = buildResult(
+    rows,
+    newLedger,
+    allLedger,
+    nextState,
+    sourceMode
+  );
 
-      - name: Verify Phase 8 boundary
-        run: |
-          node - <<'NODE'
-          const fs = require("fs");
+  const resultText =
+    JSON.stringify(
+      result,
+      null,
+      2
+    ) + "\n";
 
-          const d = JSON.parse(
-            fs.readFileSync(
-              "system-development/data/phase-8-paper-trading-model.json",
-              "utf8"
-            )
-          );
+  result.integrity = {
+    sha256: hash(resultText),
+    bytes: Buffer.byteLength(
+      resultText,
+      "utf8"
+    )
+  };
 
-          if (
-            d.version !==
-            "SYSTEM_PHASE_8_BOUNDED_PAPER_TRADING_MODEL_V1"
-          ) {
-            throw new Error("Unexpected Phase 8 version");
-          }
+  writeJson(
+    OUT_FILE,
+    result
+  );
 
-          if (d.status !== "PAPER_MODEL_CONSTRUCTED") {
-            throw new Error("Phase 8 model is not constructed");
-          }
+  writeJson(
+    CHECK_FILE,
+    result
+  );
 
-          if (d.candidate?.id !== "CANDIDATE_BASELINE_V1") {
-            throw new Error("Unexpected Phase 8 candidate ID");
-          }
+  console.log(
+    "=== TRADEMIND PRO PHASE 10 ==="
+  );
 
-          if (d.candidate?.oosStatus !== "NOT_VALIDATED") {
-            throw new Error(
-              "Phase 7 NOT_VALIDATED was not preserved"
-            );
-          }
+  console.log(
+    "VERSION:",
+    VERSION
+  );
 
-          if (
-            d.paperContract?.executionMode !== "PAPER_ONLY" ||
-            d.paperContract?.realTrading !== false ||
-            d.paperContract?.brokerOrders !== false
-          ) {
-            throw new Error(
-              "Phase 8 paper safety boundary failed"
-            );
-          }
+  console.log(
+    "STATUS:",
+    result.status
+  );
 
-          if (
-            d.learningBoundary?.learnerUpdate !== false ||
-            d.learningBoundary?.strategyMutation !== false ||
-            d.learningBoundary?.promotion !== false
-          ) {
-            throw new Error(
-              "Phase 8 learning boundary failed"
-            );
-          }
+  console.log(
+    "SOURCE MODE:",
+    sourceMode
+  );
 
-          console.log(
-            "PHASE_8_ARTIFACT_AND_BOUNDARY_VERIFIED"
-          );
-          NODE
+  console.log(
+    "NEW OBSERVATIONS:",
+    result.capture.newObservations
+  );
 
-      - name: Verify Phase 10 controlled-smoke contract
-        run: |
-          node - <<'NODE'
-          const fs = require("fs");
+  console.log(
+    "NEW ENTRIES:",
+    result.capture.newEntries
+  );
 
-          const file =
-            "system-development/phase-10-bounded-paper-experience-accumulation.js";
+  console.log(
+    "NEW EXITS:",
+    result.capture.newExits
+  );
 
-          const text = fs.readFileSync(file, "utf8");
+  console.log(
+    "CLOSED TRADES:",
+    result.capture.cumulativeClosedTrades
+  );
 
-          if (!text.includes("PHASE10_CONTROLLED_SMOKE")) {
-            throw new Error(
-              "Phase 10 controlled-smoke support is missing"
-            );
-          }
+  console.log(
+    "CUMULATIVE GROSS PNL:",
+    result.capture.cumulativeGrossPnl
+  );
 
-          if (!text.includes('source: "CONTROLLED_TEST"')) {
-            throw new Error(
-              "Phase 10 controlled-smoke source is missing"
-            );
-          }
+  console.log(
+    "OPEN POSITION:",
+    result.capture.openPosition
+  );
 
-          if (!text.includes("CONTROLLED_PHASE_10_SMOKE")) {
-            throw new Error(
-              "Phase 10 controlled-smoke rationale is missing"
-            );
-          }
+  console.log(
+    "PAPER ONLY:",
+    result.safety.executionMode ===
+      "PAPER_ONLY"
+  );
 
-          console.log(
-            "PHASE_10_CONTROLLED_SMOKE_CONTRACT_VERIFIED"
-          );
-          NODE
+  console.log(
+    "REAL TRADING:",
+    result.safety.realTrading
+  );
 
-      # IMPORTANT:
-      # The Phase 10 engine already contains its own deterministic controlled
-      # smoke stream. Do NOT create or modify the normal input file here.
-      # Setting this flag tells the engine to use that isolated test stream.
-      - name: Run Phase 10 bounded experience capture
-        env:
-          PHASE10_CONTROLLED_SMOKE: "true"
-        run: |
-          node system-development/phase-10-bounded-paper-experience-accumulation.js
+  console.log(
+    "BROKER ORDERS:",
+    result.safety.brokerOrders
+  );
 
-      - name: Verify Phase 10 result
-        run: |
-          test -f system-development/data/phase-10-paper-experience.json
+  console.log(
+    "LEARNER UPDATE:",
+    result.safety.learnerUpdates
+  );
 
-          node - <<'NODE'
-          const fs = require("fs");
+  console.log(
+    "PROMOTION:",
+    result.safety.promotion
+  );
 
-          const d = JSON.parse(
-            fs.readFileSync(
-              "system-development/data/phase-10-paper-experience.json",
-              "utf8"
-            )
-          );
+  console.log(
+    JSON.stringify(result, null, 2)
+  );
 
-          if (d.status !== "PAPER_EXPERIENCE_CAPTURED") {
-            throw new Error(
-              `Unexpected Phase 10 status: ${d.status}`
-            );
-          }
+  return result;
+}
 
-          if (d.version !==
-              "SYSTEM_PHASE_10_BOUNDED_PAPER_EXPERIENCE_ACCUMULATION_V2") {
-            throw new Error(
-              `Unexpected Phase 10 version: ${d.version}`
-            );
-          }
+if (require.main === module) {
+  main();
+}
 
-          if (d.candidate?.oosStatus !== "NOT_VALIDATED") {
-            throw new Error(
-              "Phase 7 NOT_VALIDATED was not preserved"
-            );
-          }
-
-          if (
-            d.safety?.realTrading !== false ||
-            d.safety?.brokerOrders !== false ||
-            d.safety?.learnerUpdates !== false ||
-            d.safety?.promotion !== false
-          ) {
-            throw new Error(
-              "Phase 10 safety boundary failed"
-            );
-          }
-
-          console.log(
-            "PHASE_10_RESULT_VERIFIED"
-          );
-          NODE
-
-      - name: Print Phase 10 summary
-        run: |
-          node - <<'NODE'
-          const fs = require("fs");
-
-          const d = JSON.parse(
-            fs.readFileSync(
-              "system-development/data/phase-10-paper-experience.json",
-              "utf8"
-            )
-          );
-
-          console.log("=== TRADEMIND PRO PHASE 10 ===");
-          console.log("STATUS:", d.status);
-          console.log("VERSION:", d.version);
-          console.log("NEW OBSERVATIONS:", d.capture?.newObservations);
-          console.log("NEW ENTRIES:", d.capture?.newEntries);
-          console.log("NEW EXITS:", d.capture?.newExits);
-          console.log(
-            "TOTAL CLOSED TRADES:",
-            d.capture?.cumulativeClosedTrades
-          );
-          console.log(
-            "CUMULATIVE GROSS PNL:",
-            d.capture?.cumulativeGrossPnl
-          );
-          console.log(
-            "OPEN POSITION:",
-            d.capture?.openPosition
-          );
-          console.log(
-            "REAL TRADING:",
-            d.safety?.realTrading
-          );
-          console.log(
-            "BROKER ORDERS:",
-            d.safety?.brokerOrders
-          );
-          console.log(
-            "LEARNER UPDATES:",
-            d.safety?.learnerUpdates
-          );
-          console.log(
-            "PROMOTION:",
-            d.safety?.promotion
-          );
-          NODE
-
-      - name: Upload Phase 10 evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: phase-10-bounded-paper-experience
-          path: |
-            system-development/data/phase-10-paper-experience.json
-            system-development/data/phase-10-paper-experience-ledger.jsonl
-            system-development/checkpoints/phase-10-paper-position-state.json
-            system-development/checkpoints/phase-10-paper-experience-checkpoint.json
-
-      - name: Save Phase 10 checkpoint
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add \
-            system-development/data/phase-10-paper-experience.json \
-            system-development/data/phase-10-paper-experience-ledger.jsonl \
-            system-development/checkpoints/phase-10-paper-position-state.json \
-            system-development/checkpoints/phase-10-paper-experience-checkpoint.json
-
-          git diff --cached --quiet || \
-            git commit -m "Add Phase 10 paper experience checkpoint"
-
-      - name: Push Phase 10 checkpoint
-        run: git push
-
-      - name: Final safety assertion
-        run: |
-          echo "Phase 10 final safety assertion:"
-          echo "PAPER ONLY"
-          echo "REAL ORDERS: DISABLED"
-          echo "BROKER ORDERS: DISABLED"
-          echo "LEARNER UPDATES: DISABLED"
-          echo "STRATEGY MUTATION: DISABLED"
-          echo "PROMOTION: DISABLED"
+module.exports = {
+  VERSION,
+  validateModel,
+  validateInput,
+  processObservations,
+  buildResult,
+  controlledSmokeRows,
+  main
+};
