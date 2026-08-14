@@ -1,0 +1,530 @@
+name: TradeMind Pro - System Development Phase 4
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  phase-4-learning-ready-memory:
+    name: System Phase 4 - Experience Consolidation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up job
+        run: |
+          echo "Starting TradeMind Pro System Phase 4"
+          echo "Learning-ready memory construction only"
+          echo "No learner updates"
+          echo "No strategy promotion"
+          echo "No real trading"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Phase 1 source
+        run: |
+          test -f system-development/phase-1-learning-memory.js
+          node --check system-development/phase-1-learning-memory.js
+
+      - name: Verify Phase 2 source
+        run: |
+          test -f system-development/phase-2-paper-experience-capture.js
+          node --check system-development/phase-2-paper-experience-capture.js
+
+      - name: Verify Phase 3 source
+        run: |
+          test -f system-development/phase-3-historical-experience-stream.js
+          node --check system-development/phase-3-historical-experience-stream.js
+
+      - name: Verify Phase 4 source
+        run: |
+          test -f system-development/phase-4-experience-consolidation.js
+          node --check system-development/phase-4-experience-consolidation.js
+
+      - name: Download frozen V25.7 full S5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v25-7-full_s5-import
+          path: .
+          repository: ${{ github.repository }}
+          run-id: 31687848244
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen V25.7 source
+        run: |
+          test -f v25_7_import.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const data =
+            JSON.parse(
+              fs.readFileSync(
+                "v25_7_import.json",
+                "utf8"
+              )
+            );
+
+          if (
+            data.status !==
+            "IMPORT_COMPLETE"
+          ) {
+            throw new Error(
+              "Frozen V25.7 source is not IMPORT_COMPLETE"
+            );
+          }
+
+          if (
+            data.mode !==
+            "full_s5"
+          ) {
+            throw new Error(
+              "Frozen V25.7 source is not full_s5"
+            );
+          }
+
+          if (
+            !Array.isArray(
+              data.canonicalRows
+            )
+          ) {
+            throw new Error(
+              "canonicalRows is not an array"
+            );
+          }
+
+          if (
+            data.canonicalRows.length !==
+            9385
+          ) {
+            throw new Error(
+              `Expected 9385 canonical rows, got ${data.canonicalRows.length}`
+            );
+          }
+
+          const integrity =
+            data.integrity || {};
+
+          if (
+            integrity.chronological !==
+            true
+          ) {
+            throw new Error(
+              "Chronological integrity failed"
+            );
+          }
+
+          if (
+            integrity.duplicateTimestamps !==
+            false
+          ) {
+            throw new Error(
+              "Duplicate timestamp integrity failed"
+            );
+          }
+
+          if (
+            integrity.allOHLCValid !==
+            true
+          ) {
+            throw new Error(
+              "OHLC integrity failed"
+            );
+          }
+
+          console.log(
+            "FROZEN_V25_7_SOURCE_VERIFIED"
+          );
+          NODE
+
+      - name: Run Phase 3 controlled historical stream
+        env:
+          INPUT_FILE: v25_7_import.json
+        run: |
+          node system-development/phase-3-historical-experience-stream.js
+
+      - name: Verify Phase 3 output before consolidation
+        run: |
+          test -f system-development/data/phase-3-historical-experience.jsonl
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file =
+            "system-development/data/phase-3-historical-experience.jsonl";
+
+          const lines =
+            fs.readFileSync(
+              file,
+              "utf8"
+            )
+            .split(/\r?\n/)
+            .filter(Boolean);
+
+          if (
+            lines.length === 0
+          ) {
+            throw new Error(
+              "Phase 3 output is empty"
+            );
+          }
+
+          const ids =
+            new Set();
+
+          for (
+            const [index, line]
+            of lines.entries()
+          ) {
+            const row =
+              JSON.parse(line);
+
+            if (
+              !row.experienceId
+            ) {
+              throw new Error(
+                `Missing experienceId at line ${index + 1}`
+              );
+            }
+
+            if (
+              ids.has(
+                row.experienceId
+              )
+            ) {
+              throw new Error(
+                `Duplicate Phase 3 experienceId at line ${index + 1}`
+              );
+            }
+
+            ids.add(
+              row.experienceId
+            );
+
+            if (
+              !row.decision ||
+              !row.decision.action
+            ) {
+              throw new Error(
+                `Missing decision at line ${index + 1}`
+              );
+            }
+
+            if (
+              !row.outcome ||
+              !row.outcome.status
+            ) {
+              throw new Error(
+                `Missing outcome at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.source?.dataset !==
+              "V25.7 frozen full_s5"
+            ) {
+              throw new Error(
+                `Unexpected Phase 3 source at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.context?.source !==
+              "SYSTEM_PHASE_3"
+            ) {
+              throw new Error(
+                `Unexpected Phase 3 context at line ${index + 1}`
+              );
+            }
+          }
+
+          console.log(
+            "PHASE_3_INPUT_VERIFIED"
+          );
+          console.log(
+            "Phase 3 rows:",
+            lines.length
+          );
+          NODE
+
+      - name: Run Phase 4 consolidation
+        env:
+          INPUT_FILE: system-development/data/phase-3-historical-experience.jsonl
+        run: |
+          node system-development/phase-4-experience-consolidation.js
+
+      - name: Verify Phase 4 learning-ready dataset
+        run: |
+          test -f system-development/data/phase-4-learning-ready-experience.jsonl
+          test -f system-development/checkpoints/phase-4-learning-ready-experience-checkpoint.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const dataFile =
+            "system-development/data/phase-4-learning-ready-experience.jsonl";
+
+          const checkpointFile =
+            "system-development/checkpoints/phase-4-learning-ready-experience-checkpoint.json";
+
+          const lines =
+            fs.readFileSync(
+              dataFile,
+              "utf8"
+            )
+            .split(/\r?\n/)
+            .filter(Boolean);
+
+          if (
+            lines.length === 0
+          ) {
+            throw new Error(
+              "Phase 4 dataset is empty"
+            );
+          }
+
+          const ids =
+            new Set();
+
+          const hashes =
+            new Set();
+
+          let previousTimestamp =
+            null;
+
+          for (
+            const [index, line]
+            of lines.entries()
+          ) {
+            let row;
+
+            try {
+              row =
+                JSON.parse(line);
+            } catch {
+              throw new Error(
+                `Invalid Phase 4 JSON at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.schemaVersion !==
+              "SYSTEM_PHASE_4_LEARNING_READY_V1"
+            ) {
+              throw new Error(
+                `Unexpected schema at line ${index + 1}`
+              );
+            }
+
+            if (
+              !row.experienceId
+            ) {
+              throw new Error(
+                `Missing experienceId at line ${index + 1}`
+              );
+            }
+
+            if (
+              ids.has(
+                row.experienceId
+              )
+            ) {
+              throw new Error(
+                `Duplicate experienceId at line ${index + 1}`
+              );
+            }
+
+            ids.add(
+              row.experienceId
+            );
+
+            if (
+              !row.recordHash
+            ) {
+              throw new Error(
+                `Missing recordHash at line ${index + 1}`
+              );
+            }
+
+            if (
+              hashes.has(
+                row.recordHash
+              )
+            ) {
+              throw new Error(
+                `Duplicate recordHash at line ${index + 1}`
+              );
+            }
+
+            hashes.add(
+              row.recordHash
+            );
+
+            const timestamp =
+              Date.parse(
+                row.timestamp
+              );
+
+            if (
+              !Number.isFinite(
+                timestamp
+              )
+            ) {
+              throw new Error(
+                `Invalid timestamp at line ${index + 1}`
+              );
+            }
+
+            if (
+              previousTimestamp !== null &&
+              timestamp <
+                previousTimestamp
+            ) {
+              throw new Error(
+                `Dataset is not chronological at line ${index + 1}`
+              );
+            }
+
+            previousTimestamp =
+              timestamp;
+
+            if (
+              row.source?.dataset !==
+              "V25.7 frozen full_s5"
+            ) {
+              throw new Error(
+                `Unexpected source at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.source?.phase !==
+              "SYSTEM_PHASE_3"
+            ) {
+              throw new Error(
+                `Unexpected source phase at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.provenance?.learningEnabled !==
+              false
+            ) {
+              throw new Error(
+                `Learning must remain disabled at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.provenance?.strategyPromotionEnabled !==
+              false
+            ) {
+              throw new Error(
+                `Strategy promotion must remain disabled at line ${index + 1}`
+              );
+            }
+
+            if (
+              row.provenance?.realTradingEnabled !==
+              false
+            ) {
+              throw new Error(
+                `Real trading must remain disabled at line ${index + 1}`
+              );
+            }
+          }
+
+          const checkpoint =
+            JSON.parse(
+              fs.readFileSync(
+                checkpointFile,
+                "utf8"
+              )
+            );
+
+          if (
+            checkpoint.status !==
+            "READY"
+          ) {
+            throw new Error(
+              "Phase 4 checkpoint is not READY"
+            );
+          }
+
+          if (
+            checkpoint.records?.total !==
+            lines.length
+          ) {
+            throw new Error(
+              "Checkpoint row count does not match dataset"
+            );
+          }
+
+          if (
+            checkpoint.safety?.learnerEnabled !==
+            false
+          ) {
+            throw new Error(
+              "Checkpoint says learner is enabled"
+            );
+          }
+
+          if (
+            checkpoint.safety?.realTradingEnabled !==
+            false
+          ) {
+            throw new Error(
+              "Checkpoint says real trading is enabled"
+            );
+          }
+
+          console.log(
+            "PHASE_4_LEARNING_READY_DATASET_VERIFIED"
+          );
+          console.log(
+            "Learning-ready rows:",
+            lines.length
+          );
+          console.log(
+            "Learner enabled: false"
+          );
+          console.log(
+            "Real trading enabled: false"
+          );
+          console.log(
+            "Strategy promotion enabled: false"
+          );
+          NODE
+
+      - name: Print Phase 4 summary
+        run: |
+          cat system-development/checkpoints/phase-4-learning-ready-experience-checkpoint.json
+
+      - name: Upload Phase 4 checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-phase-4-learning-ready-memory
+          path: |
+            system-development/data/phase-4-learning-ready-experience.jsonl
+            system-development/checkpoints/phase-4-learning-ready-experience-checkpoint.json
+
+      - name: Final safety assertion
+        run: |
+          echo "SYSTEM DEVELOPMENT PHASE 4 COMPLETE"
+          echo "Learning-ready memory created"
+          echo "Phase 3 source preserved"
+          echo "Phase 1 ledger preserved"
+          echo "Learner updates: false"
+          echo "Parameter optimization: false"
+          echo "Feature selection: false"
+          echo "Strategy promotion: false"
+          echo "Broker integration: false"
+          echo "Real orders: false"
