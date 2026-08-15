@@ -15,30 +15,48 @@ h1,h2,p{margin-top:0}
 h1{margin-bottom:6px;font-size:30px}.subtitle{margin-bottom:0;color:#94a3b8}
 .market-status{display:flex;align-items:center;gap:9px;padding:10px 14px;border:1px solid #243244;border-radius:999px;background:#111827;white-space:nowrap;font-size:13px;font-weight:700}
 .dot{width:9px;height:9px;border-radius:50%;background:#22c55e}.dot.closed{background:#64748b}
-.market-grid,.analysis-grid,.trade-grid,.diagnostic-grid{display:grid;gap:16px}
+.market-grid,.analysis-grid,.trade-grid,.diagnostic-grid,.phase-grid{display:grid;gap:16px}
 .market-grid{grid-template-columns:repeat(2,1fr);margin-bottom:16px}
 .analysis-grid,.trade-grid{grid-template-columns:repeat(4,1fr)}
 .diagnostic-grid{grid-template-columns:repeat(2,1fr)}
-.market-card,.signal-card,.trade-card,.info-card,.diagnostic-card{background:#111827;border:1px solid #243244;border-radius:16px;padding:20px;margin-bottom:16px}
+.phase-grid{grid-template-columns:repeat(2,1fr)}
+.market-card,.signal-card,.trade-card,.info-card,.diagnostic-card,.phase11-card{background:#111827;border:1px solid #243244;border-radius:16px;padding:20px;margin-bottom:16px}
 .card-header{color:#cbd5e1;font-weight:700}.badge,.paper{padding:5px 9px;border-radius:999px;background:#1e293b;color:#94a3b8;font-size:11px;font-weight:700}
 .price{margin:18px 0 5px;font-size:32px;font-weight:800}.change{min-height:20px;color:#94a3b8;font-size:13px}.change.up{color:#22c55e}.change.down{color:#ef4444}
 .mini-status{display:flex;justify-content:space-between;margin-top:18px;padding-top:14px;border-top:1px solid #243244;color:#94a3b8;font-size:13px}.mini-status strong,.status-row strong{color:#f8fafc}
-.section-title{margin-bottom:20px}.section-title h2,.info-card h2,.diagnostic-card h2{margin-bottom:0;font-size:18px}
+.section-title{margin-bottom:20px}.section-title h2,.info-card h2,.diagnostic-card h2,.phase11-card h2{margin-bottom:0;font-size:18px}
 #analysisStatus{color:#22c55e;font-size:12px;font-weight:800}
-.analysis-grid>div,.trade-grid>div,.diagnostic-grid>div,.score-box,.confidence,.diagnostic-note{padding:16px;border-radius:12px;background:#0b1220;border:1px solid #1e293b}
-.analysis-grid span,.trade-grid span,.diagnostic-grid span,.score-box span,.confidence-header span{display:block;margin-bottom:8px;color:#94a3b8;font-size:12px}
-.analysis-grid strong,.trade-grid strong,.diagnostic-grid strong{font-size:18px}
+.analysis-grid>div,.trade-grid>div,.diagnostic-grid>div,.phase-grid>div,.score-box,.confidence,.diagnostic-note{padding:16px;border-radius:12px;background:#0b1220;border:1px solid #1e293b}
+.analysis-grid span,.trade-grid span,.diagnostic-grid span,.phase-grid span,.score-box span,.confidence-header span{display:block;margin-bottom:8px;color:#94a3b8;font-size:12px}
+.analysis-grid strong,.trade-grid strong,.diagnostic-grid strong,.phase-grid strong{font-size:18px}
 #signal{font-size:22px}
 .score-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}.score-box strong{font-size:24px}
 .confidence{margin-top:16px}.confidence-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.confidence-header strong{font-size:18px}
 .confidence-bar{width:100%;height:8px;border-radius:999px;background:#1e293b;overflow:hidden}.confidence-fill{width:0;height:100%;border-radius:999px;background:#22c55e;transition:width .3s}
 .diagnostic-note{margin-top:16px;color:#94a3b8;font-size:13px;line-height:1.5}.diagnostic-note strong{color:#f8fafc}
 button{width:100%;margin-top:20px;padding:14px 18px;border:0;border-radius:10px;background:#2563eb;color:white;font-size:14px;font-weight:800;cursor:pointer}button:hover{opacity:.92}button:disabled{opacity:.6;cursor:not-allowed}
+.phase11-card{border-color:#334155}
+.phase11-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+.phase11-header h2{margin:0}
+.phase-badge{padding:6px 10px;border-radius:999px;background:#1e293b;color:#94a3b8;font-size:11px;font-weight:800}
+.phase-live{color:#22c55e}
+.phase-wait{color:#f59e0b}
+.phase-grid strong{font-size:17px}
+.phase11-note{margin-top:16px;padding:14px;border-radius:12px;background:#0b1220;border:1px solid #1e293b;color:#94a3b8;font-size:13px;line-height:1.5}
+.phase11-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.phase11-actions button{margin-top:0}
+.phase11-actions .secondary{background:#1e293b}
+#phase11ObservationStatus{color:#22c55e;font-weight:800}
 .status-row{padding:12px 0;border-bottom:1px solid #243244;color:#94a3b8;font-size:14px}.status-row:last-of-type{border-bottom:0}.disabled{color:#64748b!important}
 .last-update{margin-top:18px;color:#64748b;font-size:12px}
 #tradeHistory{margin-top:12px;overflow-x:auto;border-radius:12px}.trade-history-row{display:grid;grid-template-columns:45px 70px 1fr 1fr 1fr 1fr 90px 80px 1fr;gap:8px;align-items:center;padding:12px;margin-bottom:6px;background:#0b1220;border:1px solid #1e293b;border-radius:8px;color:#cbd5e1;font-size:12px;min-width:850px}.trade-history-header{font-weight:800;color:#94a3b8}.trade-history-empty{padding:16px;background:#0b1220;border:1px solid #1e293b;border-radius:10px;color:#64748b;font-size:13px}
 footer{padding-top:8px;text-align:center;color:#64748b;font-size:12px}
-@media(max-width:760px){.topbar{align-items:flex-start;flex-direction:column}.market-grid,.analysis-grid,.trade-grid,.diagnostic-grid{grid-template-columns:1fr}.score-row{grid-template-columns:1fr}.price{font-size:28px}}
+@media(max-width:760px){
+.topbar{align-items:flex-start;flex-direction:column}
+.market-grid,.analysis-grid,.trade-grid,.diagnostic-grid,.phase-grid{grid-template-columns:1fr}
+.score-row,.phase11-actions{grid-template-columns:1fr}
+.price{font-size:28px}
+}
 </style>
 </head>
 <body>
@@ -107,6 +125,51 @@ footer{padding-top:8px;text-align:center;color:#64748b;font-size:12px}
 <div class="diagnostic-note"><strong>Strategy Status:</strong> <span id="strategyStatus">WAITING FOR DATA</span></div>
 </section>
 
+<!-- =========================================================
+     PHASE 11 FRONTEND-ONLY OBSERVATION PANEL
+     ---------------------------------------------------------
+     IMPORTANT:
+     - Does NOT call or modify any backend endpoint.
+     - Does NOT modify strategy rules.
+     - Does NOT place orders.
+     - Reads values already rendered by the existing frontend.
+     - Stores only browser-local observation snapshots.
+========================================================= -->
+<section class="phase11-card">
+<div class="phase11-header">
+<h2>Phase 11 Live Validation</h2>
+<span id="phase11Badge" class="phase-badge">PAPER OBSERVATION</span>
+</div>
+
+<div class="phase-grid">
+<div><span>Validation Mode</span><strong>READ-ONLY / PAPER</strong></div>
+<div><span>Engine</span><strong>V10.25</strong></div>
+<div><span>Current Signal</span><strong id="phase11Signal">WAIT</strong></div>
+<div><span>Market Price</span><strong id="phase11Price">--</strong></div>
+<div><span>Strategy Confidence</span><strong id="phase11Confidence">--</strong></div>
+<div><span>Signal Status</span><strong id="phase11StrategyStatus">WAITING</strong></div>
+<div><span>Observation Count</span><strong id="phase11ObservationCount">0</strong></div>
+<div><span>Session Start</span><strong id="phase11SessionStart">NOT STARTED</strong></div>
+<div><span>Last Observation</span><strong id="phase11LastObservation">--</strong></div>
+<div><span>Last Signal Change</span><strong id="phase11LastSignalChange">--</strong></div>
+</div>
+
+<div class="phase11-note">
+<strong>Purpose:</strong> Prepare the presentation layer for Monday's Phase 11 live-market validation.
+This panel only observes values already displayed by the existing frontend. It does not alter the V10.25 strategy,
+learning engine, thresholds, broker controls, or backend data pipeline.
+</div>
+
+<div class="phase11-actions">
+<button id="phase11CaptureBtn">CAPTURE OBSERVATION</button>
+<button id="phase11ClearBtn" class="secondary">CLEAR LOCAL SESSION</button>
+</div>
+
+<div class="phase11-note">
+<strong>Session status:</strong> <span id="phase11ObservationStatus">READY</span>
+</div>
+</section>
+
 <section class="info-card">
 <div class="section-title"><h2>V10.25 Historical Backtest</h2><span class="paper">PAPER ONLY</span></div>
 <div class="diagnostic-grid">
@@ -142,6 +205,268 @@ footer{padding-top:8px;text-align:center;color:#64748b;font-size:12px}
 
 <footer>TradeMind Pro • V10.25 • Paper Trading Only</footer>
 </main>
+
+<script>
+/* =========================================================
+   PHASE 11 FRONTEND-ONLY OBSERVER
+   ========================================================= */
+
+(function () {
+    "use strict";
+
+    const STORAGE_KEY = "trademind_phase11_frontend_session_v1";
+    const MAX_OBSERVATIONS = 100;
+
+    let observations = [];
+    let sessionStart = null;
+    let lastSignal = null;
+    let lastSignalChange = null;
+
+    function el(id) {
+        return document.getElementById(id);
+    }
+
+    function text(id, fallback = "--") {
+        const node = el(id);
+        if (!node) return fallback;
+        const value = String(node.textContent || "").trim();
+        return value || fallback;
+    }
+
+    function loadSession() {
+        try {
+            const saved = JSON.parse(
+                localStorage.getItem(STORAGE_KEY) || "null"
+            );
+
+            if (!saved || typeof saved !== "object") return;
+
+            observations = Array.isArray(saved.observations)
+                ? saved.observations
+                : [];
+
+            sessionStart = saved.sessionStart || null;
+            lastSignal = saved.lastSignal || null;
+            lastSignalChange = saved.lastSignalChange || null;
+        } catch (error) {
+            console.warn("Phase 11 local session could not be loaded:", error);
+        }
+    }
+
+    function saveSession() {
+        try {
+            localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify({
+                    observations: observations.slice(-MAX_OBSERVATIONS),
+                    sessionStart,
+                    lastSignal,
+                    lastSignalChange
+                })
+            );
+        } catch (error) {
+            console.warn("Phase 11 local session could not be saved:", error);
+        }
+    }
+
+    function formatTime(value) {
+        if (!value) return "--";
+
+        try {
+            return new Date(value).toLocaleString("en-IN", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: true
+            });
+        } catch {
+            return "--";
+        }
+    }
+
+    function captureObservation(manual = false) {
+        const now = new Date().toISOString();
+        const signal = text("signal", "WAIT");
+
+        if (!sessionStart) {
+            sessionStart = now;
+        }
+
+        if (
+            lastSignal !== null &&
+            signal !== lastSignal
+        ) {
+            lastSignalChange = now;
+        }
+
+        lastSignal = signal;
+
+        const observation = {
+            timestamp: now,
+            signal,
+            price: text("diagPrice"),
+            trend: text("trend"),
+            momentum: text("momentum"),
+            volatility: text("volatility"),
+            entry: text("entry"),
+            stopLoss: text("stoploss"),
+            target: text("target"),
+            riskReward: text("riskReward"),
+            buyScore: text("buyScore"),
+            sellScore: text("sellScore"),
+            confidence: text("confidence"),
+            engineReason: text("signalReason"),
+            strategyStatus: text("strategyStatus")
+        };
+
+        observations.push(observation);
+
+        if (observations.length > MAX_OBSERVATIONS) {
+            observations = observations.slice(-MAX_OBSERVATIONS);
+        }
+
+        saveSession();
+        renderPhase11();
+
+        if (manual) {
+            const status = el("phase11ObservationStatus");
+            if (status) {
+                status.textContent =
+                    `CAPTURED • ${formatTime(now)}`;
+            }
+        }
+    }
+
+    function renderPhase11() {
+        const latest =
+            observations.length
+                ? observations[observations.length - 1]
+                : null;
+
+        textSet(
+            "phase11Signal",
+            latest?.signal || text("signal", "WAIT")
+        );
+
+        textSet(
+            "phase11Price",
+            latest?.price || text("diagPrice")
+        );
+
+        textSet(
+            "phase11Confidence",
+            latest?.confidence || text("confidence")
+        );
+
+        textSet(
+            "phase11StrategyStatus",
+            latest?.strategyStatus || text("strategyStatus", "WAITING")
+        );
+
+        textSet(
+            "phase11ObservationCount",
+            String(observations.length)
+        );
+
+        textSet(
+            "phase11SessionStart",
+            sessionStart
+                ? formatTime(sessionStart)
+                : "NOT STARTED"
+        );
+
+        textSet(
+            "phase11LastObservation",
+            latest
+                ? formatTime(latest.timestamp)
+                : "--"
+        );
+
+        textSet(
+            "phase11LastSignalChange",
+            lastSignalChange
+                ? formatTime(lastSignalChange)
+                : "--"
+        );
+
+        const badge = el("phase11Badge");
+        if (badge) {
+            const signal =
+                latest?.signal ||
+                text("signal", "WAIT");
+
+            if (signal === "BUY" || signal === "SELL") {
+                badge.textContent = "SIGNAL OBSERVED";
+                badge.classList.add("phase-live");
+            } else {
+                badge.textContent = "PAPER OBSERVATION";
+                badge.classList.remove("phase-live");
+            }
+        }
+    }
+
+    function textSet(id, value) {
+        const node = el(id);
+        if (node) node.textContent = value;
+    }
+
+    function clearSession() {
+        observations = [];
+        sessionStart = null;
+        lastSignal = null;
+        lastSignalChange = null;
+
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch {}
+
+        renderPhase11();
+
+        const status = el("phase11ObservationStatus");
+        if (status) {
+            status.textContent = "LOCAL SESSION CLEARED";
+        }
+    }
+
+    function init() {
+        loadSession();
+        renderPhase11();
+
+        const capture = el("phase11CaptureBtn");
+        const clear = el("phase11ClearBtn");
+
+        if (capture) {
+            capture.addEventListener(
+                "click",
+                () => captureObservation(true)
+            );
+        }
+
+        if (clear) {
+            clear.addEventListener(
+                "click",
+                clearSession
+            );
+        }
+
+        /*
+         * Frontend observation only.
+         * It reads the existing rendered dashboard every 5 seconds.
+         * It does not make any API request.
+         */
+        setInterval(
+            () => captureObservation(false),
+            5000
+        );
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+    } else {
+        init();
+    }
+})();
+</script>
 
 <script src="./strategy.js"></script>
 <script src="./script.js"></script>
