@@ -5,7 +5,8 @@
 
  PURPOSE
  ----------------------------------------------------------
- Render backend data supplied by TradeMindData.
+ Render backend data supplied by TradeMindData and expose
+ truthful frontend system-health information.
 
  IMPORTANT
  ----------------------------------------------------------
@@ -100,6 +101,190 @@
 
   /*
   ---------------------------------------------------------
+   Health status helper
+  ---------------------------------------------------------
+  */
+
+  function getEndpointHealth(result) {
+
+    if (!result) {
+      return {
+        text: "NO DATA",
+        className: "status-neutral"
+      };
+    }
+
+
+    if (result.ok === true) {
+      return {
+        text: "ONLINE",
+        className: "status-safe"
+      };
+    }
+
+
+    if (result.status === 403) {
+      return {
+        text: "HTTP 403",
+        className: "status-neutral"
+      };
+    }
+
+
+    if (result.status) {
+      return {
+        text: `HTTP ${result.status}`,
+        className: "status-neutral"
+      };
+    }
+
+
+    if (result.error) {
+      return {
+        text: String(result.error),
+        className: "status-neutral"
+      };
+    }
+
+
+    return {
+      text: "UNAVAILABLE",
+      className: "status-neutral"
+    };
+  }
+
+
+  function setHealthStatus(
+    id,
+    status
+  ) {
+
+    const element =
+      document.getElementById(id);
+
+    if (!element) {
+      return;
+    }
+
+    element.textContent =
+      status.text;
+
+    element.classList.remove(
+      "status-safe",
+      "status-neutral"
+    );
+
+    if (status.className) {
+      element.classList.add(
+        status.className
+      );
+    }
+  }
+
+
+  /*
+  ---------------------------------------------------------
+   System Health rendering
+  ---------------------------------------------------------
+  */
+
+  function renderSystemHealth(data) {
+
+    /*
+    -------------------------------------------------------
+     Frontend
+    -------------------------------------------------------
+    */
+
+    setHealthStatus(
+      "health-frontend",
+      {
+        text: "ONLINE",
+        className: "status-safe"
+      }
+    );
+
+
+    /*
+    -------------------------------------------------------
+     Market Data
+    -------------------------------------------------------
+
+     This reflects the actual adapter result.
+
+     HTTP 403 means the frontend reached the endpoint,
+     but backend authentication was rejected.
+    */
+
+    setHealthStatus(
+      "health-market-data",
+      getEndpointHealth(
+        data?.quotes
+      )
+    );
+
+
+    /*
+    -------------------------------------------------------
+     Live Signal
+    -------------------------------------------------------
+    */
+
+    setHealthStatus(
+      "health-live-signal",
+      getEndpointHealth(
+        data?.liveSignal
+      )
+    );
+
+
+    /*
+    -------------------------------------------------------
+     Phase 11 Capture
+    -------------------------------------------------------
+
+     The current Frontend V1 adapter does not expose a
+     Phase 11 capture endpoint.
+
+     Therefore we must NOT claim that Phase 11 capture
+     is online or offline.
+
+     "NOT EXPOSED" means the frontend currently has no
+     read-only data source for this field.
+    */
+
+    setHealthStatus(
+      "health-phase11",
+      {
+        text: "NOT EXPOSED",
+        className: "status-neutral"
+      }
+    );
+
+
+    /*
+    -------------------------------------------------------
+     Evidence
+    -------------------------------------------------------
+
+     Same principle as Phase 11 capture.
+
+     No evidence endpoint has been connected to V1 yet,
+     so the frontend must not invent an evidence state.
+    */
+
+    setHealthStatus(
+      "health-evidence",
+      {
+        text: "NOT EXPOSED",
+        className: "status-neutral"
+      }
+    );
+  }
+
+
+  /*
+  ---------------------------------------------------------
    Error rendering
   ---------------------------------------------------------
   */
@@ -142,6 +327,11 @@
       "signal-source",
       "UNAVAILABLE"
     );
+
+
+    renderSystemHealth(
+      null
+    );
   }
 
 
@@ -157,6 +347,7 @@
       !quotes ||
       quotes.ok !== true
     ) {
+
       setText(
         "nifty-price",
         "UNAVAILABLE"
@@ -199,7 +390,9 @@
 
       setText(
         "nifty-price",
-        formatPrice(nifty.price)
+        formatPrice(
+          nifty.price
+        )
       );
 
 
@@ -239,7 +432,9 @@
 
       setText(
         "banknifty-price",
-        formatPrice(banknifty.price)
+        formatPrice(
+          banknifty.price
+        )
       );
 
 
@@ -276,7 +471,9 @@
   ---------------------------------------------------------
   */
 
-  function renderLiveSignal(signalData) {
+  function renderLiveSignal(
+    signalData
+  ) {
 
     if (
       !signalData ||
@@ -345,7 +542,9 @@
 
     setText(
       "signal-source",
-      displayValue(source)
+      displayValue(
+        source
+      )
     );
   }
 
@@ -356,7 +555,9 @@
   ---------------------------------------------------------
   */
 
-  function renderDashboard(data) {
+  function renderDashboard(
+    data
+  ) {
 
     if (!data) {
 
@@ -373,6 +574,11 @@
 
     renderLiveSignal(
       data.liveSignal
+    );
+
+
+    renderSystemHealth(
+      data
     );
   }
 
