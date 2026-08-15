@@ -25,6 +25,7 @@
 */
 
 (function () {
+
   "use strict";
 
 
@@ -35,36 +36,49 @@
   */
 
   function setText(id, value) {
-    const element = document.getElementById(id);
+
+    const element =
+      document.getElementById(id);
 
     if (!element) {
       return;
     }
 
-    element.textContent = value;
+    element.textContent =
+      value;
+
   }
 
 
   function displayValue(value) {
+
     if (
       value === undefined ||
       value === null ||
       value === ""
     ) {
+
       return "—";
+
     }
 
     return String(value);
+
   }
 
 
   function formatPrice(value) {
+
     if (
       value === undefined ||
       value === null ||
-      !Number.isFinite(Number(value))
+      !Number.isFinite(
+        Number(value)
+      )
     ) {
+
       return "UNAVAILABLE";
+
     }
 
     return Number(value).toLocaleString(
@@ -73,20 +87,53 @@
         maximumFractionDigits: 2
       }
     );
+
+  }
+
+
+  function formatIndicator(value) {
+
+    if (
+      value === undefined ||
+      value === null ||
+      !Number.isFinite(
+        Number(value)
+      )
+    ) {
+
+      return "UNAVAILABLE";
+
+    }
+
+    return Number(value).toLocaleString(
+      "en-IN",
+      {
+        maximumFractionDigits: 4
+      }
+    );
+
   }
 
 
   function formatTimestamp(value) {
+
     if (!value) {
+
       return "UNAVAILABLE";
+
     }
 
-    const date = new Date(value);
+    const date =
+      new Date(value);
 
     if (
-      Number.isNaN(date.getTime())
+      Number.isNaN(
+        date.getTime()
+      )
     ) {
+
       return String(value);
+
     }
 
     return date.toLocaleString(
@@ -96,6 +143,7 @@
         timeStyle: "short"
       }
     );
+
   }
 
 
@@ -108,42 +156,54 @@
   function getEndpointHealth(result) {
 
     if (!result) {
+
       return {
         text: "NO DATA",
         className: "status-neutral"
       };
+
     }
 
 
     if (result.ok === true) {
+
       return {
         text: "ONLINE",
         className: "status-safe"
       };
+
     }
 
 
     if (result.status === 403) {
+
       return {
         text: "HTTP 403",
         className: "status-neutral"
       };
+
     }
 
 
     if (result.status) {
+
       return {
         text: `HTTP ${result.status}`,
         className: "status-neutral"
       };
+
     }
 
 
     if (result.error) {
+
       return {
-        text: String(result.error),
+        text: String(
+          result.error
+        ),
         className: "status-neutral"
       };
+
     }
 
 
@@ -151,6 +211,7 @@
       text: "UNAVAILABLE",
       className: "status-neutral"
     };
+
   }
 
 
@@ -166,19 +227,25 @@
       return;
     }
 
+
     element.textContent =
       status.text;
+
 
     element.classList.remove(
       "status-safe",
       "status-neutral"
     );
 
+
     if (status.className) {
+
       element.classList.add(
         status.className
       );
+
     }
+
   }
 
 
@@ -209,11 +276,6 @@
     -------------------------------------------------------
      Market Data
     -------------------------------------------------------
-
-     This reflects the actual adapter result.
-
-     HTTP 403 means the frontend reached the endpoint,
-     but backend authentication was rejected.
     */
 
     setHealthStatus(
@@ -242,15 +304,6 @@
     -------------------------------------------------------
      Phase 11 Capture
     -------------------------------------------------------
-
-     The current Frontend V1 adapter does not expose a
-     Phase 11 capture endpoint.
-
-     Therefore we must NOT claim that Phase 11 capture
-     is online or offline.
-
-     "NOT EXPOSED" means the frontend currently has no
-     read-only data source for this field.
     */
 
     setHealthStatus(
@@ -266,11 +319,6 @@
     -------------------------------------------------------
      Evidence
     -------------------------------------------------------
-
-     Same principle as Phase 11 capture.
-
-     No evidence endpoint has been connected to V1 yet,
-     so the frontend must not invent an evidence state.
     */
 
     setHealthStatus(
@@ -280,58 +328,7 @@
         className: "status-neutral"
       }
     );
-  }
 
-
-  /*
-  ---------------------------------------------------------
-   Error rendering
-  ---------------------------------------------------------
-  */
-
-  function renderUnavailableState() {
-
-    setText(
-      "nifty-price",
-      "UNAVAILABLE"
-    );
-
-    setText(
-      "nifty-subtext",
-      "Market data unavailable"
-    );
-
-
-    setText(
-      "banknifty-price",
-      "UNAVAILABLE"
-    );
-
-    setText(
-      "banknifty-subtext",
-      "Market data unavailable"
-    );
-
-
-    setText(
-      "signal-value",
-      "UNAVAILABLE"
-    );
-
-    setText(
-      "signal-time",
-      "UNAVAILABLE"
-    );
-
-    setText(
-      "signal-source",
-      "UNAVAILABLE"
-    );
-
-
-    renderSystemHealth(
-      null
-    );
   }
 
 
@@ -370,14 +367,17 @@
       );
 
       return;
+
     }
 
 
     const nifty =
-      quotes.nifty || null;
+      quotes.nifty ||
+      null;
 
     const banknifty =
-      quotes.banknifty || null;
+      quotes.banknifty ||
+      null;
 
 
     /*
@@ -419,6 +419,7 @@
         "nifty-subtext",
         "Market data unavailable"
       );
+
     }
 
 
@@ -461,7 +462,161 @@
         "banknifty-subtext",
         "Market data unavailable"
       );
+
     }
+
+  }
+
+
+  /*
+  ---------------------------------------------------------
+   Technical Indicator rendering
+  ---------------------------------------------------------
+
+   IMPORTANT:
+
+   This function ONLY displays values supplied by the
+   read-only adapter.
+
+   It does NOT:
+   - calculate indicators
+   - compare indicators
+   - interpret indicators
+   - generate signals
+   - make trading decisions
+  ---------------------------------------------------------
+  */
+
+  function renderIndicators(
+    indicatorData
+  ) {
+
+    if (
+      !indicatorData ||
+      indicatorData.ok !== true
+    ) {
+
+      setText(
+        "indicator-ema9",
+        "UNAVAILABLE"
+      );
+
+      setText(
+        "indicator-ema21",
+        "UNAVAILABLE"
+      );
+
+      setText(
+        "indicator-rsi14",
+        "UNAVAILABLE"
+      );
+
+      setText(
+        "indicator-vwap",
+        "UNAVAILABLE"
+      );
+
+      setText(
+        "indicator-atr14",
+        "UNAVAILABLE"
+      );
+
+      setText(
+        "indicator-source",
+        "UNAVAILABLE"
+      );
+
+      return;
+
+    }
+
+
+    const indicators =
+      indicatorData.indicators ||
+      {};
+
+
+    /*
+    -------------------------------------------------------
+     EMA 9
+    -------------------------------------------------------
+    */
+
+    setText(
+      "indicator-ema9",
+      formatIndicator(
+        indicators.ema9
+      )
+    );
+
+
+    /*
+    -------------------------------------------------------
+     EMA 21
+    -------------------------------------------------------
+    */
+
+    setText(
+      "indicator-ema21",
+      formatIndicator(
+        indicators.ema21
+      )
+    );
+
+
+    /*
+    -------------------------------------------------------
+     RSI 14
+    -------------------------------------------------------
+    */
+
+    setText(
+      "indicator-rsi14",
+      formatIndicator(
+        indicators.rsi14
+      )
+    );
+
+
+    /*
+    -------------------------------------------------------
+     VWAP
+    -------------------------------------------------------
+    */
+
+    setText(
+      "indicator-vwap",
+      formatIndicator(
+        indicators.vwap
+      )
+    );
+
+
+    /*
+    -------------------------------------------------------
+     ATR 14
+    -------------------------------------------------------
+    */
+
+    setText(
+      "indicator-atr14",
+      formatIndicator(
+        indicators.atr14
+      )
+    );
+
+
+    /*
+    -------------------------------------------------------
+     Source
+    -------------------------------------------------------
+    */
+
+    setText(
+      "indicator-source",
+      "BACKEND /api/indicators"
+    );
+
   }
 
 
@@ -496,6 +651,7 @@
       );
 
       return;
+
     }
 
 
@@ -546,12 +702,13 @@
         source
       )
     );
+
   }
 
 
   /*
   ---------------------------------------------------------
-   Main render
+   Main dashboard render
   ---------------------------------------------------------
   */
 
@@ -561,14 +718,34 @@
 
     if (!data) {
 
-      renderUnavailableState();
+      renderQuotes(
+        null
+      );
+
+      renderIndicators(
+        null
+      );
+
+      renderLiveSignal(
+        null
+      );
+
+      renderSystemHealth(
+        null
+      );
 
       return;
+
     }
 
 
     renderQuotes(
       data.quotes
+    );
+
+
+    renderIndicators(
+      data.indicators
     );
 
 
@@ -580,6 +757,7 @@
     renderSystemHealth(
       data
     );
+
   }
 
 
@@ -606,9 +784,13 @@
         "[TradeMind V1] DATA_ADAPTER_NOT_AVAILABLE"
       );
 
-      renderUnavailableState();
+
+      renderDashboard(
+        null
+      );
 
       return;
+
     }
 
 
@@ -636,8 +818,12 @@
       );
 
 
-      renderUnavailableState();
+      renderDashboard(
+        null
+      );
+
     }
+
   }
 
 
@@ -654,12 +840,15 @@
     document.addEventListener(
       "DOMContentLoaded",
       initializeDashboard,
-      { once: true }
+      {
+        once: true
+      }
     );
 
   } else {
 
     initializeDashboard();
+
   }
 
 })();
