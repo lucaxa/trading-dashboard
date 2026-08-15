@@ -27,9 +27,10 @@
 (function () {
   "use strict";
 
+
   const API = Object.freeze({
     quotes: "/api/quotes",
-    indicators: "/api/indicators",
+    indicators: "/api/indicators?interval=5minute",
     liveSignal: "/api/live-signal"
   });
 
@@ -41,30 +42,50 @@
   */
 
   async function requestJson(endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: "GET",
-        cache: "no-store",
-        headers: {
-          Accept: "application/json"
-        }
-      });
 
-      const text = await response.text();
+    try {
+
+      const response = await fetch(
+        endpoint,
+        {
+          method: "GET",
+          cache: "no-store",
+
+          headers: {
+            Accept: "application/json"
+          }
+        }
+      );
+
+
+      const text =
+        await response.text();
+
 
       let payload = null;
 
+
       try {
-        payload = text ? JSON.parse(text) : null;
+
+        payload =
+          text
+            ? JSON.parse(text)
+            : null;
+
       } catch (parseError) {
+
         return {
           ok: false,
           endpoint,
+          status: response.status,
           error: "INVALID_JSON_RESPONSE"
         };
+
       }
 
+
       if (!response.ok) {
+
         return {
           ok: false,
           endpoint,
@@ -72,7 +93,9 @@
           payload,
           error: "HTTP_ERROR"
         };
+
       }
+
 
       return {
         ok: true,
@@ -81,13 +104,17 @@
         payload
       };
 
+
     } catch (error) {
+
       return {
         ok: false,
         endpoint,
         error: "NETWORK_ERROR"
       };
+
     }
+
   }
 
 
@@ -98,37 +125,52 @@
   */
 
   function firstDefined(...values) {
-    for (const value of values) {
+
+    for (
+      const value of values
+    ) {
+
       if (
         value !== undefined &&
         value !== null
       ) {
+
         return value;
+
       }
+
     }
 
     return null;
+
   }
 
 
   function numberOrNull(value) {
-    const number = Number(value);
+
+    const number =
+      Number(value);
 
     return Number.isFinite(number)
       ? number
       : null;
+
   }
 
 
   function stringOrNull(value) {
+
     if (
       value === undefined ||
       value === null
     ) {
+
       return null;
+
     }
 
     return String(value);
+
   }
 
 
@@ -140,79 +182,264 @@
 
   function normalizeQuotes(result) {
 
-    if (!result || !result.ok) {
+    if (
+      !result ||
+      !result.ok
+    ) {
+
       return {
+
         ok: false,
-        error: result?.error || "QUOTE_REQUEST_FAILED",
+
+        status:
+          result?.status ||
+          null,
+
+        error:
+          result?.error ||
+          "QUOTE_REQUEST_FAILED",
+
         source: null,
+
         nifty: null,
+
         banknifty: null
+
       };
+
     }
 
-    const payload = result.payload || {};
-    const data = payload.data || payload;
+
+    const payload =
+      result.payload || {};
+
+
+    const data =
+      payload.data ||
+      payload;
+
 
     return {
+
       ok: true,
 
-      source: firstDefined(
-        payload.source,
-        data.source
-      ),
+      status:
+        result.status ||
+        200,
+
+      source:
+        firstDefined(
+          payload.source,
+          data.source
+        ),
+
 
       nifty: data.nifty
         ? {
-            price: numberOrNull(
-              firstDefined(
-                data.nifty.price,
-                data.nifty.lastPrice,
-                data.nifty.ltp
-              )
-            ),
 
-            change: numberOrNull(
-              firstDefined(
-                data.nifty.change,
-                data.nifty.changeValue
-              )
-            ),
+            price:
+              numberOrNull(
+                firstDefined(
+                  data.nifty.price,
+                  data.nifty.lastPrice,
+                  data.nifty.ltp
+                )
+              ),
 
-            changePercent: numberOrNull(
-              firstDefined(
-                data.nifty.changePercent,
-                data.nifty.percentChange
+            change:
+              numberOrNull(
+                firstDefined(
+                  data.nifty.change,
+                  data.nifty.changeValue
+                )
+              ),
+
+            changePercent:
+              numberOrNull(
+                firstDefined(
+                  data.nifty.changePercent,
+                  data.nifty.percentChange
+                )
               )
-            )
+
           }
+
         : null,
+
 
       banknifty: data.banknifty
         ? {
-            price: numberOrNull(
-              firstDefined(
-                data.banknifty.price,
-                data.banknifty.lastPrice,
-                data.banknifty.ltp
-              )
-            ),
 
-            change: numberOrNull(
-              firstDefined(
-                data.banknifty.change,
-                data.banknifty.changeValue
-              )
-            ),
+            price:
+              numberOrNull(
+                firstDefined(
+                  data.banknifty.price,
+                  data.banknifty.lastPrice,
+                  data.banknifty.ltp
+                )
+              ),
 
-            changePercent: numberOrNull(
-              firstDefined(
-                data.banknifty.changePercent,
-                data.banknifty.percentChange
+            change:
+              numberOrNull(
+                firstDefined(
+                  data.banknifty.change,
+                  data.banknifty.changeValue
+                )
+              ),
+
+            changePercent:
+              numberOrNull(
+                firstDefined(
+                  data.banknifty.changePercent,
+                  data.banknifty.percentChange
+                )
               )
-            )
+
           }
+
         : null
+
     };
+
+  }
+
+
+  /*
+  ---------------------------------------------------------
+   Indicator normalization
+  ---------------------------------------------------------
+   
+   IMPORTANT:
+   The frontend does NOT calculate these values.
+
+   They are read directly from the backend indicator
+   endpoint.
+
+   If the backend returns HTTP 403, the adapter reports
+   that failure truthfully.
+  ---------------------------------------------------------
+  */
+
+  function normalizeIndicators(result) {
+
+    if (
+      !result ||
+      !result.ok
+    ) {
+
+      return {
+
+        ok: false,
+
+        status:
+          result?.status ||
+          null,
+
+        endpoint:
+          result?.endpoint ||
+          API.indicators,
+
+        error:
+          result?.error ||
+          "INDICATOR_REQUEST_FAILED",
+
+        payload:
+          result?.payload ||
+          null,
+
+        indicators: {
+
+          ema9: null,
+
+          ema21: null,
+
+          rsi14: null,
+
+          vwap: null,
+
+          atr14: null
+
+        }
+
+      };
+
+    }
+
+
+    const payload =
+      result.payload || {};
+
+
+    const data =
+      payload.data ||
+      payload;
+
+
+    const indicators =
+      data.indicators ||
+      data;
+
+
+    return {
+
+      ok: true,
+
+      status:
+        result.status ||
+        200,
+
+      endpoint:
+        result.endpoint ||
+        API.indicators,
+
+      error: null,
+
+      indicators: {
+
+        ema9:
+          numberOrNull(
+            firstDefined(
+              indicators.ema9,
+              indicators.EMA9
+            )
+          ),
+
+        ema21:
+          numberOrNull(
+            firstDefined(
+              indicators.ema21,
+              indicators.EMA21
+            )
+          ),
+
+        rsi14:
+          numberOrNull(
+            firstDefined(
+              indicators.rsi14,
+              indicators.RSI14
+            )
+          ),
+
+        vwap:
+          numberOrNull(
+            indicators.vwap
+          ),
+
+        atr14:
+          numberOrNull(
+            firstDefined(
+              indicators.atr14,
+              indicators.ATR14
+            )
+          )
+
+      },
+
+      raw:
+        payload
+
+    };
+
   }
 
 
@@ -224,156 +451,231 @@
 
   function normalizeLiveSignal(result) {
 
-    if (!result || !result.ok) {
+    if (
+      !result ||
+      !result.ok
+    ) {
+
       return {
+
         ok: false,
-        error: result?.error || "LIVE_SIGNAL_REQUEST_FAILED"
+
+        status:
+          result?.status ||
+          null,
+
+        error:
+          result?.error ||
+          "LIVE_SIGNAL_REQUEST_FAILED"
+
       };
+
     }
 
-    const payload = result.payload || {};
+
+    const payload =
+      result.payload || {};
+
 
     const indicators =
-      payload.indicators || {};
+      payload.indicators ||
+      {};
+
 
     const referenceRisk =
-      payload.referenceRisk || {};
+      payload.referenceRisk ||
+      {};
+
 
     const signalCandle =
-      payload.signalCandle || {};
+      payload.signalCandle ||
+      {};
+
 
     return {
+
       ok: true,
 
-      success: payload.success === true,
+      status:
+        result.status ||
+        200,
 
-      version: stringOrNull(
-        payload.version
-      ),
+      success:
+        payload.success === true,
 
-      strategy: stringOrNull(
-        payload.strategy
-      ),
 
-      mode: stringOrNull(
-        payload.mode
-      ),
+      version:
+        stringOrNull(
+          payload.version
+        ),
 
-      instrument: stringOrNull(
-        payload.instrument
-      ),
 
-      interval: stringOrNull(
-        payload.interval
-      ),
+      strategy:
+        stringOrNull(
+          payload.strategy
+        ),
 
-      status: stringOrNull(
-        payload.status
-      ),
 
-      signal: stringOrNull(
-        payload.signal
-      ),
+      mode:
+        stringOrNull(
+          payload.mode
+        ),
 
-      reason: stringOrNull(
-        payload.reason
-      ),
 
-      timestamp: stringOrNull(
-        firstDefined(
-          payload.timestamp,
-          signalCandle.timestamp,
-          signalCandle.time
-        )
-      ),
+      instrument:
+        stringOrNull(
+          payload.instrument
+        ),
 
-      signalCandle: {
-        timestamp: stringOrNull(
+
+      interval:
+        stringOrNull(
+          payload.interval
+        ),
+
+
+      statusValue:
+        stringOrNull(
+          payload.status
+        ),
+
+
+      signal:
+        stringOrNull(
+          payload.signal
+        ),
+
+
+      reason:
+        stringOrNull(
+          payload.reason
+        ),
+
+
+      timestamp:
+        stringOrNull(
           firstDefined(
+            payload.timestamp,
             signalCandle.timestamp,
             signalCandle.time
           )
         ),
 
-        open: numberOrNull(
-          signalCandle.open
-        ),
 
-        high: numberOrNull(
-          signalCandle.high
-        ),
+      signalCandle: {
 
-        low: numberOrNull(
-          signalCandle.low
-        ),
+        timestamp:
+          stringOrNull(
+            firstDefined(
+              signalCandle.timestamp,
+              signalCandle.time
+            )
+          ),
 
-        close: numberOrNull(
-          signalCandle.close
-        )
+        open:
+          numberOrNull(
+            signalCandle.open
+          ),
+
+        high:
+          numberOrNull(
+            signalCandle.high
+          ),
+
+        low:
+          numberOrNull(
+            signalCandle.low
+          ),
+
+        close:
+          numberOrNull(
+            signalCandle.close
+          )
+
       },
+
 
       indicators: {
-        ema9: numberOrNull(
-          firstDefined(
-            indicators.ema9,
-            indicators.EMA9
-          )
-        ),
 
-        ema21: numberOrNull(
-          firstDefined(
-            indicators.ema21,
-            indicators.EMA21
-          )
-        ),
+        ema9:
+          numberOrNull(
+            firstDefined(
+              indicators.ema9,
+              indicators.EMA9
+            )
+          ),
 
-        rsi14: numberOrNull(
-          firstDefined(
-            indicators.rsi14,
-            indicators.RSI14
-          )
-        ),
+        ema21:
+          numberOrNull(
+            firstDefined(
+              indicators.ema21,
+              indicators.EMA21
+            )
+          ),
 
-        vwap: numberOrNull(
-          indicators.vwap
-        ),
+        rsi14:
+          numberOrNull(
+            firstDefined(
+              indicators.rsi14,
+              indicators.RSI14
+            )
+          ),
 
-        atr14: numberOrNull(
-          firstDefined(
-            indicators.atr14,
-            indicators.ATR14
+        vwap:
+          numberOrNull(
+            indicators.vwap
+          ),
+
+        atr14:
+          numberOrNull(
+            firstDefined(
+              indicators.atr14,
+              indicators.ATR14
+            )
           )
-        )
+
       },
+
 
       referenceRisk: {
-        entry: numberOrNull(
-          referenceRisk.entry
-        ),
 
-        stop: numberOrNull(
-          referenceRisk.stop
-        ),
+        entry:
+          numberOrNull(
+            referenceRisk.entry
+          ),
 
-        target: numberOrNull(
-          referenceRisk.target
-        ),
+        stop:
+          numberOrNull(
+            referenceRisk.stop
+          ),
 
-        risk: numberOrNull(
-          referenceRisk.risk
-        ),
+        target:
+          numberOrNull(
+            referenceRisk.target
+          ),
 
-        rewardRisk: numberOrNull(
-          firstDefined(
-            referenceRisk.rewardRisk,
-            referenceRisk.rewardRiskRatio
+        risk:
+          numberOrNull(
+            referenceRisk.risk
+          ),
+
+        rewardRisk:
+          numberOrNull(
+            firstDefined(
+              referenceRisk.rewardRisk,
+              referenceRisk.rewardRiskRatio
+            )
           )
-        )
+
       },
 
+
       diagnostics:
-        payload.diagnostics || null
+        payload.diagnostics ||
+        null
+
     };
+
   }
 
 
@@ -383,60 +685,108 @@
   ---------------------------------------------------------
   */
 
-  const TradeMindData = Object.freeze({
+  const TradeMindData =
+    Object.freeze({
 
-    endpoints: API,
-
-    async getQuotes() {
-      const result = await requestJson(API.quotes);
-
-      return normalizeQuotes(result);
-    },
+      endpoints: API,
 
 
-    async getLiveSignal() {
-      const result = await requestJson(API.liveSignal);
+      /*
+      -----------------------------------------------------
+       Quotes
+      -----------------------------------------------------
+      */
 
-      return normalizeLiveSignal(result);
-    },
+      async getQuotes() {
+
+        const result =
+          await requestJson(
+            API.quotes
+          );
+
+        return normalizeQuotes(
+          result
+        );
+
+      },
 
 
-    async getIndicators() {
-      const result = await requestJson(API.indicators);
+      /*
+      -----------------------------------------------------
+       Indicators
+      -----------------------------------------------------
+      */
 
-      if (!result.ok) {
-        return {
-          ok: false,
-          error:
-            result.error ||
-            "INDICATOR_REQUEST_FAILED"
-        };
+      async getIndicators() {
+
+        const result =
+          await requestJson(
+            API.indicators
+          );
+
+        return normalizeIndicators(
+          result
+        );
+
+      },
+
+
+      /*
+      -----------------------------------------------------
+       Live Signal
+      -----------------------------------------------------
+      */
+
+      async getLiveSignal() {
+
+        const result =
+          await requestJson(
+            API.liveSignal
+          );
+
+        return normalizeLiveSignal(
+          result
+        );
+
+      },
+
+
+      /*
+      -----------------------------------------------------
+       Complete dashboard read
+      -----------------------------------------------------
+      */
+
+      async getDashboardData() {
+
+        const [
+          quotes,
+          indicators,
+          liveSignal
+        ] = await Promise.all([
+
+          this.getQuotes(),
+
+          this.getIndicators(),
+
+          this.getLiveSignal()
+
+        ]);
+
+
+        return Object.freeze({
+
+          quotes,
+
+          indicators,
+
+          liveSignal
+
+        });
+
       }
 
-      return {
-        ok: true,
-        payload: result.payload
-      };
-    },
-
-
-    async getDashboardData() {
-
-      const [
-        quotes,
-        liveSignal
-      ] = await Promise.all([
-        this.getQuotes(),
-        this.getLiveSignal()
-      ]);
-
-      return Object.freeze({
-        quotes,
-        liveSignal
-      });
-    }
-
-  });
+    });
 
 
   /*
@@ -445,6 +795,8 @@
   ---------------------------------------------------------
   */
 
-  window.TradeMindData = TradeMindData;
+  window.TradeMindData =
+    TradeMindData;
+
 
 })();
