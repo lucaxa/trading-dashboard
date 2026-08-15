@@ -31,6 +31,8 @@ latest completed candle
         ↓
 freshness validation
         ↓
+frozen V10.20 strategy provenance validation
+        ↓
 frozen V10.20 decision
         ↓
 Phase 11 observation contract
@@ -38,15 +40,14 @@ Phase 11 observation contract
 SAFETY
 ------
 A stale candle is rejected.
-
 A future candle is rejected.
-
 A missing/invalid candle is rejected.
-
 A non-LIVE response is rejected.
+A non-PAPER_ONLY response is rejected.
+An unexpected strategy identity is rejected.
 
 No observation file is written unless all
-freshness and market-data checks pass.
+freshness, provenance, and market-data checks pass.
 ===========================================================
 */
 
@@ -57,6 +58,9 @@ const path = require("path");
 
 const VERSION =
   "SYSTEM_PHASE_11_LIVE_OBSERVATION_CAPTURE_V1";
+
+const EXPECTED_STRATEGY =
+  "V10.20";
 
 const DEFAULT_SIGNAL_URL =
   "https://trading-dashboard-sigma-ten.vercel.app/api/live-signal";
@@ -71,14 +75,6 @@ const OUTPUT_FILE =
       "system-development/data/phase-11-live-observations.json"
   );
 
-/*
-Maximum acceptable age of the completed candle.
-
-The live endpoint may be called shortly after a 5-minute
-candle closes. Ten minutes gives enough operational room
-while still preventing old historical candles from being
-labelled as forward evidence.
-*/
 const MAX_CANDLE_AGE_MS =
   Number(
     process.env.PHASE11_MAX_CANDLE_AGE_MS ||
@@ -100,12 +96,8 @@ function finite(value, name) {
 }
 
 function ensureFreshness(signalCandle) {
-
   const tsSeconds =
-    finite(
-      signalCandle.ts,
-      "signalCandle.ts"
-    );
+    finite(signalCandle.ts, "signalCandle.ts");
 
   const timestampMs =
     tsSeconds * 1000;
@@ -113,28 +105,18 @@ function ensureFreshness(signalCandle) {
   const now =
     Date.now();
 
-  if (
-    timestampMs > now + 60 * 1000
-  ) {
-    fail(
-      "Completed candle timestamp is in the future"
-    );
+  if (timestampMs > now + 60 * 1000) {
+    fail("Completed candle timestamp is in the future");
   }
 
   const age =
     now - timestampMs;
 
-  if (
-    age < 0
-  ) {
-    fail(
-      "Completed candle timestamp is invalid"
-    );
+  if (age < 0) {
+    fail("Completed candle timestamp is invalid");
   }
 
-  if (
-    age > MAX_CANDLE_AGE_MS
-  ) {
+  if (age > MAX_CANDLE_AGE_MS) {
     fail(
       `Latest completed candle is stale: ` +
       `${Math.round(age / 1000)} seconds old`
@@ -148,138 +130,87 @@ function ensureFreshness(signalCandle) {
 }
 
 function validateCandle(candle) {
-
-  if (
-    !candle ||
-    typeof candle !== "object"
-  ) {
-    fail(
-      "Signal candle is missing"
-    );
+  if (!candle || typeof candle !== "object") {
+    fail("Signal candle is missing");
   }
 
-  const o =
-    finite(
-      candle.open,
-      "candle.open"
-    );
+  const o = finite(candle.open, "candle.open");
+  const h = finite(candle.high, "candle.high");
+  const l = finite(candle.low, "candle.low");
+  const c = finite(candle.close, "candle.close");
 
-  const h =
-    finite(
-      candle.high,
-      "candle.high"
-    );
-
-  const l =
-    finite(
-      candle.low,
-      "candle.low"
-    );
-
-  const c =
-    finite(
-      candle.close,
-      "candle.close"
-    );
-
-  if (
-    h < Math.max(o, c)
-  ) {
-    fail(
-      "Candle high is invalid"
-    );
+  if (h < Math.max(o, c)) {
+    fail("Candle high is invalid");
   }
 
-  if (
-    l > Math.min(o, c)
-  ) {
-    fail(
-      "Candle low is invalid"
-    );
+  if (l > Math.min(o, c)) {
+    fail("Candle low is invalid");
   }
 
-  if (
-    l > h
-  ) {
-    fail(
-      "Candle low/high relationship is invalid"
-    );
+  if (l > h) {
+    fail("Candle low/high relationship is invalid");
   }
 
-  return {
-    o,
-    h,
-    l,
-    c
-  };
+  return { o, h, l, c };
+}
+
+function validateStrategyProvenance(data) {
+  if (data.strategy !== EXPECTED_STRATEGY) {
+    fail(
+      `Unexpected strategy identity: ` +
+      `${data.strategy ?? "missing"}; ` +
+      `expected ${EXPECTED_STRATEGY}`
+    );
+  }
 }
 
 function mapDecision(signal) {
-
   switch (signal) {
-
     case "WAIT":
       return {
         action: "NO_TRADE",
-        rationale:
-          "Frozen V10.20 decision: WAIT"
+        rationale: "Frozen V10.20 decision: WAIT"
       };
 
     case "BUY":
       return {
         action: "ENTER_LONG",
-        rationale:
-          "Frozen V10.20 decision: BUY"
+        rationale: "Frozen V10.20 decision: BUY"
       };
 
     case "SELL":
       return {
         action: "ENTER_SHORT",
-        rationale:
-          "Frozen V10.20 decision: SELL"
+        rationale: "Frozen V10.20 decision: SELL"
       };
 
     case "EXIT":
       return {
         action: "EXIT",
-        rationale:
-          "Frozen V10.20 decision: EXIT"
+        rationale: "Frozen V10.20 decision: EXIT"
       };
 
     default:
-      fail(
-        `Unsupported live signal: ${signal}`
-      );
+      fail(`Unsupported live signal: ${signal}`);
   }
 }
 
 async function main() {
-
   console.log(
     "=== TRADEMIND PRO PHASE 11 LIVE CAPTURE ==="
   );
 
-  console.log(
-    "VERSION:",
-    VERSION
-  );
+  console.log("VERSION:", VERSION);
+  console.log("EXPECTED STRATEGY:", EXPECTED_STRATEGY);
+  console.log("SIGNAL URL:", SIGNAL_URL);
 
-  console.log(
-    "SIGNAL URL:",
-    SIGNAL_URL
-  );
-
-  /*
-  Fetch existing live-signal endpoint.
-  */
   const response =
     await fetch(
       SIGNAL_URL,
       {
         method: "GET",
         headers: {
-          Accept:
-            "application/json"
+          Accept: "application/json"
         }
       }
     );
@@ -290,105 +221,48 @@ async function main() {
   let data;
 
   try {
-
-    data =
-      JSON.parse(text);
-
+    data = JSON.parse(text);
   } catch {
-
-    fail(
-      "Live-signal endpoint returned invalid JSON"
-    );
-
+    fail("Live-signal endpoint returned invalid JSON");
   }
 
-  if (
-    !response.ok
-  ) {
-
-    fail(
-      `Live-signal HTTP error: ${response.status}`
-    );
-
+  if (!response.ok) {
+    fail(`Live-signal HTTP error: ${response.status}`);
   }
 
-  /*
-  Basic live contract.
-  */
-  if (
-    data.success !== true
-  ) {
-
-    fail(
-      "Live-signal response is not successful"
-    );
-
+  if (data.success !== true) {
+    fail("Live-signal response is not successful");
   }
 
-  if (
-    data.status !== "LIVE"
-  ) {
-
-    fail(
-      `Live-signal is not LIVE: ${data.status}`
-    );
-
+  if (data.status !== "LIVE") {
+    fail(`Live-signal is not LIVE: ${data.status}`);
   }
 
-  if (
-    data.mode !== "PAPER_ONLY"
-  ) {
-
-    fail(
-      "Live-signal is not PAPER_ONLY"
-    );
-
+  if (data.mode !== "PAPER_ONLY") {
+    fail("Live-signal is not PAPER_ONLY");
   }
 
-  if (
-    data.instrument !== "NIFTY 50"
-  ) {
-
-    fail(
-      "Unexpected instrument"
-    );
-
+  if (data.instrument !== "NIFTY 50") {
+    fail("Unexpected instrument");
   }
 
-  if (
-    data.interval !== "5minute"
-  ) {
-
-    fail(
-      "Unexpected live interval"
-    );
-
+  if (data.interval !== "5minute") {
+    fail("Unexpected live interval");
   }
 
-  /*
-  Signal candle.
-  */
+  validateStrategyProvenance(data);
+
   const signalCandle =
     data.signalCandle;
 
   const freshness =
-    ensureFreshness(
-      signalCandle
-    );
+    ensureFreshness(signalCandle);
 
   const candle =
-    validateCandle(
-      signalCandle
-    );
+    validateCandle(signalCandle);
 
-  /*
-  Convert frozen engine decision
-  into Phase 11 action vocabulary.
-  */
   const decision =
-    mapDecision(
-      data.signal
-    );
+    mapDecision(data.signal);
 
   const timestamp =
     new Date(
@@ -396,86 +270,49 @@ async function main() {
     ).toISOString();
 
   const observation = {
-
-    source:
-      "LIVE_MARKET",
-
+    source: "LIVE_MARKET",
     timestamp,
-
-    instrument:
-      "NIFTY 50",
-
-    timeframe:
-      "5m",
-
-    completedCandle:
-      true,
-
+    instrument: "NIFTY 50",
+    timeframe: "5m",
+    completedCandle: true,
     candle,
 
     decision: {
-
-      action:
-        decision.action,
-
-      confidence:
-        null,
-
-      rationale:
-        decision.rationale
-
+      action: decision.action,
+      confidence: null,
+      rationale: decision.rationale
     },
 
     capture: {
-
-      sourceVersion:
-        VERSION,
-
-      engineVersion:
-        data.version || null,
-
-      strategy:
-        data.strategy || null,
-
-      signal:
-        data.signal,
-
+      sourceVersion: VERSION,
+      engineVersion: data.version || null,
+      strategy: data.strategy,
+      signal: data.signal,
       signalTime:
-        data.data?.signalTime ||
-        timestamp,
-
+        data.data?.signalTime || timestamp,
       capturedAt:
-        new Date(
-          Date.now()
-        ).toISOString(),
-
+        new Date(Date.now()).toISOString(),
       candleAgeSeconds:
-        Math.round(
-          freshness.ageMs / 1000
-        )
-
+        Math.round(freshness.ageMs / 1000)
     }
-
   };
 
-  /*
-  Final safety checks before writing.
-  */
-  if (
-    observation.source !==
-    "LIVE_MARKET"
-  ) {
+  if (observation.source !== "LIVE_MARKET") {
+    fail("Internal source safety check failed");
+  }
+
+  if (observation.completedCandle !== true) {
     fail(
-      "Internal source safety check failed"
+      "Internal completed-candle safety check failed"
     );
   }
 
   if (
-    observation.completedCandle !==
-    true
+    observation.capture?.strategy !==
+    EXPECTED_STRATEGY
   ) {
     fail(
-      "Internal completed-candle safety check failed"
+      "Internal strategy provenance check failed"
     );
   }
 
@@ -484,45 +321,25 @@ async function main() {
       "REPLACE_WITH"
     )
   ) {
-    fail(
-      "Placeholder timestamp detected"
-    );
+    fail("Placeholder timestamp detected");
   }
 
   if (
     !Number.isFinite(
-      Date.parse(
-        observation.timestamp
-      )
+      Date.parse(observation.timestamp)
     )
   ) {
-    fail(
-      "Generated timestamp is invalid"
-    );
+    fail("Generated timestamp is invalid");
   }
 
-  /*
-  We intentionally write exactly one observation.
-
-  This is NOT historical backfill.
-  This is NOT synthetic data.
-  */
   fs.mkdirSync(
-    path.dirname(
-      OUTPUT_FILE
-    ),
-    {
-      recursive: true
-    }
+    path.dirname(OUTPUT_FILE),
+    { recursive: true }
   );
 
   fs.writeFileSync(
     OUTPUT_FILE,
-    JSON.stringify(
-      [observation],
-      null,
-      2
-    ) + "\n",
+    JSON.stringify([observation], null, 2) + "\n",
     "utf8"
   );
 
@@ -531,36 +348,20 @@ async function main() {
   );
 
   console.log(
-    JSON.stringify(
-      observation,
-      null,
-      2
-    )
+    JSON.stringify(observation, null, 2)
   );
 
-  console.log(
-    "OUTPUT:",
-    OUTPUT_FILE
-  );
-
+  console.log("OUTPUT:", OUTPUT_FILE);
 }
 
-main()
-  .catch(
-    error => {
-
-      console.error(
-        "LIVE_FORWARD_CAPTURE_REJECTED"
-      );
-
-      console.error(
-        error?.message ||
-        error
-      );
-
-      process.exit(
-        1
-      );
-
-    }
+main().catch(error => {
+  console.error(
+    "LIVE_FORWARD_CAPTURE_REJECTED"
   );
+
+  console.error(
+    error?.message || error
+  );
+
+  process.exit(1);
+});
