@@ -192,22 +192,6 @@
       color: #f59e0b;
     }
 
-    .placeholder {
-      min-height: 180px;
-
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      border: 1px dashed #334155;
-      border-radius: 12px;
-
-      color: #64748b;
-
-      font-size: 13px;
-      text-align: center;
-    }
-
     .footer {
       margin-top: 32px;
       padding-top: 18px;
@@ -268,7 +252,6 @@
 
       </div>
 
-
       <div class="read-only">
 
         <span class="read-only-dot"></span>
@@ -311,11 +294,11 @@
             class="card-value"
             id="candidate-value"
           >
-            —
+            NOT EXPOSED
           </div>
 
           <div class="card-subtext">
-            Strategy candidate
+            No read-only backend source connected
           </div>
 
         </div>
@@ -333,11 +316,11 @@
             class="card-value"
             id="phase7-value"
           >
-            —
+            NOT EXPOSED
           </div>
 
           <div class="card-subtext">
-            Validation status
+            Validation status not exposed to V1
           </div>
 
         </div>
@@ -355,11 +338,11 @@
             class="card-value"
             id="phase8-value"
           >
-            —
+            NOT EXPOSED
           </div>
 
           <div class="card-subtext">
-            Paper model
+            Paper model not exposed to V1
           </div>
 
         </div>
@@ -377,11 +360,11 @@
             class="card-value"
             id="phase11-value"
           >
-            —
+            NOT EXPOSED
           </div>
 
           <div class="card-subtext">
-            Forward experience
+            Forward experience not exposed to V1
           </div>
 
         </div>
@@ -815,7 +798,7 @@
           </span>
 
           <span
-            class="status-value"
+            class="status-value status-safe"
             id="health-frontend"
           >
             ONLINE
@@ -869,10 +852,10 @@
           </span>
 
           <span
-            class="status-value"
+            class="status-value status-neutral"
             id="health-phase11"
           >
-            —
+            NOT EXPOSED
           </span>
 
         </div>
@@ -887,10 +870,10 @@
           </span>
 
           <span
-            class="status-value"
+            class="status-value status-neutral"
             id="health-evidence"
           >
-            —
+            NOT EXPOSED
           </span>
 
         </div>
@@ -917,10 +900,14 @@
       </div>
 
 
-      <div class="placeholder">
+      <div class="card">
 
-        Trade history will be connected after the
-        read-only data adapter is built.
+        <div class="placeholder">
+
+          No read-only trade-history source is currently
+          exposed to Frontend V1.
+
+        </div>
 
       </div>
 
@@ -931,22 +918,25 @@
 
     <footer class="footer">
 
-      TradeMind Pro Frontend V1
-      <br>
+      <strong>TradeMind Pro — Frontend V1</strong><br>
 
-      Presentation layer only.
-      Backend/research engine remains the source of truth.
-      No strategy modification, learning, promotion,
-      or broker execution is performed by this frontend.
+      Presentation layer only.<br>
+
+      Backend and research systems remain the source of truth.<br>
+
+      No real trading, broker execution, learning, strategy
+      modification, or promotion controls are available here.
 
     </footer>
 
   </main>
 
 
-  <!-- FRONTEND V1 SCRIPTS -->
+  <!-- FRONTEND V1 DATA ADAPTER -->
 
   <script src="./data-adapter.js"></script>
+
+  <!-- FRONTEND V1 UI CONTROLLER -->
 
   <script src="./app.js"></script>
 
