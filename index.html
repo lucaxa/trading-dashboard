@@ -45,6 +45,13 @@ button{width:100%;margin-top:20px;padding:14px 18px;border:0;border-radius:10px;
 .phase11-note{margin-top:16px;padding:14px;border-radius:12px;background:#0b1220;border:1px solid #1e293b;color:#94a3b8;font-size:13px;line-height:1.5}
 .phase11-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
 .phase11-actions button{margin-top:0}
+.phase11-evidence-list{margin-top:12px}
+.phase11-evidence-row{display:grid;grid-template-columns:1.4fr .7fr .9fr .9fr 1.4fr;gap:10px;align-items:center;padding:12px;margin-top:8px;background:#0b1220;border:1px solid #1e293b;border-radius:10px;font-size:12px}
+.phase11-evidence-row span{display:block;color:#64748b;margin-bottom:4px}
+.phase11-evidence-row strong{color:#cbd5e1}
+.evidence-buy{color:#22c55e;font-weight:900}
+.evidence-sell{color:#ef4444;font-weight:900}
+.evidence-wait{color:#f59e0b;font-weight:900}
 .phase11-actions .secondary{background:#1e293b}
 #phase11ObservationStatus{color:#22c55e;font-weight:800}
 .status-row{padding:12px 0;border-bottom:1px solid #243244;color:#94a3b8;font-size:14px}.status-row:last-of-type{border-bottom:0}.disabled{color:#64748b!important}
@@ -56,6 +63,7 @@ footer{padding-top:8px;text-align:center;color:#64748b;font-size:12px}
 .market-grid,.analysis-grid,.trade-grid,.diagnostic-grid,.phase-grid{grid-template-columns:1fr}
 .score-row,.phase11-actions{grid-template-columns:1fr}
 .price{font-size:28px}
+.phase11-evidence-row{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
@@ -126,19 +134,20 @@ footer{padding-top:8px;text-align:center;color:#64748b;font-size:12px}
 </section>
 
 <!-- =========================================================
-     PHASE 11 FRONTEND-ONLY OBSERVATION PANEL
+     PHASE 11 FRONTEND-ONLY EVIDENCE CAPTURE
      ---------------------------------------------------------
      IMPORTANT:
      - Does NOT call or modify any backend endpoint.
      - Does NOT modify strategy rules.
      - Does NOT place orders.
      - Reads values already rendered by the existing frontend.
-     - Stores only browser-local observation snapshots.
+     - Stores evidence only in browser-local localStorage.
+     - Automatic polling is used only to detect displayed-state changes.
 ========================================================= -->
 <section class="phase11-card">
 <div class="phase11-header">
 <h2>Phase 11 Live Validation</h2>
-<span id="phase11Badge" class="phase-badge">PAPER OBSERVATION</span>
+<span id="phase11Badge" class="phase-badge">PAPER EVIDENCE</span>
 </div>
 
 <div class="phase-grid">
@@ -148,25 +157,43 @@ footer{padding-top:8px;text-align:center;color:#64748b;font-size:12px}
 <div><span>Market Price</span><strong id="phase11Price">--</strong></div>
 <div><span>Strategy Confidence</span><strong id="phase11Confidence">--</strong></div>
 <div><span>Signal Status</span><strong id="phase11StrategyStatus">WAITING</strong></div>
-<div><span>Observation Count</span><strong id="phase11ObservationCount">0</strong></div>
+<div><span>Evidence Count</span><strong id="phase11ObservationCount">0</strong></div>
+<div><span>Signal Changes</span><strong id="phase11SignalChanges">0</strong></div>
+<div><span>BUY Observed</span><strong id="phase11BuyObserved">0</strong></div>
+<div><span>SELL Observed</span><strong id="phase11SellObserved">0</strong></div>
+<div><span>WAIT Observed</span><strong id="phase11WaitObserved">0</strong></div>
 <div><span>Session Start</span><strong id="phase11SessionStart">NOT STARTED</strong></div>
-<div><span>Last Observation</span><strong id="phase11LastObservation">--</strong></div>
+<div><span>Last Evidence</span><strong id="phase11LastObservation">--</strong></div>
 <div><span>Last Signal Change</span><strong id="phase11LastSignalChange">--</strong></div>
+<div><span>Last Capture Reason</span><strong id="phase11LastReason">--</strong></div>
+<div><span>Local Storage</span><strong id="phase11StorageStatus">READY</strong></div>
 </div>
 
 <div class="phase11-note">
-<strong>Purpose:</strong> Prepare the presentation layer for Monday's Phase 11 live-market validation.
-This panel only observes values already displayed by the existing frontend. It does not alter the V10.25 strategy,
-learning engine, thresholds, broker controls, or backend data pipeline.
+<strong>Purpose:</strong> Create a structured, read-only evidence record for Monday's Phase 11 live-market validation.
+Each saved record contains the values already visible in the dashboard at that moment, including price, signal,
+confidence, trend, momentum, VWAP state, scores, indicators, and strategy status.
 </div>
 
 <div class="phase11-actions">
-<button id="phase11CaptureBtn">CAPTURE OBSERVATION</button>
+<button id="phase11CaptureBtn">CAPTURE EVIDENCE NOW</button>
 <button id="phase11ClearBtn" class="secondary">CLEAR LOCAL SESSION</button>
+</div>
+
+<div class="phase11-actions">
+<button id="phase11ExportBtn">EXPORT EVIDENCE JSON</button>
+<button id="phase11RefreshBtn" class="secondary">REFRESH VIEW</button>
 </div>
 
 <div class="phase11-note">
 <strong>Session status:</strong> <span id="phase11ObservationStatus">READY</span>
+</div>
+
+<div class="phase11-note">
+<strong>Recent evidence</strong>
+<div id="phase11EvidenceList" class="phase11-evidence-list">
+<div class="trade-history-empty">No evidence captured yet.</div>
+</div>
 </div>
 </section>
 
@@ -208,65 +235,43 @@ learning engine, thresholds, broker controls, or backend data pipeline.
 
 <script>
 /* =========================================================
-   PHASE 11 FRONTEND-ONLY OBSERVER
+   PHASE 11 FRONTEND-ONLY EVIDENCE OBSERVER
    ========================================================= */
 
 (function () {
     "use strict";
 
-    const STORAGE_KEY = "trademind_phase11_frontend_session_v1";
-    const MAX_OBSERVATIONS = 100;
+    const STORAGE_KEY = "trademind_phase11_frontend_evidence_v2";
+    const MAX_OBSERVATIONS = 500;
+    const POLL_MS = 5000;
+    const HEARTBEAT_MS = 30000;
 
     let observations = [];
     let sessionStart = null;
     let lastSignal = null;
     let lastSignalChange = null;
+    let lastFingerprint = null;
+    let lastStoredAt = 0;
+    let lastCaptureReason = null;
 
     function el(id) {
         return document.getElementById(id);
     }
 
-    function text(id, fallback = "--") {
+    function read(id, fallback = "--") {
         const node = el(id);
         if (!node) return fallback;
         const value = String(node.textContent || "").trim();
         return value || fallback;
     }
 
-    function loadSession() {
-        try {
-            const saved = JSON.parse(
-                localStorage.getItem(STORAGE_KEY) || "null"
-            );
-
-            if (!saved || typeof saved !== "object") return;
-
-            observations = Array.isArray(saved.observations)
-                ? saved.observations
-                : [];
-
-            sessionStart = saved.sessionStart || null;
-            lastSignal = saved.lastSignal || null;
-            lastSignalChange = saved.lastSignalChange || null;
-        } catch (error) {
-            console.warn("Phase 11 local session could not be loaded:", error);
-        }
+    function setText(id, value) {
+        const node = el(id);
+        if (node) node.textContent = value;
     }
 
-    function saveSession() {
-        try {
-            localStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify({
-                    observations: observations.slice(-MAX_OBSERVATIONS),
-                    sessionStart,
-                    lastSignal,
-                    lastSignalChange
-                })
-            );
-        } catch (error) {
-            console.warn("Phase 11 local session could not be saved:", error);
-        }
+    function nowIso() {
+        return new Date().toISOString();
     }
 
     function formatTime(value) {
@@ -284,130 +289,316 @@ learning engine, thresholds, broker controls, or backend data pipeline.
         }
     }
 
-    function captureObservation(manual = false) {
-        const now = new Date().toISOString();
-        const signal = text("signal", "WAIT");
+    function loadSession() {
+        try {
+            const saved = JSON.parse(
+                localStorage.getItem(STORAGE_KEY) || "null"
+            );
+
+            if (!saved || typeof saved !== "object") return;
+
+            observations = Array.isArray(saved.observations)
+                ? saved.observations
+                : [];
+
+            sessionStart = saved.sessionStart || null;
+            lastSignal = saved.lastSignal || null;
+            lastSignalChange = saved.lastSignalChange || null;
+            lastCaptureReason = saved.lastCaptureReason || null;
+
+            if (observations.length) {
+                lastStoredAt = new Date(
+                    observations[observations.length - 1].timestamp
+                ).getTime();
+
+                lastFingerprint =
+                    observations[observations.length - 1].fingerprint || null;
+            }
+        } catch (error) {
+            console.warn("Phase 11 evidence session could not be loaded:", error);
+        }
+    }
+
+    function saveSession() {
+        try {
+            localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify({
+                    schema: "TradeMind-Pro-Phase11-Evidence-v2",
+                    engine: "V10.25",
+                    mode: "READ-ONLY / PAPER",
+                    observations: observations.slice(-MAX_OBSERVATIONS),
+                    sessionStart,
+                    lastSignal,
+                    lastSignalChange,
+                    lastCaptureReason
+                })
+            );
+
+            setText("phase11StorageStatus", "READY");
+        } catch (error) {
+            setText("phase11StorageStatus", "STORAGE ERROR");
+            console.warn("Phase 11 evidence could not be saved:", error);
+        }
+    }
+
+    function snapshot() {
+        const signal = read("signal", "WAIT");
+
+        return {
+            timestamp: nowIso(),
+            signal,
+            price: read("diagPrice"),
+            trend: read("trend"),
+            momentum: read("momentum"),
+            volatility: read("volatility"),
+            entry: read("entry"),
+            stopLoss: read("stoploss"),
+            target: read("target"),
+            riskReward: read("riskReward"),
+            ema9: read("diagEma9"),
+            ema21: read("diagEma21"),
+            rsi14: read("diagRsi"),
+            vwap: read("diagVwap"),
+            atr14: read("diagAtr"),
+            swingHigh: read("diagSwingHigh"),
+            swingLow: read("diagSwingLow"),
+            buyScore: read("buyScore"),
+            sellScore: read("sellScore"),
+            confidence: read("confidence"),
+            engineReason: read("signalReason"),
+            strategyStatus: read("strategyStatus"),
+            marketStatus: read("marketStatus"),
+            analysisStatus: read("analysisStatus")
+        };
+    }
+
+    function fingerprintOf(s) {
+        return [
+            s.signal,
+            s.price,
+            s.trend,
+            s.momentum,
+            s.volatility,
+            s.buyScore,
+            s.sellScore,
+            s.confidence,
+            s.engineReason,
+            s.strategyStatus,
+            s.ema9,
+            s.ema21,
+            s.rsi14,
+            s.vwap,
+            s.atr14,
+            s.swingHigh,
+            s.swingLow
+        ].join("|");
+    }
+
+    function captureEvidence(reason = "manual") {
+        const s = snapshot();
+        const now = new Date(s.timestamp).getTime();
 
         if (!sessionStart) {
-            sessionStart = now;
+            sessionStart = s.timestamp;
         }
 
-        if (
-            lastSignal !== null &&
-            signal !== lastSignal
-        ) {
-            lastSignalChange = now;
+        if (lastSignal !== null && s.signal !== lastSignal) {
+            lastSignalChange = s.timestamp;
         }
 
-        lastSignal = signal;
-
-        const observation = {
-            timestamp: now,
-            signal,
-            price: text("diagPrice"),
-            trend: text("trend"),
-            momentum: text("momentum"),
-            volatility: text("volatility"),
-            entry: text("entry"),
-            stopLoss: text("stoploss"),
-            target: text("target"),
-            riskReward: text("riskReward"),
-            buyScore: text("buyScore"),
-            sellScore: text("sellScore"),
-            confidence: text("confidence"),
-            engineReason: text("signalReason"),
-            strategyStatus: text("strategyStatus")
+        const record = {
+            ...s,
+            captureReason: reason
         };
 
-        observations.push(observation);
+        record.fingerprint = fingerprintOf(record);
+
+        observations.push(record);
 
         if (observations.length > MAX_OBSERVATIONS) {
             observations = observations.slice(-MAX_OBSERVATIONS);
         }
 
-        saveSession();
-        renderPhase11();
+        lastSignal = s.signal;
+        lastFingerprint = record.fingerprint;
+        lastStoredAt = now;
+        lastCaptureReason = reason;
 
-        if (manual) {
-            const status = el("phase11ObservationStatus");
-            if (status) {
-                status.textContent =
-                    `CAPTURED • ${formatTime(now)}`;
-            }
+        saveSession();
+        render();
+    }
+
+    function shouldAutoCapture() {
+        const s = snapshot();
+        const fingerprint = fingerprintOf(s);
+        const now = Date.now();
+
+        if (!lastFingerprint) return true;
+        if (fingerprint !== lastFingerprint) return true;
+        if (now - lastStoredAt >= HEARTBEAT_MS) return true;
+
+        return false;
+    }
+
+    function autoObserve() {
+        if (shouldAutoCapture()) {
+            const reason =
+                lastFingerprint &&
+                fingerprintOf(snapshot()) !== lastFingerprint
+                    ? "displayed-state-change"
+                    : "30-second-heartbeat";
+
+            captureEvidence(reason);
         }
     }
 
-    function renderPhase11() {
+    function counts() {
+        let buy = 0;
+        let sell = 0;
+        let wait = 0;
+
+        for (const item of observations) {
+            if (item.signal === "BUY") buy++;
+            else if (item.signal === "SELL") sell++;
+            else if (item.signal === "WAIT") wait++;
+        }
+
+        return { buy, sell, wait };
+    }
+
+    function signalChanges() {
+        let changes = 0;
+        let previous = null;
+
+        for (const item of observations) {
+            if (previous !== null && item.signal !== previous) {
+                changes++;
+            }
+            previous = item.signal;
+        }
+
+        return changes;
+    }
+
+    function renderEvidenceList() {
+        const host = el("phase11EvidenceList");
+        if (!host) return;
+
+        if (!observations.length) {
+            host.innerHTML =
+                '<div class="trade-history-empty">No evidence captured yet.</div>';
+            return;
+        }
+
+        const recent = observations.slice(-10).reverse();
+
+        host.innerHTML = recent.map((item, index) => {
+            const signalClass =
+                item.signal === "BUY"
+                    ? "evidence-buy"
+                    : item.signal === "SELL"
+                        ? "evidence-sell"
+                        : "evidence-wait";
+
+            return `
+                <div class="phase11-evidence-row">
+                    <div>
+                        <strong>${formatTime(item.timestamp)}</strong>
+                        <span>${item.captureReason || "observation"}</span>
+                    </div>
+                    <div class="${signalClass}">
+                        ${item.signal}
+                    </div>
+                    <div>
+                        <span>Price</span>
+                        <strong>${item.price}</strong>
+                    </div>
+                    <div>
+                        <span>Confidence</span>
+                        <strong>${item.confidence}</strong>
+                    </div>
+                    <div>
+                        <span>Status</span>
+                        <strong>${item.strategyStatus}</strong>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    }
+
+    function render() {
         const latest =
             observations.length
                 ? observations[observations.length - 1]
                 : null;
 
-        textSet(
-            "phase11Signal",
-            latest?.signal || text("signal", "WAIT")
-        );
+        const current = latest || snapshot();
+        const c = counts();
 
-        textSet(
-            "phase11Price",
-            latest?.price || text("diagPrice")
-        );
-
-        textSet(
-            "phase11Confidence",
-            latest?.confidence || text("confidence")
-        );
-
-        textSet(
+        setText("phase11Signal", current.signal || "WAIT");
+        setText("phase11Price", current.price || "--");
+        setText("phase11Confidence", current.confidence || "--");
+        setText(
             "phase11StrategyStatus",
-            latest?.strategyStatus || text("strategyStatus", "WAITING")
+            current.strategyStatus || "WAITING"
         );
 
-        textSet(
+        setText(
             "phase11ObservationCount",
             String(observations.length)
         );
 
-        textSet(
+        setText(
+            "phase11SignalChanges",
+            String(signalChanges())
+        );
+
+        setText("phase11BuyObserved", String(c.buy));
+        setText("phase11SellObserved", String(c.sell));
+        setText("phase11WaitObserved", String(c.wait));
+
+        setText(
             "phase11SessionStart",
             sessionStart
                 ? formatTime(sessionStart)
                 : "NOT STARTED"
         );
 
-        textSet(
+        setText(
             "phase11LastObservation",
             latest
                 ? formatTime(latest.timestamp)
                 : "--"
         );
 
-        textSet(
+        setText(
             "phase11LastSignalChange",
             lastSignalChange
                 ? formatTime(lastSignalChange)
                 : "--"
         );
 
+        setText(
+            "phase11LastReason",
+            lastCaptureReason || "--"
+        );
+
         const badge = el("phase11Badge");
         if (badge) {
-            const signal =
-                latest?.signal ||
-                text("signal", "WAIT");
-
-            if (signal === "BUY" || signal === "SELL") {
+            if (
+                current.signal === "BUY" ||
+                current.signal === "SELL"
+            ) {
                 badge.textContent = "SIGNAL OBSERVED";
                 badge.classList.add("phase-live");
             } else {
-                badge.textContent = "PAPER OBSERVATION";
+                badge.textContent = "PAPER EVIDENCE";
                 badge.classList.remove("phase-live");
             }
         }
-    }
 
-    function textSet(id, value) {
-        const node = el(id);
-        if (node) node.textContent = value;
+        renderEvidenceList();
     }
 
     function clearSession() {
@@ -415,56 +606,107 @@ learning engine, thresholds, broker controls, or backend data pipeline.
         sessionStart = null;
         lastSignal = null;
         lastSignalChange = null;
+        lastFingerprint = null;
+        lastStoredAt = 0;
+        lastCaptureReason = null;
 
         try {
             localStorage.removeItem(STORAGE_KEY);
         } catch {}
 
-        renderPhase11();
+        render();
+        setText("phase11ObservationStatus", "LOCAL SESSION CLEARED");
+    }
 
-        const status = el("phase11ObservationStatus");
-        if (status) {
-            status.textContent = "LOCAL SESSION CLEARED";
-        }
+    function exportEvidence() {
+        const payload = {
+            schema: "TradeMind-Pro-Phase11-Evidence-v2",
+            engine: "V10.25",
+            mode: "READ-ONLY / PAPER",
+            exportedAt: nowIso(),
+            sessionStart,
+            lastSignal,
+            lastSignalChange,
+            summary: {
+                evidenceCount: observations.length,
+                signalChanges: signalChanges(),
+                ...counts()
+            },
+            observations
+        };
+
+        const blob = new Blob(
+            [JSON.stringify(payload, null, 2)],
+            { type: "application/json" }
+        );
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download =
+            `TradeMind_Phase11_Evidence_${new Date()
+                .toISOString()
+                .replace(/[:.]/g, "-")}.json`;
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+
+        setText("phase11ObservationStatus", "JSON EXPORT CREATED");
     }
 
     function init() {
         loadSession();
-        renderPhase11();
+        render();
 
         const capture = el("phase11CaptureBtn");
         const clear = el("phase11ClearBtn");
+        const exportBtn = el("phase11ExportBtn");
+        const refresh = el("phase11RefreshBtn");
 
         if (capture) {
             capture.addEventListener(
                 "click",
-                () => captureObservation(true)
+                () => {
+                    captureEvidence("manual");
+                    setText(
+                        "phase11ObservationStatus",
+                        `CAPTURED • ${formatTime(
+                            observations[observations.length - 1].timestamp
+                        )}`
+                    );
+                }
             );
         }
 
         if (clear) {
-            clear.addEventListener(
-                "click",
-                clearSession
-            );
+            clear.addEventListener("click", clearSession);
+        }
+
+        if (exportBtn) {
+            exportBtn.addEventListener("click", exportEvidence);
+        }
+
+        if (refresh) {
+            refresh.addEventListener("click", () => {
+                render();
+                setText("phase11ObservationStatus", "VIEW REFRESHED");
+            });
         }
 
         /*
-         * Frontend observation only.
-         * It reads the existing rendered dashboard every 5 seconds.
-         * It does not make any API request.
+         * Polling only reads existing DOM values.
+         * It makes no API requests and changes no strategy state.
          */
-        setInterval(
-            () => captureObservation(false),
-            5000
-        );
+        setInterval(autoObserve, POLL_MS);
     }
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", init);
-    } else {
-        init();
-    }
+    /*
+     * Start AFTER the existing strategy/script files have loaded.
+     * This prevents the observer from capturing an initial empty DOM state.
+     */
+    window.addEventListener("load", init);
 })();
 </script>
 
