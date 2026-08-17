@@ -1,0 +1,53 @@
+{
+  "phase": "SYSTEM_DEVELOPMENT_PHASE_11",
+  "component": "BOUNDED_FORWARD_PAPER_EXPERIENCE",
+  "version": "SYSTEM_PHASE_11_BOUNDED_FORWARD_PAPER_EXPERIENCE_V1",
+  "status": "FORWARD_PAPER_EXPERIENCE_CAPTURED",
+  "candidate": {
+    "id": "CANDIDATE_BASELINE_V1",
+    "oosStatus": "NOT_VALIDATED",
+    "frozen": true
+  },
+  "source": {
+    "mode": "LIVE_MARKET",
+    "genuineMarketEvidence": true,
+    "instrument": "NIFTY 50",
+    "timeframe": "5m",
+    "completedCandlesRequired": true
+  },
+  "capture": {
+    "newObservations": 1,
+    "newEntries": 0,
+    "newExits": 0,
+    "cumulativeObservations": 1,
+    "cumulativeEntries": 0,
+    "cumulativeExits": 0,
+    "cumulativeClosedTrades": 0,
+    "cumulativeWins": 0,
+    "cumulativeLosses": 0,
+    "cumulativeGrossPnl": 0,
+    "openPosition": "FLAT"
+  },
+  "safety": {
+    "executionMode": "PAPER_ONLY",
+    "realTrading": false,
+    "brokerOrders": false,
+    "strategyModification": false,
+    "parameterOptimization": false,
+    "featureSelection": false,
+    "learnerUpdates": false,
+    "modelWeightUpdate": false,
+    "promotion": false,
+    "maxOpenPositions": 1,
+    "maxTradesPerSession": 5,
+    "maxDailyLossPct": 1
+  },
+  "learning": {
+    "allowed": false,
+    "reason": "Forward evidence must accumulate before any learning update"
+  },
+  "decision": "CONTINUE_BOUNDED_FORWARD_OBSERVATION",
+  "integrity": {
+    "sha256": "2fb1bda78b5222654a8557f45e38be1c0639e6e65daef29e10d035ab283be6e4"
+  }
+}

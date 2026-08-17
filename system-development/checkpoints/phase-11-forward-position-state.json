@@ -1,0 +1,16 @@
+{
+  "version": "SYSTEM_PHASE_11_POSITION_STATE_V1",
+  "position": "FLAT",
+  "entryPrice": null,
+  "entryTimestamp": null,
+  "tradeId": null,
+  "sessionDate": "2026-08-17",
+  "sessionTrades": 0,
+  "sessionPnl": 0,
+  "cumulativeClosedTrades": 0,
+  "cumulativeWins": 0,
+  "cumulativeLosses": 0,
+  "cumulativeGrossPnl": 0,
+  "lastTimestamp": "2026-08-17T03:55:00.000Z",
+  "lastObservationHash": "6a74ee3d4ab72b06fe692379dafa032a51e25c983c776647a2ba9b9c328f21b0"
+}
