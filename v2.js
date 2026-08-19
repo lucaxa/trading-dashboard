@@ -1,271 +1,39 @@
 /*
 ===========================================================
  TradeMind Pro — V2 Dashboard
- STEP 4.2 — LIVE QUOTES + CHART RENDERING FIX
+ STEP 4.4 — CURRENT HTML / CSS ALIGNED LIVE LAYER
  ----------------------------------------------------------
  READ-ONLY PRESENTATION LAYER
 
- Uses:
-   GET /api/quotes
-
- Does NOT:
-   - modify Phase 11
-   - modify api/quotes.js
-   - modify strategy
-   - modify learning
-   - call Dhan
-   - send broker orders
-   - write evidence
-
- Quote refresh:
-   every 5 seconds, with overlap protection
+ IMPORTANT:
+ - Uses the existing GET /api/quotes route.
+ - Reuses the proven quote extraction shape from script.js.
+ - Does not modify Phase 11.
+ - Does not modify api/quotes.js.
+ - Does not call a broker.
+ - Does not write evidence.
+ - Quotes refresh every 5 seconds.
 ===========================================================
 */
 (() => {
   "use strict";
 
   const state = {
-    range: "1D",
-    demoCandles: [],
-    liveQuotes: { nifty: null, banknifty: null },
-    previousQuotes: { nifty: null, banknifty: null },
-    quoteRefreshInFlight: false,
-    quoteRefreshStarted: false,
-    lastQuoteUpdate: null
+    nifty: null,
+    banknifty: null,
+    previousNifty: null,
+    previousBanknifty: null,
+    lastUpdate: null,
+    quoteInFlight: false,
+    started: false,
+    candles: []
   };
 
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const $ = (selector, root = document) =>
+    root.querySelector(selector);
 
-  function ensureStyles() {
-    if ($("#v2-dynamic-chart-styles")) return;
-
-    const style = document.createElement("style");
-    style.id = "v2-dynamic-chart-styles";
-    style.textContent = `
-      .chart-placeholder {
-        position:relative;
-        overflow:hidden;
-        min-height:360px;
-        background:
-          linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),
-          linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
-        background-size:10% 20%;
-      }
-
-      #v2-chart-plot {
-        position:absolute;
-        inset:20px 52px 45px 42px;
-        overflow:hidden;
-      }
-
-      #v2-chart-volume {
-        position:absolute;
-        left:42px;
-        right:52px;
-        bottom:10px;
-        height:52px;
-        display:flex;
-        align-items:flex-end;
-        gap:3px;
-        overflow:hidden;
-      }
-
-      .chart-candle {
-        position:absolute;
-        width:9px;
-        min-width:9px;
-      }
-
-      .candle-wick {
-        position:absolute;
-        left:3px;
-        width:2px;
-        background:#16e782;
-        opacity:.95;
-      }
-
-      .candle-body {
-        position:absolute;
-        left:0;
-        width:9px;
-        min-height:3px;
-        border-radius:1px;
-      }
-
-      .candle-up .candle-body {
-        background:#16e782;
-        border:1px solid #16e782;
-      }
-
-      .candle-down .candle-wick {
-        background:#ff5964;
-      }
-
-      .candle-down .candle-body {
-        background:#ff5964;
-        border:1px solid #ff5964;
-      }
-
-      .volume-bar {
-        flex:1 1 0;
-        min-width:2px;
-        max-width:10px;
-        background:rgba(31,148,210,.35);
-        border-radius:2px 2px 0 0;
-      }
-
-      #v2-current-line {
-        position:absolute;
-        left:42px;
-        right:0;
-        height:1px;
-        border-top:1px dashed #16e782;
-        opacity:.7;
-        pointer-events:none;
-      }
-
-      #v2-current-price {
-        position:absolute;
-        right:0;
-        transform:translateY(-50%);
-        padding:6px 9px;
-        background:#16e782;
-        color:#04110a;
-        font-weight:800;
-        font-size:11px;
-        border-radius:2px 0 0 2px;
-        z-index:4;
-      }
-
-      .v2-chart-label {
-        position:absolute;
-        left:12px;
-        top:10px;
-        z-index:5;
-        display:flex;
-        flex-direction:column;
-        gap:4px;
-        font-size:10px;
-        line-height:1.15;
-        color:#8ca4ba;
-        pointer-events:none;
-      }
-
-      .v2-chart-label b {
-        color:#dce8f5;
-      }
-
-      .v2-chart-axis {
-        position:absolute;
-        right:5px;
-        top:20px;
-        bottom:45px;
-        width:42px;
-        display:flex;
-        flex-direction:column;
-        justify-content:space-between;
-        align-items:flex-end;
-        color:#7890a6;
-        font-size:9px;
-        pointer-events:none;
-      }
-
-      .v2-chart-times {
-        position:absolute;
-        left:42px;
-        right:52px;
-        bottom:24px;
-        display:flex;
-        justify-content:space-between;
-        color:#7890a6;
-        font-size:9px;
-        pointer-events:none;
-      }
-
-      .v2-chart-tooltip {
-        position:absolute;
-        z-index:10;
-        display:none;
-        min-width:145px;
-        padding:8px 10px;
-        background:#091421;
-        border:1px solid #2b4964;
-        border-radius:6px;
-        box-shadow:0 8px 30px rgba(0,0,0,.45);
-        color:#dce8f5;
-        font-size:10px;
-        pointer-events:none;
-      }
-
-      .v2-chart-tooltip b {
-        color:#16e782;
-      }
-
-      .range-controls button {
-        cursor:pointer;
-      }
-
-      .range-controls button.active {
-        color:#16e782;
-        border-color:#16e782;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function toast(message) {
-    let el = $(".v2-toast");
-
-    if (!el) {
-      el = document.createElement("div");
-      el.className = "v2-toast";
-      el.style.cssText =
-        "position:fixed;right:18px;bottom:18px;z-index:9999;" +
-        "background:#0d1c2c;border:1px solid #23415e;color:#dce8f5;" +
-        "padding:10px 14px;border-radius:8px;font-size:12px;" +
-        "opacity:0;transition:.2s;pointer-events:none";
-      document.body.appendChild(el);
-    }
-
-    el.textContent = message;
-    el.style.opacity = "1";
-    clearTimeout(el._timer);
-    el._timer = setTimeout(() => {
-      el.style.opacity = "0";
-    }, 2200);
-  }
-
-  function modal(title, message, badge = "V2 PROTOTYPE") {
-    $(".v2-modal-backdrop")?.remove();
-
-    const backdrop = document.createElement("div");
-    backdrop.className = "v2-modal-backdrop";
-    backdrop.style.cssText =
-      "position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;" +
-      "display:flex;align-items:center;justify-content:center;padding:20px";
-
-    const box = document.createElement("div");
-    box.style.cssText =
-      "max-width:430px;width:100%;background:#0a1522;" +
-      "border:1px solid #29435f;border-radius:12px;padding:20px;" +
-      "color:#dce8f5;box-shadow:0 20px 60px rgba(0,0,0,.5)";
-
-    box.innerHTML =
-      `<span style="font-size:10px;color:#16e782">${badge}</span>` +
-      `<h3>${title}</h3>` +
-      `<p>${message}</p>` +
-      `<button type="button">Close</button>`;
-
-    backdrop.appendChild(box);
-    document.body.appendChild(backdrop);
-
-    backdrop.addEventListener("click", e => {
-      if (e.target === backdrop) backdrop.remove();
-    });
-
-    $("button", box).addEventListener("click", () => backdrop.remove());
-  }
+  const $$ = (selector, root = document) =>
+    [...root.querySelectorAll(selector)];
 
   function numberOrNull(value) {
     const n = Number(value);
@@ -274,54 +42,45 @@
 
   function formatPrice(value) {
     const n = numberOrNull(value);
-
     if (n === null) return "--";
 
     return n.toLocaleString("en-IN", {
-      minimumFractionDigits:2,
-      maximumFractionDigits:2
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     });
   }
 
   /*
-   * Robustly walk the existing /api/quotes response.
-   * We do not assume one exact nesting shape.
+   * This follows the same response-shape strategy already used
+   * by the working V10.25 frontend controller:
+   * result.data -> array, quotes, results, items, or object values.
    */
-  function collectObjects(value, output = []) {
-    if (value === null || value === undefined) return output;
+  function extractQuotes(data) {
+    if (Array.isArray(data)) return data;
 
-    if (Array.isArray(value)) {
-      value.forEach(item => collectObjects(item, output));
-      return output;
+    if (!data || typeof data !== "object") {
+      return [];
     }
 
-    if (typeof value !== "object") return output;
+    if (Array.isArray(data.data)) return data.data;
+    if (Array.isArray(data.quotes)) return data.quotes;
+    if (Array.isArray(data.results)) return data.results;
+    if (Array.isArray(data.items)) return data.items;
 
-    output.push(value);
-
-    Object.values(value).forEach(child => {
-      if (child && typeof child === "object") {
-        collectObjects(child, output);
-      }
-    });
-
-    return output;
+    return Object.values(data).filter(
+      value =>
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+    );
   }
 
-  function objectText(obj) {
-    try {
-      return JSON.stringify(obj).toLowerCase();
-    } catch {
-      return "";
-    }
-  }
-
-  function extractPrice(obj) {
-    if (typeof obj === "number") {
-      return numberOrNull(obj);
+  function extractPrice(quote) {
+    if (typeof quote === "number") {
+      return numberOrNull(quote);
     }
 
-    if (!obj || typeof obj !== "object") {
+    if (!quote || typeof quote !== "object") {
       return null;
     }
 
@@ -329,43 +88,43 @@
       "ltp",
       "last_price",
       "lastPrice",
-      "lastTradedPrice",
-      "last_traded_price",
       "price",
       "close",
       "lp",
-      "currentPrice",
-      "current_price",
-      "marketPrice",
-      "market_price",
-      "last"
+      "last_traded_price",
+      "lastTradedPrice"
     ];
 
     for (const field of fields) {
-      const value = numberOrNull(obj[field]);
+      const n = Number(quote[field]);
 
-      if (value !== null && value > 0) {
-        return value;
+      if (Number.isFinite(n) && n > 0) {
+        return n;
       }
     }
 
     return null;
   }
 
-  function findInstrumentObject(payload, instrument) {
-    const objects = collectObjects(payload);
+  function findInstrument(quotes, instrument) {
+    const wanted = String(instrument).toLowerCase();
 
-    const instrumentId =
-      instrument === "nifty"
-        ? "40000001"
-        : "40000003";
+    return quotes.find(quote => {
+      if (!quote || typeof quote !== "object") {
+        return false;
+      }
 
-    const matches = objects.filter(obj => {
-      const text = objectText(obj);
+      let text = "";
 
-      if (instrument === "nifty") {
+      try {
+        text = JSON.stringify(quote).toLowerCase();
+      } catch {
+        return false;
+      }
+
+      if (wanted === "nifty") {
         return (
-          text.includes(instrumentId) ||
+          text.includes("40000001") ||
           (
             text.includes("nifty") &&
             !text.includes("banknifty")
@@ -373,182 +132,42 @@
         );
       }
 
-      return (
-        text.includes(instrumentId) ||
-        text.includes("banknifty")
-      );
-    });
-
-    /*
-     * Prefer an object that contains a recognizable price.
-     */
-    return (
-      matches.find(obj => extractPrice(obj) !== null) ||
-      matches[0] ||
-      null
-    );
-  }
-
-  function updateIndexCard(card, price, previous) {
-    if (!card) return;
-
-    const priceElement = card.querySelector("strong");
-
-    if (priceElement) {
-      priceElement.textContent = formatPrice(price);
-    }
-
-    const changeElement = card.querySelector("em");
-
-    if (!changeElement) return;
-
-    if (price === null) {
-      changeElement.textContent = "Waiting for live data";
-      changeElement.style.color = "";
-      return;
-    }
-
-    if (previous !== null) {
-      const difference = price - previous;
-      const percentage =
-        previous !== 0
-          ? (difference / previous) * 100
-          : 0;
-
-      const sign = difference >= 0 ? "+" : "";
-
-      changeElement.textContent =
-        `${sign}${difference.toFixed(2)} (${sign}${percentage.toFixed(2)}%)`;
-
-      changeElement.style.color =
-        difference >= 0
-          ? "#16e782"
-          : "#ff5964";
-    } else {
-      changeElement.textContent =
-        "LIVE • read-only quote";
-
-      changeElement.style.color =
-        "#16e782";
-    }
-  }
-
-  function updateLiveDisplay() {
-    const cards =
-      $$(".index-strip .index-card, .market-strip .index-card");
-
-    updateIndexCard(
-      cards[0],
-      state.liveQuotes.nifty,
-      state.previousQuotes.nifty
-    );
-
-    updateIndexCard(
-      cards[1],
-      state.liveQuotes.banknifty,
-      state.previousQuotes.banknifty
-    );
-
-    /*
-     * The V2 chart's current-price label follows NIFTY.
-     */
-    if (state.liveQuotes.nifty !== null) {
-      const chartPrice =
-        $("#v2-current-price");
-
-      if (chartPrice) {
-        chartPrice.textContent =
-          formatPrice(state.liveQuotes.nifty);
+      if (wanted === "banknifty") {
+        return (
+          text.includes("40000003") ||
+          text.includes("banknifty")
+        );
       }
 
-      positionCurrentPrice(
-        state.liveQuotes.nifty
-      );
-    }
-
-    const now =
-      state.lastQuoteUpdate;
-
-    const timeText =
-      now
-        ? now.toLocaleTimeString(
-            "en-IN",
-            {
-              hour12:false,
-              timeZone:"Asia/Kolkata"
-            }
-          )
-        : "--:--:--";
-
-    const chartTime =
-      $("#v2-chart-time");
-
-    if (chartTime) {
-      chartTime.textContent =
-        `${timeText} IST`;
-    }
-
-    const status =
-      $(".market-status strong");
-
-    if (status) {
-      status.textContent =
-        timeText;
-    }
-
-    const statusSmall =
-      $(".market-status small");
-
-    if (statusSmall) {
-      statusSmall.textContent =
-        now
-          ? "LIVE • INDstocks"
-          : "Waiting for quote";
-    }
-
-    document.documentElement.dataset.v2LiveQuotes =
-      (
-        state.liveQuotes.nifty !== null ||
-        state.liveQuotes.banknifty !== null
-      )
-        ? "connected"
-        : "waiting";
+      return false;
+    }) || null;
   }
 
-  async function refreshLiveQuotes() {
-    if (state.quoteRefreshInFlight) return;
+  async function fetchQuotes() {
+    if (state.quoteInFlight) return;
 
-    state.quoteRefreshInFlight = true;
+    state.quoteInFlight = true;
 
     try {
-      /*
-       * Existing backend route only.
-       * Cache busting prevents an intermediary from serving
-       * an older V2 response.
-       */
-      const response =
-        await fetch(
-          `/api/quotes?_v2=${Date.now()}`,
-          {
-            method:"GET",
-            cache:"no-store",
-            headers:{
-              Accept:"application/json",
-              "Cache-Control":
-                "no-cache, no-store, max-age=0",
-              Pragma:"no-cache"
-            }
+      const response = await fetch(
+        `/api/quotes?_v2=${Date.now()}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Accept": "application/json",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache"
           }
-        );
+        }
+      );
 
-      const rawText =
-        await response.text();
+      const text = await response.text();
 
-      let payload;
+      let result;
 
       try {
-        payload =
-          JSON.parse(rawText);
+        result = JSON.parse(text);
       } catch {
         throw new Error(
           `Invalid JSON from /api/quotes (HTTP ${response.status})`
@@ -556,11 +175,8 @@
       }
 
       console.info(
-        "[TradeMind V2] /api/quotes response",
-        {
-          status:response.status,
-          payload
-        }
+        "[TradeMind V2] /api/quotes",
+        result
       );
 
       if (!response.ok) {
@@ -569,49 +185,50 @@
         );
       }
 
-      if (payload?.success === false) {
+      if (result?.success === false) {
         throw new Error(
-          typeof payload.error === "string"
-            ? payload.error
-            : "Quote API returned success:false"
+          typeof result.error === "string"
+            ? result.error
+            : JSON.stringify(result.error || result)
         );
       }
 
-      const root =
-        payload?.data ??
-        payload;
+      /*
+       * api/quotes.js returns:
+       * {
+       *   success: true,
+       *   source: "INDstocks",
+       *   data: data.data
+       * }
+       */
+      const quotes =
+        extractQuotes(result?.data ?? result);
 
-      const niftyObject =
-        findInstrumentObject(
-          root,
-          "nifty"
-        );
+      const niftyQuote =
+        findInstrument(quotes, "nifty");
 
-      const bankObject =
-        findInstrumentObject(
-          root,
-          "banknifty"
-        );
+      const bankQuote =
+        findInstrument(quotes, "banknifty");
 
       const niftyPrice =
-        extractPrice(niftyObject);
+        extractPrice(niftyQuote);
 
       const bankPrice =
-        extractPrice(bankObject);
+        extractPrice(bankQuote);
 
       if (niftyPrice !== null) {
-        state.previousQuotes.nifty =
-          state.liveQuotes.nifty;
+        state.previousNifty =
+          state.nifty;
 
-        state.liveQuotes.nifty =
+        state.nifty =
           niftyPrice;
       }
 
       if (bankPrice !== null) {
-        state.previousQuotes.banknifty =
-          state.liveQuotes.banknifty;
+        state.previousBanknifty =
+          state.banknifty;
 
-        state.liveQuotes.banknifty =
+        state.banknifty =
           bankPrice;
       }
 
@@ -619,159 +236,197 @@
         niftyPrice !== null ||
         bankPrice !== null
       ) {
-        state.lastQuoteUpdate =
-          new Date();
-
-        updateLiveDisplay();
-
-        const footer =
-          $("footer");
-
-        if (footer) {
-          footer.textContent =
-            "V2 prototype — live quotes connected read-only. " +
-            "Phase 11, backend, strategy, learning engine and broker controls remain untouched.";
-        }
+        state.lastUpdate = new Date();
       }
 
+      render();
+
       console.info(
-        "[TradeMind V2] Parsed prices",
+        "[TradeMind V2] Parsed quotes",
         {
-          nifty:niftyPrice,
-          banknifty:bankPrice,
-          niftyObject,
-          bankObject
+          nifty: niftyPrice,
+          banknifty: bankPrice,
+          niftyQuote,
+          bankQuote,
+          quoteCount: quotes.length
         }
       );
 
     } catch (error) {
       console.error(
-        "[TradeMind V2] Read-only quote refresh failed:",
+        "[TradeMind V2] quote refresh failed:",
         error
       );
-
-      document.documentElement.dataset.v2LiveQuotes =
-        "error";
-
     } finally {
-      state.quoteRefreshInFlight =
-        false;
+      state.quoteInFlight = false;
     }
   }
 
-  function startLiveQuoteRefresh() {
-    if (state.quoteRefreshStarted) return;
-
-    state.quoteRefreshStarted = true;
-
-    /*
-     * Immediate first request.
-     */
-    refreshLiveQuotes();
-
-    /*
-     * Existing project cadence: 5 seconds.
-     */
-    window.setInterval(
-      refreshLiveQuotes,
-      5000
-    );
-
-    console.info(
-      "[TradeMind V2] LIVE QUOTES ACTIVE — read-only / 5s"
-    );
-  }
-
-  function generateCandles(count = 54) {
-    let price = 24242;
-    const candles = [];
-
-    for (let i = 0; i < count; i++) {
-      const drift =
-        1.9 +
-        Math.sin(i / 7) * 1.7;
-
-      const noise =
-        Math.sin(i * 2.31) * 10 +
-        Math.cos(i * 0.71) * 5;
-
-      const open = price;
-
-      const close =
-        open +
-        drift +
-        noise * 0.55;
-
-      const high =
-        Math.max(open, close) +
-        5 +
-        Math.abs(
-          Math.sin(i * 1.17)
-        ) * 9;
-
-      const low =
-        Math.min(open, close) -
-        5 -
-        Math.abs(
-          Math.cos(i * 0.83)
-        ) * 8;
-
-      const volume =
-        0.35 +
-        Math.abs(
-          Math.sin(i * 0.61)
-        ) * 0.95;
-
-      candles.push({
-        open,
-        high,
-        low,
-        close,
-        volume,
-        time:
-          `${String(
-            9 +
-            Math.floor(
-              (i * 5 + 15) / 60
-            )
-          ).padStart(2,"0")}:${
-            String(
-              (15 + i * 5) % 60
-            ).padStart(2,"0")
-          }`
-      });
-
-      price = close;
+  function renderChange(price, previous) {
+    if (
+      price === null ||
+      previous === null
+    ) {
+      return "Waiting for live data";
     }
 
-    return candles;
+    const change =
+      price - previous;
+
+    if (change === 0) {
+      return "No change";
+    }
+
+    const pct =
+      previous !== 0
+        ? (change / previous) * 100
+        : 0;
+
+    const sign =
+      change >= 0 ? "+" : "";
+
+    return `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
   }
 
-  function positionCurrentPrice(value) {
-    const line =
-      $("#v2-current-line");
+  function updateIndexCards() {
+    const cards =
+      $$(".market-strip .index-card");
 
-    const tag =
+    if (cards[0]) {
+      const price =
+        $("strong", cards[0]);
+
+      const change =
+        $("em", cards[0]);
+
+      if (price) {
+        price.textContent =
+          formatPrice(state.nifty);
+      }
+
+      if (change) {
+        change.textContent =
+          renderChange(
+            state.nifty,
+            state.previousNifty
+          );
+
+        change.style.color =
+          state.nifty !== null &&
+          state.previousNifty !== null &&
+          state.nifty < state.previousNifty
+            ? "#ff4f5e"
+            : "#16e782";
+      }
+    }
+
+    if (cards[1]) {
+      const price =
+        $("strong", cards[1]);
+
+      const change =
+        $("em", cards[1]);
+
+      if (price) {
+        price.textContent =
+          formatPrice(state.banknifty);
+      }
+
+      if (change) {
+        change.textContent =
+          renderChange(
+            state.banknifty,
+            state.previousBanknifty
+          );
+
+        change.style.color =
+          state.banknifty !== null &&
+          state.previousBanknifty !== null &&
+          state.banknifty < state.previousBanknifty
+            ? "#ff4f5e"
+            : "#16e782";
+      }
+    }
+  }
+
+  function updateTimestamp() {
+    const time =
+      $("#v2-chart-time");
+
+    const status =
+      $(".market-status strong");
+
+    if (!state.lastUpdate) {
+      if (time) {
+        time.textContent =
+          "--:--:-- IST";
+      }
+
+      if (status) {
+        status.textContent =
+          "--:--:--";
+      }
+
+      return;
+    }
+
+    const text =
+      state.lastUpdate.toLocaleTimeString(
+        "en-IN",
+        {
+          hour12: false,
+          timeZone: "Asia/Kolkata"
+        }
+      );
+
+    if (time) {
+      time.textContent =
+        `${text} IST`;
+    }
+
+    if (status) {
+      status.textContent =
+        text;
+    }
+  }
+
+  function updateCurrentPrice() {
+    const price =
       $("#v2-current-price");
 
-    if (!line || !tag) return;
+    if (price) {
+      price.textContent =
+        formatPrice(state.nifty);
+    }
 
-    const candles =
-      state.demoCandles;
+    const chart =
+      $(".chart");
 
-    if (!candles.length) return;
+    const line =
+      $(".current-price-line", chart);
 
-    const lows =
-      candles.map(c => c.low);
+    if (!chart || !line) return;
 
-    const highs =
-      candles.map(c => c.high);
+    const current =
+      state.nifty;
+
+    if (current === null) return;
+
+    const values =
+      state.candles.flatMap(
+        candle => [
+          candle.high,
+          candle.low
+        ]
+      );
+
+    if (!values.length) return;
 
     const min =
-      Math.min(...lows);
+      Math.min(...values);
 
     const max =
-      Math.max(...highs);
+      Math.max(...values);
 
     const span =
       max - min || 1;
@@ -779,53 +434,225 @@
     const bounded =
       Math.max(
         min,
-        Math.min(max, Number(value))
+        Math.min(max, current)
       );
 
     const pct =
       ((max - bounded) / span) * 100;
 
     line.style.top =
-      `calc(20px + ${pct}% * (100% - 65px) / 100)`;
+      `${Math.max(
+        5,
+        Math.min(95, pct)
+      )}%`;
 
-    tag.style.top =
-      line.style.top;
+    if (price) {
+      price.style.top =
+        `${Math.max(
+          5,
+          Math.min(95, pct)
+        )}%`;
+    }
+  }
+
+  function addChartStyles() {
+    if ($("#v2-live-chart-styles")) return;
+
+    const style =
+      document.createElement("style");
+
+    style.id =
+      "v2-live-chart-styles";
+
+    style.textContent = `
+      .chart-plot{
+        position:absolute;
+        left:8%;
+        right:8%;
+        top:18%;
+        bottom:18%;
+        overflow:hidden;
+        z-index:3;
+      }
+
+      .v2-live-candle{
+        position:absolute;
+        width:7px;
+      }
+
+      .v2-live-wick{
+        position:absolute;
+        left:3px;
+        width:1px;
+        height:100%;
+      }
+
+      .v2-live-body{
+        position:absolute;
+        left:0;
+        width:7px;
+        min-height:2px;
+      }
+
+      .v2-up .v2-live-wick,
+      .v2-up .v2-live-body{
+        background:#16e782;
+      }
+
+      .v2-down .v2-live-wick,
+      .v2-down .v2-live-body{
+        background:#ff4f5e;
+      }
+
+      .chart-volume{
+        position:absolute;
+        left:8%;
+        right:8%;
+        bottom:5%;
+        height:14%;
+        display:flex;
+        align-items:flex-end;
+        gap:3px;
+        z-index:2;
+        overflow:hidden;
+      }
+
+      .v2-volume{
+        flex:1;
+        min-width:2px;
+        background:rgba(22,140,255,.28);
+        border-radius:2px 2px 0 0;
+      }
+
+      .current-price-line{
+        position:absolute;
+        left:8%;
+        right:0;
+        height:1px;
+        border-top:1px dashed #16e782;
+        z-index:5;
+        pointer-events:none;
+      }
+
+      #v2-current-price{
+        z-index:6;
+        transform:translateY(-50%);
+      }
+
+      .chart-overlay{
+        z-index:5;
+      }
+
+      .chart-indicator-legend,
+      .chart-axis-y,
+      .chart-axis-x{
+        z-index:7;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+
+  function generateDemoCandles() {
+    /*
+     * Presentation-only chart until V2 is connected to the
+     * historical candle endpoint. It never feeds the strategy.
+     */
+    const candles = [];
+    let price = 24205;
+
+    for (let i = 0; i < 48; i++) {
+      const drift =
+        2.5 +
+        Math.sin(i / 5) * 2;
+
+      const noise =
+        Math.sin(i * 1.77) * 7 +
+        Math.cos(i * .63) * 4;
+
+      const open =
+        price;
+
+      const close =
+        open +
+        drift +
+        noise;
+
+      const high =
+        Math.max(open, close) +
+        5 +
+        Math.abs(
+          Math.sin(i)
+        ) * 8;
+
+      const low =
+        Math.min(open, close) -
+        5 -
+        Math.abs(
+          Math.cos(i)
+        ) * 7;
+
+      const volume =
+        .35 +
+        Math.abs(
+          Math.sin(i * .51)
+        ) * 1.1;
+
+      candles.push({
+        open,
+        high,
+        low,
+        close,
+        volume
+      });
+
+      price =
+        close;
+    }
+
+    return candles;
   }
 
   function renderChart() {
-    const panel =
-      $(".chart-placeholder");
+    const chart =
+      $(".chart");
 
-    if (!panel) return;
-
-    /*
-     * IMPORTANT:
-     * The original v2.html contains prototype chart text inside
-     * .chart-placeholder. Clear that static content completely
-     * before building the live V2 chart so labels/data cannot
-     * appear as raw text on top of the canvas area.
-     */
-    panel.innerHTML = "";
+    if (!chart) return;
 
     const plot =
-      document.createElement("div");
-    plot.id = "v2-chart-plot";
+      $("#v2-chart-plot");
 
     const volume =
-      document.createElement("div");
-    volume.id = "v2-chart-volume";
+      $("#v2-chart-volume");
 
-    panel.appendChild(plot);
-    panel.appendChild(volume);
+    if (!plot || !volume) return;
+
+    /*
+     * Remove the old fake chart layer if it exists.
+     * Keep the HTML axis, legend, overlay and tooltip.
+     */
+    $(".fake-candles", chart)?.remove();
+    $$(".ema", chart).forEach(
+      element => element.remove()
+    );
+
+    plot.innerHTML = "";
+    volume.innerHTML = "";
 
     const candles =
-      state.demoCandles;
+      state.candles;
+
+    if (!candles.length) return;
 
     const lows =
-      candles.map(c => c.low);
+      candles.map(
+        candle => candle.low
+      );
 
     const highs =
-      candles.map(c => c.high);
+      candles.map(
+        candle => candle.high
+      );
 
     const min =
       Math.min(...lows);
@@ -841,15 +668,17 @@
         const wrapper =
           document.createElement("div");
 
+        const up =
+          candle.close >=
+          candle.open;
+
         wrapper.className =
-          `chart-candle ${
-            candle.close >= candle.open
-              ? "candle-up"
-              : "candle-down"
+          `v2-live-candle ${
+            up ? "v2-up" : "v2-down"
           }`;
 
         const x =
-          ((index + 0.5) /
+          (index /
             candles.length) *
           100;
 
@@ -870,7 +699,7 @@
             span) * 100;
 
         wrapper.style.left =
-          `calc(${x}% - 4.5px)`;
+          `calc(${x}% - 3px)`;
 
         wrapper.style.top =
           `${highPct}%`;
@@ -885,16 +714,13 @@
           document.createElement("div");
 
         wick.className =
-          "candle-wick";
-
-        wick.style.height =
-          "100%";
+          "v2-live-wick";
 
         const body =
           document.createElement("div");
 
         body.className =
-          "candle-body";
+          "v2-live-body";
 
         body.style.top =
           `${Math.min(
@@ -916,28 +742,6 @@
           body
         );
 
-        wrapper.addEventListener(
-          "mouseenter",
-          event => {
-            showTooltip(
-              event,
-              candle
-            );
-          }
-        );
-
-        wrapper.addEventListener(
-          "mousemove",
-          event => {
-            moveTooltip(event);
-          }
-        );
-
-        wrapper.addEventListener(
-          "mouseleave",
-          hideTooltip
-        );
-
         plot.appendChild(
           wrapper
         );
@@ -946,10 +750,10 @@
           document.createElement("div");
 
         bar.className =
-          "volume-bar";
+          "v2-volume";
 
         bar.style.height =
-          `${15 + candle.volume * 65}%`;
+          `${20 + candle.volume * 35}%`;
 
         volume.appendChild(
           bar
@@ -957,241 +761,19 @@
       }
     );
 
-    renderChartOverlay(
-      min,
-      max
-    );
-
-    const demoCurrent =
-      state.demoCandles.at(-1)?.close;
-
-    positionCurrentPrice(
-      state.liveQuotes.nifty ??
-      demoCurrent
-    );
-  }
-
-  function renderChartOverlay(min, max) {
-    const panel =
-      $(".chart-placeholder");
-
-    if (!panel) return;
-
-    panel.querySelectorAll(
-      ".v2-chart-label,.v2-chart-axis,.v2-chart-times,#v2-current-line,#v2-current-price,.v2-chart-tooltip"
-    ).forEach(
-      element => element.remove()
-    );
-
-    const label =
-      document.createElement("div");
-
-    label.className =
-      "v2-chart-label";
-
-    label.innerHTML = `
-      <span>EMA 9&nbsp; <b>24,349.80</b></span>
-      <span>EMA 21&nbsp; <b>24,335.10</b></span>
-      <span>VWAP&nbsp; <b>24,312.65</b></span>
-      <span>Volume&nbsp; <b>1.25M</b></span>
-    `;
-
-    panel.appendChild(label);
-
-    const axis =
-      document.createElement("div");
-
-    axis.className =
-      "v2-chart-axis";
-
-    const steps = 5;
-
-    for (let i = 0; i < steps; i++) {
-      const value =
-        max -
-        ((max - min) *
-          i /
-          (steps - 1));
-
-      const span =
-        document.createElement("span");
-
-      span.textContent =
-        value.toLocaleString(
-          "en-IN",
-          {
-            maximumFractionDigits:0
-          }
-        );
-
-      axis.appendChild(span);
-    }
-
-    panel.appendChild(axis);
-
-    const times =
-      document.createElement("div");
-
-    times.className =
-      "v2-chart-times";
-
-    const labels = [
-      "09:15",
-      "10:00",
-      "10:45",
-      "11:30",
-      "12:15",
-      "13:00",
-      "13:45",
-      "14:30",
-      "15:15"
-    ];
-
-    labels.forEach(text => {
-      const span =
-        document.createElement("span");
-
-      span.textContent =
-        text;
-
-      times.appendChild(
-        span
-      );
-    });
-
-    panel.appendChild(times);
-
-    const line =
-      document.createElement("div");
-
-    line.id =
-      "v2-current-line";
-
-    panel.appendChild(line);
-
-    const price =
-      document.createElement("div");
-
-    price.id =
-      "v2-current-price";
-
-    price.textContent =
-      formatPrice(
-        state.liveQuotes.nifty ??
-        state.demoCandles.at(-1)?.close
-      );
-
-    panel.appendChild(price);
-
-    const tooltip =
-      document.createElement("div");
-
-    tooltip.className =
-      "v2-chart-tooltip";
-
-    panel.appendChild(
-      tooltip
-    );
-  }
-
-  function showTooltip(event, candle) {
-    const tooltip =
-      $(".v2-chart-tooltip");
-
-    if (!tooltip) return;
-
-    tooltip.innerHTML = `
-      <b>${candle.time}</b><br>
-      O ${candle.open.toFixed(2)}
-      &nbsp; H ${candle.high.toFixed(2)}<br>
-      L ${candle.low.toFixed(2)}
-      &nbsp; C ${candle.close.toFixed(2)}<br>
-      V ${candle.volume.toFixed(2)}M
-    `;
-
-    tooltip.style.display =
-      "block";
-
-    moveTooltip(event);
-  }
-
-  function moveTooltip(event) {
-    const tooltip =
-      $(".v2-chart-tooltip");
-
-    const panel =
-      $(".chart-placeholder");
-
-    if (!tooltip || !panel) return;
-
-    const rect =
-      panel.getBoundingClientRect();
-
-    let left =
-      event.clientX -
-      rect.left +
-      14;
-
-    let top =
-      event.clientY -
-      rect.top -
-      25;
-
-    const maxLeft =
-      rect.width -
-      tooltip.offsetWidth -
-      8;
-
-    const maxTop =
-      rect.height -
-      tooltip.offsetHeight -
-      8;
-
-    left =
-      Math.max(
-        8,
-        Math.min(
-          left,
-          maxLeft
-        )
-      );
-
-    top =
-      Math.max(
-        8,
-        Math.min(
-          top,
-          maxTop
-        )
-      );
-
-    tooltip.style.left =
-      `${left}px`;
-
-    tooltip.style.top =
-      `${top}px`;
-  }
-
-  function hideTooltip() {
-    const tooltip =
-      $(".v2-chart-tooltip");
-
-    if (tooltip) {
-      tooltip.style.display =
-        "none";
-    }
+    updateCurrentPrice();
   }
 
   function wireRanges() {
-    $$(".range-controls button").forEach(
-      button => {
+    $$(".range-controls button")
+      .forEach(button => {
         button.addEventListener(
           "click",
           () => {
             $$(".range-controls button")
               .forEach(
-                b =>
-                  b.classList.remove(
+                item =>
+                  item.classList.remove(
                     "active"
                   )
               );
@@ -1199,92 +781,63 @@
             button.classList.add(
               "active"
             );
-
-            state.range =
-              button.dataset.range;
-
-            toast(
-              `Chart range: ${state.range} — visual prototype`
-            );
           }
         );
-      }
-    );
+      });
   }
 
-  function wireNavigation() {
-    $$(".sidebar nav a").forEach(
-      link => {
-        link.addEventListener(
-          "click",
-          event => {
-            event.preventDefault();
+  function safeModal(title, message) {
+    const existing =
+      $(".v2-safe-modal");
 
-            $$(".sidebar nav a")
-              .forEach(
-                a =>
-                  a.classList.remove(
-                    "active"
-                  )
-              );
+    existing?.remove();
 
-            link.classList.add(
-              "active"
-            );
+    const backdrop =
+      document.createElement("div");
 
-            const label =
-              $("span", link)
-                ?.textContent
-                ?.trim() ||
-              "Dashboard";
+    backdrop.className =
+      "v2-safe-modal";
 
-            const targets = {
-              Dashboard:".overview",
-              Market:".overview",
-              Chart:".chart-panel",
-              Strategy:".strategy",
-              Backtest:".backtest",
-              Trades:".signals",
-              Learning:".evidence",
-              Insights:".health",
-              Reports:".quick"
-            };
+    backdrop.style.cssText =
+      "position:fixed;inset:0;z-index:9999;" +
+      "background:rgba(0,0,0,.65);" +
+      "display:grid;place-items:center;padding:20px";
 
-            if (
-              label ===
-              "Settings"
-            ) {
-              modal(
-                "V2 Settings",
-                "Presentation-only settings. Phase 11, backend, strategy, learning engine and broker controls cannot be changed here.",
-                "READ-ONLY"
-              );
-              return;
-            }
+    const box =
+      document.createElement("div");
 
-            $(targets[label])
-              ?.scrollIntoView({
-                behavior:"smooth",
-                block:"start"
-              });
+    box.style.cssText =
+      "max-width:420px;width:100%;" +
+      "background:#0a1320;border:1px solid #1d3047;" +
+      "border-radius:10px;padding:20px;" +
+      "color:#f5f7fb";
 
-            toast(
-              `${label} view selected`
-            );
-          }
-        );
-      }
-    );
+    box.innerHTML =
+      `<h3>${title}</h3>` +
+      `<p style="color:#8293aa">${message}</p>` +
+      `<button type="button">Close</button>`;
+
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+
+    $("button", box).onclick =
+      () => backdrop.remove();
+
+    backdrop.onclick =
+      event => {
+        if (event.target === backdrop) {
+          backdrop.remove();
+        }
+      };
   }
 
   function wireButtons() {
     $(".settings")?.addEventListener(
       "click",
       () =>
-        modal(
+        safeModal(
           "V2 Settings",
-          "Presentation-only settings. Backend and Phase 11 remain untouched.",
-          "READ-ONLY"
+          "Presentation-only settings. No backend, Phase 11, strategy or broker state is changed here."
         )
     );
 
@@ -1292,73 +845,83 @@
       ?.addEventListener(
         "click",
         () =>
-          modal(
-            "Paper Trade — Prototype",
-            "No order is created. V2 is not connected to a broker, Dhan, or the trading engine.",
-            "SAFE / NO REAL ORDER"
+          safeModal(
+            "Paper Trade",
+            "No order is created. V2 is currently a read-only presentation layer."
           )
       );
 
-    const quick =
+    const buttons =
       $$(".quick button");
 
-    quick[0]?.addEventListener(
+    buttons[0]?.addEventListener(
       "click",
       () =>
-        modal(
+        safeModal(
           "Backtest",
-          "The V2 backtest control is not connected yet.",
-          "NOT CONNECTED"
+          "The V2 backtest control is not connected yet."
         )
     );
 
-    quick[1]?.addEventListener(
+    buttons[1]?.addEventListener(
       "click",
       () =>
-        modal(
+        safeModal(
           "Reports",
-          "The V2 report interface will be built in a later step.",
-          "V2 PREVIEW"
+          "The V2 reports interface will be connected in a later step."
         )
     );
 
-    quick[2]?.addEventListener(
+    buttons[2]?.addEventListener(
       "click",
       () =>
-        toast(
-          "Export is presentation-only in V2"
+        safeModal(
+          "Export",
+          "Export is not connected yet."
         )
     );
 
-    quick[3]?.addEventListener(
+    buttons[3]?.addEventListener(
       "click",
       () =>
-        modal(
-          "V2 Settings",
-          "Presentation-only settings. No backend or Phase 11 changes.",
-          "READ-ONLY"
+        safeModal(
+          "Settings",
+          "Presentation-only settings."
         )
     );
   }
 
-  function init() {
-    ensureStyles();
+  function render() {
+    updateIndexCards();
+    updateTimestamp();
+    updateCurrentPrice();
+  }
 
-    state.demoCandles =
-      generateCandles();
+  function start() {
+    if (state.started) return;
+
+    state.started = true;
+
+    addChartStyles();
+
+    state.candles =
+      generateDemoCandles();
 
     renderChart();
     wireRanges();
-    wireNavigation();
     wireButtons();
 
-    document.documentElement.dataset.trademindV2 =
-      "step4-2-read-only-live-quotes";
-
-    startLiveQuoteRefresh();
+    render();
 
     console.info(
-      "TradeMind Pro V2 Step 4.2 initialized — chart rendering restored; live quotes remain read-only."
+      "[TradeMind V2] ACTIVE — read-only /quotes / 5s"
+    );
+
+    fetchQuotes();
+
+    window.setInterval(
+      fetchQuotes,
+      5000
     );
   }
 
@@ -1368,9 +931,10 @@
   ) {
     document.addEventListener(
       "DOMContentLoaded",
-      init
+      start,
+      { once: true }
     );
   } else {
-    init();
+    start();
   }
 })();
