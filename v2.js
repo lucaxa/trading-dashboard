@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro — V2 Dashboard
- STEP 4.8 — REAL CANDLES + REAL FRONTEND INDICATORS
+ STEP 4.9 — INTERACTIVE REAL-MARKET CHART
  ----------------------------------------------------------
  READ-ONLY PRESENTATION LAYER
 
@@ -26,7 +26,14 @@
     lastUpdate: null,
     quoteInFlight: false,
     started: false,
-    candles: []
+    candles: [],
+    chartRange: "1D",
+    chartStart: 0,
+    chartVisibleCount: 78,
+    chartDragging: false,
+    chartDragStartX: 0,
+    chartDragStartIndex: 0,
+    chartPointerIndex: null
   };
 
   const $ = (selector, root = document) =>
@@ -444,15 +451,18 @@
 
     if (current === null) return;
 
+    const candles =
+      getVisibleCandles();
+
+    if (!candles.length) return;
+
     const values =
-      state.candles.flatMap(
+      candles.flatMap(
         candle => [
           candle.high,
           candle.low
         ]
       );
-
-    if (!values.length) return;
 
     const min =
       Math.min(...values);
@@ -466,26 +476,34 @@
     const bounded =
       Math.max(
         min,
-        Math.min(max, current)
+        Math.min(
+          max,
+          current
+        )
       );
 
     const pct =
-      ((max - bounded) / span) * 100;
+      ((max - bounded) /
+        span) * 100;
+
+    const position =
+      Math.max(
+        5,
+        Math.min(
+          95,
+          pct
+        )
+      );
 
     line.style.top =
-      `${Math.max(
-        5,
-        Math.min(95, pct)
-      )}%`;
+      `${position}%`;
 
     if (price) {
       price.style.top =
-        `${Math.max(
-          5,
-          Math.min(95, pct)
-        )}%`;
+        `${position}%`;
     }
   }
+
 
   function addChartStyles() {
     if ($("#v2-live-chart-styles")) return;
@@ -638,6 +656,89 @@
       .v2-dot.ema21{background:#ff9f1a}
       .v2-dot.vwap{background:#a96cff}
       .v2-dot.volume{background:#2d6f91}
+
+      .v2-crosshair-x{
+        position:absolute;
+        top:18%;
+        bottom:18%;
+        width:1px;
+        background:rgba(122,165,205,.45);
+        display:none;
+        z-index:12;
+        pointer-events:none;
+      }
+
+      .v2-crosshair-y{
+        position:absolute;
+        left:8%;
+        right:0;
+        height:1px;
+        background:rgba(122,165,205,.45);
+        display:none;
+        z-index:12;
+        pointer-events:none;
+      }
+
+      .v2-interactive-tooltip{
+        position:absolute;
+        min-width:190px;
+        display:none;
+        flex-direction:column;
+        gap:3px;
+        padding:8px 10px;
+        border:1px solid #29415c;
+        border-radius:7px;
+        background:rgba(5,13,23,.96);
+        box-shadow:0 8px 24px rgba(0,0,0,.35);
+        color:#9eb0c5;
+        font-size:9px;
+        line-height:1.25;
+        z-index:20;
+        pointer-events:none;
+      }
+
+      .v2-interactive-tooltip b{
+        color:#f4f8fc;
+      }
+
+      .v2-interactive-tooltip .tooltip-time{
+        color:#16e782;
+        font-weight:700;
+        margin-bottom:2px;
+      }
+
+      .v2-range-status{
+        position:absolute;
+        left:8%;
+        bottom:2px;
+        transform:translateY(100%);
+        color:#60758e;
+        font-size:7px;
+        pointer-events:none;
+        z-index:8;
+        white-space:nowrap;
+      }
+
+      .chart-plot{
+        cursor:crosshair;
+        user-select:none;
+        -webkit-user-select:none;
+      }
+
+      .chart-plot:active{
+        cursor:grabbing;
+      }
+
+      .range-controls button{
+        cursor:pointer;
+        transition:all .15s ease;
+      }
+
+      .range-controls button.active{
+        border-color:#16e782 !important;
+        color:#16e782 !important;
+        box-shadow:0 0 0 1px rgba(22,231,130,.2);
+      }
 
       .chart-overlay{
         z-index:5;
@@ -848,6 +949,11 @@
 
   async function fetchCandles() {
     try {
+      /*
+       * Request the full historical slice exposed by the existing
+       * frontend-safe candle endpoint. V2 does not change the endpoint
+       * or its backend behavior.
+       */
       const response = await fetch(
         `/api/candles?interval=5minute&_v2=${Date.now()}`,
         {
@@ -897,12 +1003,19 @@
       }
 
       /*
-       * Keep the chart readable. The backend can return up to
-       * seven days of 5-minute candles; V2 displays the most
-       * recent 78 candles (~one trading day plus a little context).
+       * IMPORTANT:
+       * Keep every real candle returned by the existing endpoint.
+       * The viewport/range controls decide what is visible.
        */
-      state.candles =
-        candles.slice(-78);
+      state.candles = candles;
+
+      /*
+       * Keep the selected range anchored to the latest candle after
+       * a refresh, unless the user is actively dragging/zooming.
+       */
+      if (!state.chartDragging) {
+        applyRangeToViewport(state.chartRange, true);
+      }
 
       renderChart();
 
@@ -910,7 +1023,8 @@
         "[TradeMind V2] Historical candles loaded",
         {
           returned: candles.length,
-          displayed: state.candles.length,
+          visible: state.chartVisibleCount,
+          range: state.chartRange,
           last: state.candles[state.candles.length - 1]
         }
       );
@@ -922,9 +1036,8 @@
       );
 
       /*
-       * Do not replace real candles with synthetic candles.
-       * If the historical endpoint fails, preserve the last
-       * successfully loaded chart instead.
+       * Never replace real candles with synthetic data.
+       * Preserve the last successful chart.
        */
     }
   }
@@ -1039,22 +1152,12 @@
     const plot = $("#v2-chart-plot");
     if (!plot || !candles.length) return;
 
-    plot.querySelector(
-      ".v2-indicator-svg"
-    )?.remove();
+    plot.querySelector(".v2-indicator-svg")?.remove();
+    plot.querySelector(".v2-indicator-legend")?.remove();
 
-    plot.querySelector(
-      ".v2-indicator-legend"
-    )?.remove();
-
-    const ema9 =
-      calculateEMA(candles, 9);
-
-    const ema21 =
-      calculateEMA(candles, 21);
-
-    const vwap =
-      calculateVWAP(candles);
+    const ema9 = calculateEMA(candles, 9);
+    const ema21 = calculateEMA(candles, 21);
+    const vwap = calculateVWAP(candles);
 
     const svg =
       document.createElementNS(
@@ -1062,44 +1165,22 @@
         "svg"
       );
 
-    svg.classList.add(
-      "v2-indicator-svg"
-    );
-
-    svg.setAttribute(
-      "viewBox",
-      "0 0 100 100"
-    );
-
-    svg.setAttribute(
-      "preserveAspectRatio",
-      "none"
-    );
+    svg.classList.add("v2-indicator-svg");
+    svg.setAttribute("viewBox", "0 0 100 100");
+    svg.setAttribute("preserveAspectRatio", "none");
 
     svg.innerHTML = `
       <path
         class="v2-indicator-line v2-ema9"
-        d="${createIndicatorPath(
-          ema9,
-          min,
-          max
-        )}"
+        d="${createIndicatorPath(ema9, min, max)}"
       />
       <path
         class="v2-indicator-line v2-ema21"
-        d="${createIndicatorPath(
-          ema21,
-          min,
-          max
-        )}"
+        d="${createIndicatorPath(ema21, min, max)}"
       />
       <path
         class="v2-indicator-line v2-vwap"
-        d="${createIndicatorPath(
-          vwap,
-          min,
-          max
-        )}"
+        d="${createIndicatorPath(vwap, min, max)}"
       />
     `;
 
@@ -1108,27 +1189,18 @@
     const legend =
       document.createElement("div");
 
-    legend.className =
-      "v2-indicator-legend";
-
-    const lastEMA9 =
-      ema9[ema9.length - 1];
-
-    const lastEMA21 =
-      ema21[ema21.length - 1];
-
-    const lastVWAP =
-      vwap[vwap.length - 1];
+    legend.className = "v2-indicator-legend";
 
     legend.innerHTML = `
-      <div><span class="v2-dot ema9"></span>EMA 9 <b>${formatPrice(lastEMA9)}</b></div>
-      <div><span class="v2-dot ema21"></span>EMA 21 <b>${formatPrice(lastEMA21)}</b></div>
-      <div><span class="v2-dot vwap"></span>VWAP <b>${formatPrice(lastVWAP)}</b></div>
-      <div><span class="v2-dot volume"></span>Volume <b>${formatVolume(candles[candles.length - 1].volume)}</b></div>
+      <div><span class="v2-dot ema9"></span>EMA 9 <b>${formatPrice(ema9.at(-1))}</b></div>
+      <div><span class="v2-dot ema21"></span>EMA 21 <b>${formatPrice(ema21.at(-1))}</b></div>
+      <div><span class="v2-dot vwap"></span>VWAP <b>${formatPrice(vwap.at(-1))}</b></div>
+      <div><span class="v2-dot volume"></span>Volume <b>${formatVolume(candles.at(-1)?.volume)}</b></div>
     `;
 
     plot.appendChild(legend);
   }
+
 
   function formatVolume(value) {
     const n = numberOrNull(value);
@@ -1145,39 +1217,242 @@
     return n.toFixed(0);
   }
 
-  function renderChart() {
-    const chart =
-      $(".chart");
+  function getRangeCount(range) {
+    const counts = {
+      "1D": 78,
+      "5D": 390,
+      "1M": 1638,
+      "3M": 4914,
+      "6M": 9828,
+      "YTD": 99999,
+      "1Y": 99999,
+      "All": 99999
+    };
 
+    return counts[range] ?? 78;
+  }
+
+  function getVisibleCandles() {
+    const all = state.candles;
+
+    if (!all.length) {
+      return [];
+    }
+
+    const count = Math.min(
+      Math.max(10, state.chartVisibleCount),
+      all.length
+    );
+
+    const maxStart =
+      Math.max(0, all.length - count);
+
+    state.chartStart =
+      Math.max(
+        0,
+        Math.min(
+          state.chartStart,
+          maxStart
+        )
+      );
+
+    return all.slice(
+      state.chartStart,
+      state.chartStart + count
+    );
+  }
+
+  function applyRangeToViewport(range, anchorLatest = true) {
+    state.chartRange = range;
+
+    const requested =
+      getRangeCount(range);
+
+    state.chartVisibleCount =
+      Math.min(
+        requested,
+        Math.max(10, state.candles.length)
+      );
+
+    if (anchorLatest) {
+      state.chartStart =
+        Math.max(
+          0,
+          state.candles.length -
+          state.chartVisibleCount
+        );
+    }
+
+    /*
+     * If the feed does not contain enough history for the selected
+     * range, show everything actually available instead of fabricating
+     * historical data.
+     */
+    renderRangeStatus();
+  }
+
+  function renderRangeStatus() {
+    const chart = $(".chart");
     if (!chart) return;
 
-    const plot =
-      $("#v2-chart-plot");
+    let status =
+      $(".v2-range-status", chart);
 
-    const volume =
-      $("#v2-chart-volume");
+    if (!status) {
+      status =
+        document.createElement("div");
+
+      status.className =
+        "v2-range-status";
+
+      chart.appendChild(status);
+    }
+
+    const requested =
+      getRangeCount(state.chartRange);
+
+    const available =
+      state.candles.length;
+
+    if (
+      requested > available &&
+      available > 0
+    ) {
+      status.textContent =
+        `${state.chartRange} • ${available.toLocaleString("en-IN")} candles available`;
+      status.title =
+        "This frontend is showing all candles returned by the existing backend feed. No historical data is fabricated.";
+    } else {
+      status.textContent =
+        `${state.chartRange} • ${state.chartVisibleCount.toLocaleString("en-IN")} candles`;
+      status.title =
+        "Frontend chart range";
+    }
+  }
+
+  function updateChartAxes(candles, min, max) {
+    const chart = $(".chart");
+    if (!chart || !candles.length) return;
+
+    let yAxis =
+      $(".chart-axis-y", chart);
+
+    if (!yAxis) {
+      yAxis =
+        document.createElement("div");
+      yAxis.className = "chart-axis-y";
+      chart.appendChild(yAxis);
+    }
+
+    const span =
+      max - min || 1;
+
+    const yValues =
+      [0, 0.25, 0.5, 0.75, 1]
+        .map(
+          ratio =>
+            max - span * ratio
+        );
+
+    yAxis.innerHTML =
+      yValues
+        .map(
+          value =>
+            `<span>${formatPrice(value)}</span>`
+        )
+        .join("");
+
+    let xAxis =
+      $(".chart-axis-x", chart);
+
+    if (!xAxis) {
+      xAxis =
+        document.createElement("div");
+      xAxis.className = "chart-axis-x";
+      chart.appendChild(xAxis);
+    }
+
+    const indices =
+      [0, 0.25, 0.5, 0.75, 1]
+        .map(
+          ratio =>
+            Math.min(
+              candles.length - 1,
+              Math.round(
+                ratio *
+                (candles.length - 1)
+              )
+            )
+        );
+
+    xAxis.innerHTML =
+      indices
+        .map(
+          index =>
+            `<span>${formatCandleTime(
+              candles[index].ts
+            )}</span>`
+        )
+        .join("");
+  }
+
+  function formatCandleTime(ts) {
+    if (!Number.isFinite(ts)) return "--";
+
+    const ms =
+      ts < 100000000000
+        ? ts * 1000
+        : ts;
+
+    const date =
+      new Date(ms);
+
+    if (Number.isNaN(date.getTime())) {
+      return "--";
+    }
+
+    return date.toLocaleTimeString(
+      "en-IN",
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Asia/Kolkata"
+      }
+    );
+  }
+
+  function renderChart() {
+    const chart = $(".chart");
+    if (!chart) return;
+
+    const plot = $("#v2-chart-plot");
+    const volume = $("#v2-chart-volume");
 
     if (!plot || !volume) return;
 
-    /*
-     * Remove the old fake chart layer if it exists.
-     * Keep the HTML axis, legend, overlay and tooltip.
-     */
     $(".fake-candles", chart)?.remove();
-    $$(".ema", chart).forEach(
-      element => element.remove()
-    );
+
+    $$(".ema", chart)
+      .forEach(
+        element => element.remove()
+      );
 
     $$(".chart-indicator-legend", chart)
-      .forEach(element => element.remove());
+      .forEach(
+        element => element.remove()
+      );
 
     plot.innerHTML = "";
     volume.innerHTML = "";
 
     const candles =
-      state.candles;
+      getVisibleCandles();
 
-    if (!candles.length) return;
+    if (!candles.length) {
+      updateCurrentPrice();
+      return;
+    }
 
     const lows =
       candles.map(
@@ -1189,11 +1464,27 @@
         candle => candle.high
       );
 
-    const min =
+    /*
+     * Add a small visual margin so the candles do not touch the
+     * top/bottom edges when volatility is low.
+     */
+    const rawMin =
       Math.min(...lows);
 
-    const max =
+    const rawMax =
       Math.max(...highs);
+
+    const rawSpan =
+      rawMax - rawMin || 1;
+
+    const padding =
+      rawSpan * 0.08;
+
+    const min =
+      rawMin - padding;
+
+    const max =
+      rawMax + padding;
 
     const span =
       max - min || 1;
@@ -1203,6 +1494,15 @@
       min,
       max
     );
+
+    updateChartAxes(
+      candles,
+      min,
+      max
+    );
+
+    const count =
+      candles.length;
 
     candles.forEach(
       (candle, index) => {
@@ -1215,13 +1515,17 @@
 
         wrapper.className =
           `v2-live-candle ${
-            up ? "v2-up" : "v2-down"
+            up
+              ? "v2-up"
+              : "v2-down"
           }`;
 
         const x =
-          (index /
-            candles.length) *
-          100;
+          count === 1
+            ? 50
+            : (index /
+                (count - 1)) *
+              100;
 
         const highPct =
           ((max - candle.high) /
@@ -1264,17 +1568,26 @@
           "v2-live-body";
 
         body.style.top =
-          `${Math.min(
-            openPct,
-            closePct
-          ) - highPct}%`;
+          `${Math.max(
+            0,
+            Math.min(
+              100,
+              Math.min(
+                openPct,
+                closePct
+              ) - highPct
+            )
+          )}%`;
 
         body.style.height =
           `${Math.max(
             1,
-            Math.abs(
-              openPct -
-              closePct
+            Math.min(
+              100,
+              Math.abs(
+                openPct -
+                closePct
+              )
             )
           )}%`;
 
@@ -1293,16 +1606,527 @@
         bar.className =
           "v2-volume";
 
-        bar.style.height =
-          `${20 + candle.volume * 35}%`;
+        const volumes =
+          candles.map(
+            item =>
+              Number(item.volume) || 0
+          );
 
-        volume.appendChild(
-          bar
+        const maxVolume =
+          Math.max(
+            1,
+            ...volumes
+          );
+
+        bar.style.height =
+          `${Math.max(
+            4,
+            ((Number(candle.volume) || 0) /
+              maxVolume) *
+            100
+          )}%`;
+
+        volume.appendChild(bar);
+      }
+    );
+
+    renderRangeStatus();
+    updateCurrentPrice();
+    updateChartInteractionPosition();
+  }
+
+  function getCandleFromPointer(event) {
+    const plot =
+      $("#v2-chart-plot");
+
+    if (!plot || !state.candles.length) {
+      return null;
+    }
+
+    const rect =
+      plot.getBoundingClientRect();
+
+    const x =
+      Math.max(
+        0,
+        Math.min(
+          rect.width,
+          event.clientX - rect.left
+        )
+      );
+
+    const visible =
+      getVisibleCandles();
+
+    if (!visible.length) return null;
+
+    const ratio =
+      rect.width > 0
+        ? x / rect.width
+        : 0;
+
+    const localIndex =
+      Math.round(
+        ratio *
+        Math.max(
+          0,
+          visible.length - 1
+        )
+      );
+
+    const index =
+      state.chartStart +
+      localIndex;
+
+    const candle =
+      state.candles[
+        Math.max(
+          0,
+          Math.min(
+            state.candles.length - 1,
+            index
+          )
+        )
+      ];
+
+    return {
+      candle,
+      index,
+      localIndex,
+      ratio
+    };
+  }
+
+  function ensureChartInteractionElements() {
+    const chart = $(".chart");
+    if (!chart) return;
+
+    if (!$(".v2-crosshair-x", chart)) {
+      const line =
+        document.createElement("div");
+
+      line.className =
+        "v2-crosshair-x";
+
+      chart.appendChild(line);
+    }
+
+    if (!$(".v2-crosshair-y", chart)) {
+      const line =
+        document.createElement("div");
+
+      line.className =
+        "v2-crosshair-y";
+
+      chart.appendChild(line);
+    }
+
+    if (!$(".v2-interactive-tooltip", chart)) {
+      const tooltip =
+        document.createElement("div");
+
+      tooltip.className =
+        "v2-interactive-tooltip";
+
+      chart.appendChild(tooltip);
+    }
+  }
+
+  function updateChartInteractionPosition(event) {
+    const chart = $(".chart");
+    const plot = $("#v2-chart-plot");
+
+    if (!chart || !plot) return;
+
+    ensureChartInteractionElements();
+
+    const crossX =
+      $(".v2-crosshair-x", chart);
+
+    const crossY =
+      $(".v2-crosshair-y", chart);
+
+    const tooltip =
+      $(".v2-interactive-tooltip", chart);
+
+    if (
+      state.chartPointerIndex === null
+    ) {
+      crossX.style.display = "none";
+      crossY.style.display = "none";
+      tooltip.style.display = "none";
+      return;
+    }
+
+    const visible =
+      getVisibleCandles();
+
+    const localIndex =
+      state.chartPointerIndex -
+      state.chartStart;
+
+    if (
+      localIndex < 0 ||
+      localIndex >= visible.length
+    ) {
+      crossX.style.display = "none";
+      crossY.style.display = "none";
+      tooltip.style.display = "none";
+      return;
+    }
+
+    const plotRect =
+      plot.getBoundingClientRect();
+
+    const chartRect =
+      chart.getBoundingClientRect();
+
+    const ratio =
+      visible.length <= 1
+        ? 0.5
+        : localIndex /
+          (visible.length - 1);
+
+    const x =
+      plotRect.left -
+      chartRect.left +
+      ratio *
+      plotRect.width;
+
+    const candle =
+      state.candles[
+        state.chartPointerIndex
+      ];
+
+    if (!candle) return;
+
+    const visibleValues =
+      visible.flatMap(
+        item => [
+          item.high,
+          item.low
+        ]
+      );
+
+    const min =
+      Math.min(...visibleValues);
+
+    const max =
+      Math.max(...visibleValues);
+
+    const span =
+      max - min || 1;
+
+    const yRatio =
+      (max - candle.close) /
+      span;
+
+    const y =
+      plotRect.top -
+      chartRect.top +
+      yRatio *
+      plotRect.height;
+
+    crossX.style.display = "block";
+    crossY.style.display = "block";
+
+    crossX.style.left =
+      `${x}px`;
+
+    crossY.style.top =
+      `${y}px`;
+
+    const tooltipWidth = 190;
+
+    let tooltipLeft =
+      x + 14;
+
+    if (
+      tooltipLeft + tooltipWidth >
+      chart.clientWidth
+    ) {
+      tooltipLeft =
+        x - tooltipWidth - 14;
+    }
+
+    tooltip.style.left =
+      `${Math.max(
+        6,
+        tooltipLeft
+      )}px`;
+
+    tooltip.style.top =
+      `${Math.max(
+        6,
+        y - 58
+      )}px`;
+
+    tooltip.innerHTML = `
+      <div class="tooltip-time">${formatCandleDateTime(candle.ts)}</div>
+      <div>O <b>${formatPrice(candle.open)}</b></div>
+      <div>H <b>${formatPrice(candle.high)}</b></div>
+      <div>L <b>${formatPrice(candle.low)}</b></div>
+      <div>C <b>${formatPrice(candle.close)}</b></div>
+      <div>V <b>${formatVolume(candle.volume)}</b></div>
+    `;
+
+    tooltip.style.display =
+      "flex";
+  }
+
+  function formatCandleDateTime(ts) {
+    if (!Number.isFinite(ts)) return "--";
+
+    const ms =
+      ts < 100000000000
+        ? ts * 1000
+        : ts;
+
+    const date =
+      new Date(ms);
+
+    if (Number.isNaN(date.getTime())) {
+      return "--";
+    }
+
+    return date.toLocaleString(
+      "en-IN",
+      {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Asia/Kolkata"
+      }
+    );
+  }
+
+  function wireChartInteractions() {
+    const plot = $("#v2-chart-plot");
+    if (!plot || plot.dataset.v2Interactive === "1") {
+      return;
+    }
+
+    plot.dataset.v2Interactive = "1";
+    plot.style.touchAction = "none";
+
+    ensureChartInteractionElements();
+
+    plot.addEventListener(
+      "pointermove",
+      event => {
+        if (state.chartDragging) {
+          const dx =
+            event.clientX -
+            state.chartDragStartX;
+
+          const width =
+            plot.clientWidth || 1;
+
+          const visible =
+            state.chartVisibleCount;
+
+          const candleDelta =
+            Math.round(
+              (-dx / width) *
+              visible
+            );
+
+          const maxStart =
+            Math.max(
+              0,
+              state.candles.length -
+              visible
+            );
+
+          state.chartStart =
+            Math.max(
+              0,
+              Math.min(
+                maxStart,
+                state.chartDragStartIndex +
+                candleDelta
+              )
+            );
+
+          state.chartPointerIndex =
+            null;
+
+          renderChart();
+          return;
+        }
+
+        const hit =
+          getCandleFromPointer(event);
+
+        if (!hit) return;
+
+        state.chartPointerIndex =
+          hit.index;
+
+        updateChartInteractionPosition(
+          event
         );
       }
     );
 
-    updateCurrentPrice();
+    plot.addEventListener(
+      "pointerleave",
+      () => {
+        if (!state.chartDragging) {
+          state.chartPointerIndex = null;
+          updateChartInteractionPosition();
+        }
+      }
+    );
+
+    plot.addEventListener(
+      "pointerdown",
+      event => {
+        if (!state.candles.length) return;
+
+        state.chartDragging = true;
+        state.chartDragStartX =
+          event.clientX;
+        state.chartDragStartIndex =
+          state.chartStart;
+
+        plot.setPointerCapture?.(
+          event.pointerId
+        );
+      }
+    );
+
+    plot.addEventListener(
+      "pointerup",
+      event => {
+        state.chartDragging = false;
+
+        try {
+          plot.releasePointerCapture?.(
+            event.pointerId
+          );
+        } catch {}
+
+        updateChartInteractionPosition();
+      }
+    );
+
+    plot.addEventListener(
+      "pointercancel",
+      () => {
+        state.chartDragging = false;
+      }
+    );
+
+    plot.addEventListener(
+      "wheel",
+      event => {
+        if (!state.candles.length) return;
+
+        event.preventDefault();
+
+        const visible =
+          getVisibleCandles();
+
+        if (!visible.length) return;
+
+        const rect =
+          plot.getBoundingClientRect();
+
+        const ratio =
+          Math.max(
+            0,
+            Math.min(
+              1,
+              (event.clientX -
+                rect.left) /
+              (rect.width || 1)
+            )
+          );
+
+        const anchor =
+          state.chartStart +
+          ratio *
+          (visible.length - 1);
+
+        const factor =
+          event.deltaY < 0
+            ? 0.82
+            : 1.22;
+
+        const newCount =
+          Math.max(
+            20,
+            Math.min(
+              state.candles.length,
+              Math.round(
+                state.chartVisibleCount *
+                factor
+              )
+            )
+          );
+
+        const newStart =
+          Math.round(
+            anchor -
+            ratio *
+            (newCount - 1)
+          );
+
+        state.chartVisibleCount =
+          newCount;
+
+        state.chartStart =
+          Math.max(
+            0,
+            Math.min(
+              Math.max(
+                0,
+                state.candles.length -
+                newCount
+              ),
+              newStart
+            )
+          );
+
+        state.chartRange = "CUSTOM";
+
+        $$(".range-controls button")
+          .forEach(
+            button =>
+              button.classList.remove(
+                "active"
+              )
+          );
+
+        renderChart();
+      },
+      { passive: false }
+    );
+
+    plot.addEventListener(
+      "dblclick",
+      () => {
+        applyRangeToViewport(
+          "1D",
+          true
+        );
+
+        $$(".range-controls button")
+          .forEach(
+            button =>
+              button.classList.toggle(
+                "active",
+                button.textContent.trim() ===
+                "1D"
+              )
+          );
+
+        renderChart();
+      }
+    );
   }
 
   function wireRanges() {
@@ -1311,21 +2135,32 @@
         button.addEventListener(
           "click",
           () => {
+            const range =
+              button.textContent.trim();
+
+            applyRangeToViewport(
+              range,
+              true
+            );
+
             $$(".range-controls button")
               .forEach(
                 item =>
-                  item.classList.remove(
-                    "active"
+                  item.classList.toggle(
+                    "active",
+                    item === button
                   )
               );
 
-            button.classList.add(
-              "active"
-            );
+            state.chartPointerIndex =
+              null;
+
+            renderChart();
           }
         );
       });
   }
+
 
   function safeModal(title, message) {
     const existing =
@@ -1452,6 +2287,7 @@
 
     wireRanges();
     wireButtons();
+    wireChartInteractions();
 
     render();
 
