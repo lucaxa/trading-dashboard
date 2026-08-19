@@ -208,64 +208,144 @@ footer{text-align:center;color:#536980;font-size:7px;padding:14px 0 2px}
 .chart{height:250px}.range-controls button{padding:4px 6px}
 }
 /* =========================================================
-   TradeMind Pro V2 — Sidebar Size / Vertical Balance
-   STEP 4.11
+   TradeMind Pro V2 — Sidebar Responsive Refinement
+   STEP 4.12
    ---------------------------------------------------------
-   Frontend-only change.
-   Backend / brain / Phase 11 / APIs untouched.
+   Frontend UI/UX ONLY.
+   No backend / API / Phase 11 changes.
+   Replace the previous STEP 4.11 sidebar override with this.
    ========================================================= */
 
-/* Let the navigation occupy the available vertical space
-   between the brand and the footer. */
+/* ---------- DESKTOP SIDEBAR ---------- */
+/* Wider sidebar gives labels room to breathe. */
 .sidebar{
-  display:flex;
-  flex-direction:column;
+  width:180px;
+  flex:0 0 180px;
+  padding:18px 10px;
 }
 
+/* Do NOT stretch each navigation item to fill the entire
+   remaining height. Use a controlled, consistent rhythm. */
 .sidebar nav{
   flex:1;
   display:flex;
   flex-direction:column;
-  gap:6px;
-  justify-content:space-between;
+  gap:5px;
+  justify-content:flex-start;
 }
 
-/* Larger, easier-to-hit navigation buttons. */
+/* Larger readable navigation buttons without giant blocks. */
 .sidebar nav a{
-  flex:1 1 0;
-  min-height:52px;
-  padding:8px 10px;
+  flex:0 0 54px;
+  min-height:54px;
+  width:100%;
+  padding:0 12px;
   border-radius:8px;
-  font-size:10px;
-  gap:7px;
-  justify-content:center;
+  gap:10px;
+  justify-content:flex-start;
+  font-size:11px;
+  line-height:1.2;
 }
 
+/* Icons get their own stable column. */
 .sidebar nav a i{
-  width:22px;
+  width:24px;
+  flex:0 0 24px;
+  text-align:center;
   font-size:14px;
 }
 
+/* Navigation labels are intentionally more readable. */
 .sidebar nav a span{
-  font-size:10px;
-  line-height:1.15;
+  font-size:11px;
+  line-height:1.2;
+  white-space:nowrap;
 }
 
-/* Keep the active state visually stronger. */
+/* Active item remains prominent without becoming oversized. */
 .sidebar nav a.active{
-  border-left-width:3px;
-  padding-left:7px;
+  border-left:3px solid var(--blue);
+  padding-left:9px;
 }
 
-/* Give the footer a little breathing room without creating
-   another large empty area. */
+/* Footer stays at the bottom naturally. */
 .sidebar-footer{
-  padding-top:12px;
+  margin-top:auto;
+  padding-top:14px;
 }
 
-/* Keep the compact/mobile navigation rules unchanged. */
+
+/* ---------- LARGE TABLET ---------- */
+@media(max-width:1200px){
+  .sidebar{
+    width:165px;
+    flex-basis:165px;
+  }
+
+  .main{
+    width:calc(100% - 165px);
+  }
+
+  .sidebar nav a{
+    flex-basis:50px;
+    min-height:50px;
+    font-size:10px;
+  }
+
+  .sidebar nav a span{
+    font-size:10px;
+  }
+}
+
+
+/* ---------- TABLET ---------- */
+@media(max-width:900px) and (min-width:761px){
+  .sidebar{
+    width:150px;
+    flex-basis:150px;
+    padding-left:8px;
+    padding-right:8px;
+  }
+
+  .main{
+    width:calc(100% - 150px);
+  }
+
+  .sidebar nav{
+    gap:4px;
+  }
+
+  .sidebar nav a{
+    flex-basis:47px;
+    min-height:47px;
+    padding:0 8px;
+    gap:7px;
+    font-size:9px;
+  }
+
+  .sidebar nav a i{
+    width:20px;
+    flex-basis:20px;
+    font-size:12px;
+  }
+
+  .sidebar nav a span{
+    font-size:9px;
+  }
+
+  .sidebar nav a.active{
+    padding-left:5px;
+  }
+}
+
+
+/* ---------- MOBILE ---------- */
 @media(max-width:760px){
   .sidebar{
     display:none;
+  }
+
+  .main{
+    width:100%;
   }
 }
