@@ -42,14 +42,68 @@
 <div class="content-grid">
 <section class="panel chart-panel">
   <div class="panel-title"><h2>Live Chart — NIFTY 50 <small>5m</small></h2><div class="tools">Indicators　⛶　▣</div></div>
-  <div class="chart">
+  <div class="chart" id="v2-chart">
     <div class="grid"></div>
-    <div class="fake-candles"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-    <div class="ema ema9"></div><div class="ema ema21"></div><div class="ema vwap"></div>
-    <div class="chart-price">--</div>
-    <div class="indicators"><span>EMA 9　<b>--</b></span><span>EMA 21　<b>--</b></span><span>VWAP　<b>--</b></span><span>Volume　<b>--</b></span></div>
+
+    <div class="chart-axis-y">
+      <span>24,500</span><span>24,450</span><span>24,400</span>
+      <span>24,350</span><span>24,300</span><span>24,250</span>
+      <span>24,200</span>
+    </div>
+
+    <div class="chart-plot" id="v2-chart-plot"></div>
+
+    <div class="chart-overlay">
+      <div class="chart-crosshair" id="v2-crosshair">
+        <div class="crosshair-v"></div>
+        <div class="crosshair-h"></div>
+        <div class="crosshair-price">24,366</div>
+        <div class="crosshair-time">10:25</div>
+      </div>
+      <div class="current-price-line"></div>
+      <div class="chart-price" id="v2-current-price">24,366.45</div>
+    </div>
+
+    <div class="chart-indicator-legend">
+      <span class="legend-ema9">EMA 9 <b>24,349.80</b></span>
+      <span class="legend-ema21">EMA 21 <b>24,335.10</b></span>
+      <span class="legend-vwap">VWAP <b>24,312.65</b></span>
+    </div>
+
+    <div class="chart-volume" id="v2-chart-volume"></div>
+
+    <div class="chart-axis-x">
+      <span>09:15</span><span>10:00</span><span>10:45</span>
+      <span>11:30</span><span>12:15</span><span>13:00</span>
+      <span>13:45</span><span>14:30</span><span>15:15</span>
+    </div>
+
+    <div class="chart-tooltip" id="v2-chart-tooltip">
+      <b>10:25</b>
+      <span>O 24,351.20</span>
+      <span>H 24,371.80</span>
+      <span>L 24,346.10</span>
+      <span>C 24,366.45</span>
+      <span>V 1.25M</span>
+    </div>
   </div>
-  <div class="chart-footer"><span>1D　5D　1M　3M　6M　YTD　1Y　All</span><span>Waiting for data</span></div>
+  <div class="chart-footer">
+    <div class="range-controls">
+      <button data-range="1D" class="active">1D</button>
+      <button data-range="5D">5D</button>
+      <button data-range="1M">1M</button>
+      <button data-range="3M">3M</button>
+      <button data-range="6M">6M</button>
+      <button data-range="YTD">YTD</button>
+      <button data-range="1Y">1Y</button>
+      <button data-range="All">All</button>
+    </div>
+    <div class="chart-meta">
+      <span id="v2-chart-time">10:25:00 IST</span>
+      <span>5m</span>
+      <span>Auto</span>
+    </div>
+  </div>
 </section>
 
 <section class="panel strategy">
