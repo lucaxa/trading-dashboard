@@ -20,7 +20,16 @@
     indicatorsVisible: true,
     range: "1D",
     demoCandles: [],
-    crosshairVisible: false
+    crosshairVisible: false,
+
+    // STEP 4 — read-only live quote state.
+    liveQuotes: {
+      nifty: null,
+      banknifty: null
+    },
+    quoteRefreshInFlight: false,
+    quoteRefreshStarted: false,
+    lastQuoteUpdate: null
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -341,6 +350,342 @@
     $(".backtest a")?.addEventListener("click", e => {e.preventDefault();quick[0]?.click()});
   }
 
+
+  /* =======================================================
+     STEP 4 — READ-ONLY LIVE MARKET DATA
+     -------------------------------------------------------
+     Reuses the EXISTING /api/quotes endpoint.
+
+     SAFETY:
+     - GET only
+     - No POST/PUT/DELETE
+     - No strategy calls
+     - No Phase 11 writes
+     - No broker/Dhan calls
+     - No modification to the existing backend
+     ======================================================= */
+
+  function numberOrNull(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function extractQuoteArray(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object") return [];
+
+    if (Array.isArray(payload.data)) return payload.data;
+    if (Array.isArray(payload.quotes)) return payload.quotes;
+    if (Array.isArray(payload.results)) return payload.results;
+    if (Array.isArray(payload.items)) return payload.items;
+
+    return Object.values(payload).filter(
+      value =>
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+    );
+  }
+
+  function extractQuotePrice(quote) {
+    if (typeof quote === "number") {
+      return numberOrNull(quote);
+    }
+
+    if (!quote || typeof quote !== "object") {
+      return null;
+    }
+
+    const fields = [
+      "ltp",
+      "last_price",
+      "lastPrice",
+      "price",
+      "close",
+      "lp",
+      "last_traded_price",
+      "lastTradedPrice"
+    ];
+
+    for (const field of fields) {
+      const value = numberOrNull(quote[field]);
+
+      if (value !== null && value > 0) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  function findQuote(quotes, instrument) {
+    const wanted = instrument.toLowerCase();
+
+    return quotes.find(quote => {
+      if (!quote || typeof quote !== "object") {
+        return false;
+      }
+
+      const text = JSON.stringify(quote).toLowerCase();
+
+      if (wanted === "nifty") {
+        return (
+          text.includes("40000001") ||
+          (
+            text.includes("nifty") &&
+            !text.includes("banknifty")
+          )
+        );
+      }
+
+      return (
+        text.includes("40000003") ||
+        text.includes("banknifty")
+      );
+    }) || null;
+  }
+
+  function formatLivePrice(value) {
+    const n = numberOrNull(value);
+
+    if (n === null) return "--";
+
+    return n.toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  function updateIndexCard(card, price) {
+    if (!card) return;
+
+    const priceElement = card.querySelector("strong");
+
+    if (priceElement) {
+      priceElement.textContent = formatLivePrice(price);
+    }
+
+    const changeElement = card.querySelector("em");
+
+    if (changeElement) {
+      changeElement.textContent =
+        price === null
+          ? "Waiting for live data"
+          : "LIVE • read-only quote";
+      changeElement.style.color =
+        price === null ? "" : "#16e782";
+    }
+  }
+
+  function updateLivePriceDisplay() {
+    const cards = $$(".market-strip .index-card");
+
+    updateIndexCard(
+      cards[0],
+      state.liveQuotes.nifty?.price ?? null
+    );
+
+    updateIndexCard(
+      cards[1],
+      state.liveQuotes.banknifty?.price ?? null
+    );
+
+    const current =
+      state.liveQuotes.nifty?.price ?? null;
+
+    if (current !== null) {
+      const chartPrice = $("#v2-current-price");
+
+      if (chartPrice) {
+        chartPrice.textContent =
+          formatLivePrice(current);
+      }
+
+      const crosshairPrice =
+        $(".crosshair-price");
+
+      if (crosshairPrice) {
+        crosshairPrice.textContent =
+          current.toFixed(0);
+      }
+    }
+
+    const lastUpdate =
+      $("#v2-chart-time");
+
+    if (lastUpdate && state.lastQuoteUpdate) {
+      lastUpdate.textContent =
+        `${state.lastQuoteUpdate.toLocaleTimeString("en-IN", {
+          hour12: false,
+          timeZone: "Asia/Kolkata"
+        })} IST`;
+    }
+
+    const status =
+      $(".market-status strong");
+
+    if (status) {
+      status.textContent =
+        state.lastQuoteUpdate
+          ? state.lastQuoteUpdate.toLocaleTimeString(
+              "en-IN",
+              {
+                hour12: false,
+                timeZone: "Asia/Kolkata"
+              }
+            )
+          : "--:--:--";
+    }
+
+    const statusSmall =
+      $(".market-status small");
+
+    if (statusSmall) {
+      statusSmall.textContent =
+        state.lastQuoteUpdate
+          ? "LIVE • INDstocks"
+          : "Waiting for quote";
+    }
+  }
+
+  async function refreshLiveQuotes() {
+    if (state.quoteRefreshInFlight) {
+      return;
+    }
+
+    state.quoteRefreshInFlight = true;
+
+    try {
+      const response = await fetch(
+        "/api/quotes",
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Accept": "application/json",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache"
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Quote API HTTP ${response.status}`
+        );
+      }
+
+      const payload =
+        await response.json();
+
+      if (payload?.success === false) {
+        throw new Error(
+          typeof payload.error === "string"
+            ? payload.error
+            : "Quote API returned success:false"
+        );
+      }
+
+      const quotes =
+        extractQuoteArray(
+          payload?.data ?? payload
+        );
+
+      const nifty =
+        findQuote(quotes, "nifty");
+
+      const banknifty =
+        findQuote(quotes, "banknifty");
+
+      const niftyPrice =
+        extractQuotePrice(nifty);
+
+      const bankPrice =
+        extractQuotePrice(banknifty);
+
+      if (niftyPrice !== null) {
+        state.liveQuotes.nifty = {
+          price: niftyPrice
+        };
+      }
+
+      if (bankPrice !== null) {
+        state.liveQuotes.banknifty = {
+          price: bankPrice
+        };
+      }
+
+      if (
+        niftyPrice !== null ||
+        bankPrice !== null
+      ) {
+        state.lastQuoteUpdate = new Date();
+        updateLivePriceDisplay();
+
+        document.documentElement.dataset.v2LiveQuotes =
+          "connected";
+
+        const footer =
+          $("footer");
+
+        if (footer) {
+          footer.textContent =
+            "V2 prototype — live quotes connected read-only. Phase 11, backend, strategy, learning engine and broker controls remain untouched.";
+        }
+      }
+
+      console.info(
+        "[TradeMind V2] Read-only quotes updated:",
+        {
+          nifty: niftyPrice,
+          banknifty: bankPrice
+        }
+      );
+
+    } catch (error) {
+      console.error(
+        "[TradeMind V2] Read-only quote refresh failed:",
+        error
+      );
+
+      document.documentElement.dataset.v2LiveQuotes =
+        "error";
+
+      const footer =
+        $("footer");
+
+      if (footer) {
+        footer.textContent =
+          "V2 prototype — live quote connection unavailable. Phase 11, backend, strategy, learning engine and broker controls remain untouched.";
+      }
+
+    } finally {
+      state.quoteRefreshInFlight = false;
+    }
+  }
+
+  function startLiveQuoteRefresh() {
+    if (state.quoteRefreshStarted) {
+      return;
+    }
+
+    state.quoteRefreshStarted = true;
+
+    // First read-only quote request.
+    refreshLiveQuotes();
+
+    // Match the existing project's quote cadence:
+    // 5 seconds, with overlap protection.
+    window.setInterval(
+      refreshLiveQuotes,
+      5000
+    );
+
+    console.info(
+      "[TradeMind V2] LIVE QUOTES ACTIVE — read-only / 5s"
+    );
+  }
+
   function init() {
     ensureStyles();
     state.demoCandles = generateCandles();
@@ -348,8 +693,20 @@
     wireRanges();
     wireNavigation();
     wireButtons();
-    document.documentElement.dataset.trademindV2 = "step3-chart-demo";
-    console.info("TradeMind Pro V2 Step 3: chart UI active. Demo data only; no API/backend/broker connection.");
+
+    document.documentElement.dataset.trademindV2 =
+      "step4-read-only-live-quotes";
+
+    /*
+     * STEP 4:
+     * Connect only to the existing GET /api/quotes
+     * endpoint. No other backend route is touched.
+     */
+    startLiveQuoteRefresh();
+
+    console.info(
+      "TradeMind Pro V2 Step 4: read-only live quotes active. No write/API strategy/broker connection."
+    );
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded",init);
