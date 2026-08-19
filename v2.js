@@ -75,12 +75,32 @@
     if (Array.isArray(data.results)) return data.results;
     if (Array.isArray(data.items)) return data.items;
 
-    return Object.values(data).filter(
-      value =>
-        value &&
-        typeof value === "object" &&
-        !Array.isArray(value)
-    );
+    /*
+     * INDstocks returns full quotes as an object keyed by
+     * the instrument code, for example:
+     *
+     * {
+     *   "NIDX_40000001": { live_price: ... },
+     *   "NIDX_40000003": { live_price: ... }
+     * }
+     *
+     * Object.values() alone loses that instrument key.
+     * Preserve it so findInstrument() can identify NIFTY
+     * and BANKNIFTY reliably.
+     */
+    return Object.entries(data)
+      .filter(
+        ([, value]) =>
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value)
+      )
+      .map(
+        ([instrumentKey, value]) => ({
+          ...value,
+          __instrumentKey: instrumentKey
+        })
+      );
   }
 
   function extractPrice(quote) {
@@ -134,6 +154,7 @@
 
       if (wanted === "nifty") {
         return (
+          text.includes("nidx_40000001") ||
           text.includes("40000001") ||
           (
             text.includes("nifty") &&
@@ -144,6 +165,7 @@
 
       if (wanted === "banknifty") {
         return (
+          text.includes("nidx_40000003") ||
           text.includes("40000003") ||
           text.includes("banknifty")
         );
