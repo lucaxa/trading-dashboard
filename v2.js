@@ -793,16 +793,30 @@
   }
 
   function renderChart() {
+    const panel =
+      $(".chart-placeholder");
+
+    if (!panel) return;
+
+    /*
+     * IMPORTANT:
+     * The original v2.html contains prototype chart text inside
+     * .chart-placeholder. Clear that static content completely
+     * before building the live V2 chart so labels/data cannot
+     * appear as raw text on top of the canvas area.
+     */
+    panel.innerHTML = "";
+
     const plot =
-      $("#v2-chart-plot");
+      document.createElement("div");
+    plot.id = "v2-chart-plot";
 
     const volume =
-      $("#v2-chart-volume");
+      document.createElement("div");
+    volume.id = "v2-chart-volume";
 
-    if (!plot || !volume) return;
-
-    plot.innerHTML = "";
-    volume.innerHTML = "";
+    panel.appendChild(plot);
+    panel.appendChild(volume);
 
     const candles =
       state.demoCandles;
