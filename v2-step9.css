@@ -1,0 +1,379 @@
+/*
+===========================================================
+ TradeMind Pro — V2
+ STEP 9 — FINAL UI COMPOSITION POLISH
+ ----------------------------------------------------------
+ FRONTEND ONLY.
+ No backend, API, strategy, evidence, learning or audit logic.
+ Existing classes/data bindings are intentionally preserved.
+===========================================================
+*/
+
+/* ---------- DESKTOP: MORE LIKE THE FINAL VISION ---------- */
+
+@media(min-width:1101px){
+  .topbar{
+    min-height:70px;
+    margin-bottom:14px;
+  }
+
+  .market-strip{
+    gap:52px;
+  }
+
+  .kpi-grid{
+    margin-bottom:14px;
+  }
+
+  .kpi-card{
+    min-height:86px;
+  }
+
+  .dashboard-grid{
+    margin-bottom:18px;
+  }
+
+  .equity-panel,
+  .allocation-panel{
+    min-height:225px;
+  }
+
+  .recent-panel,
+  .market-overview-panel{
+    min-height:132px;
+  }
+
+  .section-heading{
+    margin-top:12px;
+  }
+
+  .content-grid{
+    margin-bottom:14px;
+  }
+
+  .chart-panel .panel-title{
+    min-height:28px;
+  }
+
+  .chart{
+    height:350px;
+  }
+
+  .strategy{
+    min-height:416px;
+  }
+
+  .three-panel-grid .panel{
+    min-height:210px;
+  }
+
+  .legacy-section{
+    margin-top:4px;
+  }
+}
+
+/* ---------- TOPBAR ---------- */
+
+.mobile-brand{
+  align-items:center;
+  gap:8px;
+}
+
+.mobile-brand .brand-mark{
+  flex:0 0 auto;
+}
+
+.settings{
+  transition:
+    border-color .15s ease,
+    background .15s ease,
+    transform .15s ease;
+}
+
+.settings:hover{
+  border-color:var(--blue);
+  background:#0e2133;
+  transform:translateY(-1px);
+}
+
+/* ---------- CARD INTERACTION — VISUAL ONLY ---------- */
+
+.panel,
+.kpi-card{
+  transition:
+    border-color .15s ease,
+    box-shadow .15s ease;
+}
+
+.panel:hover,
+.kpi-card:hover{
+  border-color:#24445f;
+}
+
+.panel-actions button,
+.range-controls button,
+.primary{
+  transition:
+    background .15s ease,
+    border-color .15s ease,
+    color .15s ease,
+    transform .12s ease;
+}
+
+.panel-actions button:hover,
+.range-controls button:hover{
+  border-color:var(--blue);
+  color:#35aaff;
+  background:#0b2439;
+}
+
+.primary:hover{
+  transform:translateY(-1px);
+}
+
+/* ---------- CHART TOOLBAR ---------- */
+
+.chart-panel .panel-title .tools{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:#dbe6f2;
+  font-size:12px;
+  white-space:nowrap;
+}
+
+.chart-panel .panel-title .tools::first-letter{
+  color:#ffffff;
+}
+
+.chart-panel .panel-title small{
+  color:#6e8ba7;
+  font-size:9px;
+}
+
+/* ---------- LIVE SIGNAL HIERARCHY ---------- */
+
+.strategy .panel-title{
+  margin-bottom:4px;
+}
+
+.strategy .signal{
+  letter-spacing:.01em;
+}
+
+.strategy .levels{
+  padding:0 4px;
+}
+
+.strategy .levels div{
+  min-height:22px;
+  align-items:center;
+}
+
+.strategy .levels b{
+  color:#dce7f2;
+}
+
+.strategy .primary{
+  margin-top:34px;
+}
+
+/* ---------- EMPTY STATES ---------- */
+
+.placeholder-message{
+  padding:12px;
+  text-align:center;
+}
+
+.placeholder-message span{
+  max-width:280px;
+  line-height:1.5;
+}
+
+.allocation-empty p{
+  max-width:220px;
+  margin-left:auto;
+  margin-right:auto;
+  line-height:1.5;
+}
+
+/* ---------- MOBILE TOPBAR ---------- */
+
+@media(max-width:760px){
+  .topbar{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto auto;
+    grid-template-areas:
+      "brand mode settings"
+      "markets markets markets"
+      "status status status";
+    align-items:center;
+    gap:8px;
+    min-height:0;
+  }
+
+  .mobile-brand{
+    grid-area:brand;
+    display:flex;
+  }
+
+  .mobile-brand .brand-mark{
+    width:34px;
+    height:34px;
+    margin:0;
+    border-radius:9px;
+    font-size:11px;
+  }
+
+  .mobile-brand strong{
+    display:block;
+    font-size:11px;
+    white-space:nowrap;
+  }
+
+  .mode{
+    grid-area:mode;
+  }
+
+  .settings{
+    grid-area:settings;
+    width:36px;
+    height:36px;
+  }
+
+  .market-strip{
+    grid-area:markets;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    width:100%;
+    gap:8px;
+    margin-top:2px;
+  }
+
+  .index-card{
+    min-width:0;
+    padding:8px 9px;
+    border:1px solid #142a40;
+    border-radius:8px;
+    background:#07111c;
+  }
+
+  .market-status{
+    grid-area:status;
+    width:100%;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:5px 2px 0;
+  }
+
+  .market-status b,
+  .market-status span,
+  .market-status strong,
+  .market-status small{
+    display:block;
+  }
+
+  .market-status strong{
+    margin-left:auto;
+  }
+
+  .market-status small{
+    order:5;
+  }
+
+  .kpi-grid{
+    margin-top:3px;
+  }
+}
+
+/* ---------- SMALL MOBILE ---------- */
+
+@media(max-width:480px){
+  .mobile-brand strong{
+    font-size:10px;
+  }
+
+  .index-card{
+    padding:7px 8px;
+  }
+
+  .index-card span{
+    font-size:8px;
+  }
+
+  .index-card strong{
+    font-size:17px;
+  }
+
+  .market-status{
+    font-size:7px;
+  }
+
+  .kpi-card{
+    padding:11px;
+  }
+
+  .kpi-card strong{
+    font-size:17px;
+  }
+
+  .panel-title .tools{
+    font-size:10px;
+  }
+
+  .chart{
+    height:290px;
+  }
+
+  .strategy{
+    min-height:350px;
+  }
+
+  .strategy .signal{
+    margin-top:32px;
+    margin-bottom:24px;
+    font-size:26px;
+  }
+
+  .strategy .primary{
+    margin-top:26px;
+  }
+}
+
+/* ---------- ACCESSIBLE / TOUCH-FRIENDLY CONTROLS ---------- */
+
+@media(pointer:coarse){
+  .range-controls button{
+    min-height:34px;
+  }
+
+  .panel-actions button{
+    min-height:34px;
+  }
+
+  .settings{
+    min-width:38px;
+    min-height:38px;
+  }
+}
+
+/* ---------- DO NOT ALLOW PRESENTATION LAYERS TO CREATE PAGE WIDTH ---------- */
+
+html,
+body,
+.app-shell,
+.main,
+.panel,
+.chart,
+.chart-plot{
+  max-width:100%;
+}
+
+.main{
+  overflow-x:clip;
+}
+
+.chart{
+  contain:layout paint;
+}
