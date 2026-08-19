@@ -207,3 +207,65 @@ footer{text-align:center;color:#536980;font-size:7px;padding:14px 0 2px}
 .kpi-grid{grid-template-columns:1fr}.market-strip{grid-template-columns:1fr}
 .chart{height:250px}.range-controls button{padding:4px 6px}
 }
+/* =========================================================
+   TradeMind Pro V2 — Sidebar Size / Vertical Balance
+   STEP 4.11
+   ---------------------------------------------------------
+   Frontend-only change.
+   Backend / brain / Phase 11 / APIs untouched.
+   ========================================================= */
+
+/* Let the navigation occupy the available vertical space
+   between the brand and the footer. */
+.sidebar{
+  display:flex;
+  flex-direction:column;
+}
+
+.sidebar nav{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  justify-content:space-between;
+}
+
+/* Larger, easier-to-hit navigation buttons. */
+.sidebar nav a{
+  flex:1 1 0;
+  min-height:52px;
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:10px;
+  gap:7px;
+  justify-content:center;
+}
+
+.sidebar nav a i{
+  width:22px;
+  font-size:14px;
+}
+
+.sidebar nav a span{
+  font-size:10px;
+  line-height:1.15;
+}
+
+/* Keep the active state visually stronger. */
+.sidebar nav a.active{
+  border-left-width:3px;
+  padding-left:7px;
+}
+
+/* Give the footer a little breathing room without creating
+   another large empty area. */
+.sidebar-footer{
+  padding-top:12px;
+}
+
+/* Keep the compact/mobile navigation rules unchanged. */
+@media(max-width:760px){
+  .sidebar{
+    display:none;
+  }
+}
