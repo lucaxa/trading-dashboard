@@ -1,0 +1,428 @@
+/*
+===========================================================
+ TradeMind Pro — V2 UI/UX Polish Layer
+ STEP 8 — FRONTEND UI/UX ONLY
+ ----------------------------------------------------------
+ Purpose:
+ - Refine visual hierarchy toward the approved final UI vision.
+ - Improve desktop proportions and mobile readability.
+ - Make typography, spacing and controls feel more intentional.
+ - Preserve existing chart/data bindings and navigation.
+ - No API calls.
+ - No backend / Phase 11 / strategy / learning changes.
+===========================================================
+*/
+
+/* ---------- GLOBAL POLISH ---------- */
+
+:root{
+  --v2-radius:10px;
+  --v2-gap:12px;
+}
+
+.main{
+  padding-left:18px;
+  padding-right:18px;
+}
+
+.panel,
+.kpi-card{
+  border-radius:var(--v2-radius);
+}
+
+.panel{
+  padding:13px;
+}
+
+.panel-title h1,
+.panel-title h2{
+  letter-spacing:-.01em;
+}
+
+.panel-title>b{
+  letter-spacing:.03em;
+}
+
+/* ---------- DESKTOP SIDEBAR ---------- */
+
+@media(min-width:1101px){
+  .sidebar{
+    width:172px;
+    flex-basis:172px;
+    padding-left:12px;
+    padding-right:12px;
+  }
+
+  .sidebar nav{
+    gap:6px;
+  }
+
+  .sidebar nav a{
+    min-height:48px;
+    padding:0 12px;
+    gap:10px;
+    font-size:10px;
+  }
+
+  .sidebar nav a i{
+    width:20px;
+    font-size:13px;
+  }
+
+  .sidebar nav a span{
+    font-size:10px;
+  }
+
+  .brand strong{
+    font-size:13px;
+  }
+
+  .brand span{
+    font-size:8px;
+  }
+}
+
+/* ---------- KPI HIERARCHY ---------- */
+
+.kpi-grid{
+  gap:10px;
+}
+
+.kpi-card{
+  min-height:82px;
+  padding:12px;
+}
+
+.kpi-card strong{
+  font-size:18px;
+}
+
+.kpi-card em{
+  font-size:8px;
+}
+
+/* ---------- DASHBOARD GRID ---------- */
+
+.dashboard-grid{
+  gap:12px;
+}
+
+.content-grid,
+.three-panel-grid,
+.bottom-grid{
+  gap:12px;
+}
+
+.equity-panel{
+  min-height:220px;
+}
+
+.equity-placeholder{
+  height:164px;
+}
+
+.allocation-panel{
+  min-height:220px;
+}
+
+/* ---------- LIVE MARKET ---------- */
+
+.chart-panel{
+  min-width:0;
+}
+
+.chart{
+  height:clamp(280px,32vw,360px);
+}
+
+.strategy{
+  min-height:clamp(350px,32vw,390px);
+}
+
+/* ---------- BUTTONS / CONTROLS ---------- */
+
+.range-controls button{
+  min-width:40px;
+  min-height:28px;
+}
+
+.panel-actions button,
+.settings{
+  min-height:34px;
+}
+
+.primary{
+  min-height:40px;
+}
+
+/* ---------- TABLE / EMPTY STATES ---------- */
+
+.signal-head{
+  min-height:24px;
+  align-items:center;
+}
+
+.signal-empty{
+  min-height:86px;
+  display:grid;
+  place-items:center;
+}
+
+/* ---------- MOBILE ---------- */
+
+@media(max-width:900px){
+  .main{
+    padding:12px;
+  }
+
+  .topbar{
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .market-strip{
+    gap:18px;
+  }
+
+  .index-card{
+    min-width:130px;
+  }
+
+  .index-card strong{
+    font-size:20px;
+  }
+
+  .dashboard-grid{
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "equity"
+      "allocation"
+      "recent"
+      "market";
+  }
+
+  .content-grid{
+    grid-template-columns:1fr;
+  }
+
+  .three-panel-grid{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .bottom-grid{
+    grid-template-columns:1fr 1fr;
+  }
+}
+
+@media(max-width:760px){
+  .main{
+    width:100%;
+    padding:10px;
+  }
+
+  .topbar{
+    min-height:56px;
+    margin-bottom:10px;
+  }
+
+  .market-strip{
+    order:3;
+    width:100%;
+    flex:0 0 100%;
+    justify-content:space-between;
+  }
+
+  .market-status{
+    margin-left:auto;
+  }
+
+  .mode{
+    padding:7px 9px;
+  }
+
+  .kpi-grid{
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+  }
+
+  .kpi-card{
+    min-height:76px;
+  }
+
+  .dashboard-grid,
+  .content-grid,
+  .three-panel-grid,
+  .bottom-grid{
+    grid-template-columns:1fr;
+  }
+
+  .section-heading{
+    align-items:flex-start;
+    gap:8px;
+    flex-direction:column;
+  }
+
+  .section-heading small{
+    font-size:7px;
+  }
+
+  .panel{
+    padding:11px;
+  }
+
+  .panel-title{
+    margin-bottom:9px;
+  }
+
+  .chart{
+    height:300px;
+  }
+
+  .chart-axis-y{
+    width:40px;
+    font-size:6px;
+  }
+
+  .chart-plot,
+  .chart-volume{
+    left:45px;
+  }
+
+  .chart-axis-x{
+    left:48px;
+    right:48px;
+    font-size:6px;
+  }
+
+  .current-price-line{
+    left:45px;
+  }
+
+  .crosshair-h{
+    left:45px;
+  }
+
+  .chart-indicator-legend{
+    left:51px;
+  }
+
+  .range-controls{
+    width:100%;
+  }
+
+  .range-controls button{
+    flex:1 1 0;
+    min-width:0;
+  }
+
+  .chart-meta{
+    width:100%;
+    justify-content:flex-end;
+  }
+
+  .signal{
+    margin:38px 0 25px;
+  }
+}
+
+@media(max-width:480px){
+  .main{
+    padding:8px;
+  }
+
+  .market-strip{
+    gap:8px;
+  }
+
+  .index-card{
+    min-width:0;
+    flex:1;
+  }
+
+  .index-card span{
+    font-size:9px;
+  }
+
+  .index-card strong{
+    font-size:18px;
+  }
+
+  .index-card em{
+    font-size:7px;
+  }
+
+  .market-status{
+    font-size:8px;
+  }
+
+  .mode{
+    padding:6px 8px;
+  }
+
+  .mode b{
+    font-size:8px;
+  }
+
+  .mode small{
+    font-size:6px;
+  }
+
+  .kpi-grid{
+    grid-template-columns:1fr;
+  }
+
+  .kpi-card{
+    min-height:70px;
+  }
+
+  .chart{
+    height:280px;
+  }
+
+  .chart-tooltip{
+    min-width:130px;
+    max-width:calc(100% - 12px);
+  }
+
+  .panel-title h1,
+  .panel-title h2{
+    font-size:12px;
+  }
+
+  .performance-list,
+  .stats{
+    grid-template-columns:1fr;
+  }
+
+  .health-grid{
+    grid-template-columns:1fr;
+    gap:12px;
+  }
+
+  .evidence{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
+
+/* ---------- VERY SMALL DEVICES ---------- */
+
+@media(max-width:360px){
+  .mobile-brand strong{
+    display:none;
+  }
+
+  .chart{
+    height:255px;
+  }
+
+  .chart-axis-x span:nth-child(even){
+    display:none;
+  }
+
+  .range-controls button{
+    font-size:6px;
+    padding-left:3px;
+    padding-right:3px;
+  }
+}
