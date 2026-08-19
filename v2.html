@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="theme-color" content="#070d16">
+<title>TradeMind Pro — V2</title>
+<link rel="stylesheet" href="./v2.css">
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+  <div class="brand"><div class="brand-mark">TM</div><strong>TradeMind Pro</strong><span>Indian Intraday Trading</span></div>
+  <nav>
+    <a class="active">⌂<span>Dashboard</span></a><a>◫<span>Market</span></a><a>⌁<span>Chart</span></a><a>◈<span>Strategy</span></a><a>◌<span>Backtest</span></a><a>▣<span>Trades</span></a><a>◉<span>Learning</span></a><a>◍<span>Insights</span></a><a>▤<span>Reports</span></a><a>⚙<span>Settings</span></a>
+  </nav>
+  <div class="sidebar-footer"><b>V2</b><span>PROTOTYPE • READ ONLY</span></div>
+</aside>
+
+<main class="main">
+<header class="topbar">
+  <div class="mobile-brand"><div class="brand-mark">TM</div><strong>TradeMind Pro</strong></div>
+  <div class="market-strip">
+    <div class="index-card"><span>NIFTY 50</span><strong>--</strong><em>Waiting for live data</em></div>
+    <div class="index-card"><span>BANKNIFTY</span><strong>--</strong><em>Waiting for live data</em></div>
+  </div>
+  <div class="market-status"><b>● LIVE</b><span>Market Status</span><strong>--:--:--</strong><small>IST</small></div>
+  <div class="mode"><b>PAPER MODE</b><small>No Real Orders</small></div>
+  <button class="settings">⚙</button>
+</header>
+
+<section class="panel overview">
+  <div class="panel-title"><h1>Market Overview</h1><b>LIVE</b></div>
+  <div class="overview-grid">
+    <article><span>Trend</span><strong>--</strong></article>
+    <article><span>Momentum</span><strong>--</strong></article>
+    <article><span>Volatility / VWAP</span><strong>--</strong></article>
+    <article><span>Signal</span><strong>WAIT</strong></article>
+  </div>
+</section>
+
+<div class="content-grid">
+<section class="panel chart-panel">
+  <div class="panel-title"><h2>Live Chart — NIFTY 50 <small>5m</small></h2><div class="tools">Indicators　⛶　▣</div></div>
+  <div class="chart">
+    <div class="grid"></div>
+    <div class="fake-candles"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="ema ema9"></div><div class="ema ema21"></div><div class="ema vwap"></div>
+    <div class="chart-price">--</div>
+    <div class="indicators"><span>EMA 9　<b>--</b></span><span>EMA 21　<b>--</b></span><span>VWAP　<b>--</b></span><span>Volume　<b>--</b></span></div>
+  </div>
+  <div class="chart-footer"><span>1D　5D　1M　3M　6M　YTD　1Y　All</span><span>Waiting for data</span></div>
+</section>
+
+<section class="panel strategy">
+  <div class="panel-title"><h2>Strategy Signal</h2><b>LIVE</b></div>
+  <div class="signal">WAIT</div>
+  <div class="levels">
+    <div><span>Entry</span><b>--</b></div><div><span>Stop Loss</span><b>--</b></div>
+    <div><span>Target</span><b>--</b></div><div><span>Risk / Reward</span><b>--</b></div>
+  </div>
+  <button class="primary">PAPER TRADE</button>
+</section>
+</div>
+
+<div class="content-grid">
+<section class="panel">
+  <div class="panel-title"><h2>V10 Strategy Diagnostics</h2><b>READ ONLY</b></div>
+  <div class="metrics">
+    <article><span>EMA 9</span><b>--</b></article><article><span>EMA 21</span><b>--</b></article>
+    <article><span>RSI 14</span><b>--</b></article><article><span>VWAP</span><b>--</b></article>
+    <article><span>ATR 14</span><b>--</b></article><article><span>Volume</span><b>--</b></article>
+    <article><span>Swing High</span><b>--</b></article><article><span>Swing Low</span><b>--</b></article>
+    <article><span>Structure</span><b>--</b></article><article><span>Market Regime</span><b>--</b></article>
+    <article><span>Chop Score</span><b>--</b></article><article><span>Pattern</span><b>--</b></article>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-title"><h2>Backtest Summary <small>V10.25</small></h2><span class="pill">PAPER MODE</span></div>
+  <div class="donut"><b>--</b><span>Total Trades</span></div>
+  <div class="stats"><div>Win Rate <b>--</b></div><div>Profit Factor <b>--</b></div><div>Total Return <b>--</b></div><div>Max Drawdown <b>--</b></div></div>
+  <a>View Detailed Backtest →</a>
+</section>
+</div>
+
+<section class="panel health">
+<div class="panel-title"><h2>Market Status &amp; System Health</h2><b>LIVE</b></div>
+<div class="health-grid">
+<div><span>Market</span><b>--</b><span>Session</span><b>--</b><span>Next Candle</span><b>--</b><span>Data Source</span><b>--</b><span>Latency</span><b>--</b><span>Last Update</span><b>--</b></div>
+<div><span>API Connection</span><b>--</b><span>Data Feed</span><b>--</b><span>Strategy Engine</span><b>--</b><span>Risk Manager</span><b>--</b><span>Evidence Capture</span><b>--</b><span>Auto Refresh</span><b>--</b></div>
+</div>
+</section>
+
+<div class="bottom-grid">
+<section class="panel">
+<div class="panel-title"><h2>Phase 11 Live Evidence</h2><b>READ ONLY</b></div>
+<div class="evidence"><div class="donut"><b>--</b><span>Progress</span></div><div class="stats"><div>Evidence Records <b>--</b></div><div>Session Time <b>--</b></div><div>Quality Score <b>--</b></div><div>Status <b>--</b></div></div></div>
+</section>
+<section class="panel"><div class="panel-title"><h2>Recent Signals</h2><b>LIVE</b></div><div class="empty">No live signals connected in V2 prototype.</div></section>
+<section class="panel quick"><div class="panel-title"><h2>Quick Actions</h2></div><button class="primary">Run Backtest</button><button>View Reports</button><button>Export Data</button><button>Settings</button></section>
+</div>
+
+<footer>V2 prototype — presentation layer only. Phase 11, backend, strategy, learning engine and broker controls remain untouched.</footer>
+</main>
+</div>
+</body>
+</html>
