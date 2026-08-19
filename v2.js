@@ -36,6 +36,14 @@
     [...root.querySelectorAll(selector)];
 
   function numberOrNull(value) {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      return null;
+    }
+
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
   }
@@ -92,7 +100,9 @@
       "close",
       "lp",
       "last_traded_price",
-      "lastTradedPrice"
+      "lastTradedPrice",
+      "live_price",
+      "livePrice"
     ];
 
     for (const field of fields) {
