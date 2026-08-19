@@ -1,0 +1,506 @@
+/*
+===========================================================
+ TradeMind Pro — V2
+ STEP 10 — FINAL VISION LAYOUT
+ ----------------------------------------------------------
+ FRONTEND PRESENTATION ONLY.
+ No API, strategy, learning, evidence or trading logic.
+ Existing V2 classes and bindings remain untouched.
+===========================================================
+*/
+
+/* =========================================================
+   1. GLOBAL VISUAL HIERARCHY
+========================================================= */
+
+.main{
+  scroll-behavior:smooth;
+}
+
+.section-heading{
+  position:relative;
+  padding-top:4px;
+}
+
+.section-heading::after{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:-5px;
+  height:1px;
+  background:linear-gradient(90deg,#173a57,rgba(23,58,87,.15),transparent);
+  pointer-events:none;
+}
+
+.section-heading.compact{
+  margin-top:22px;
+}
+
+/* =========================================================
+   2. SIDEBAR — PROFESSIONAL TERMINAL FEEL
+========================================================= */
+
+.sidebar{
+  position:sticky;
+  top:0;
+  height:100vh;
+  z-index:50;
+}
+
+.sidebar nav a{
+  position:relative;
+  transition:
+    background .15s ease,
+    color .15s ease,
+    padding-left .15s ease;
+}
+
+.sidebar nav a:hover{
+  background:#091d2f;
+  color:#b9d9f5;
+  padding-left:11px;
+}
+
+.sidebar nav a.active{
+  box-shadow:inset 0 0 18px rgba(21,151,255,.06);
+}
+
+/* =========================================================
+   3. TOP MARKET STRIP
+========================================================= */
+
+.topbar{
+  position:relative;
+}
+
+.market-strip{
+  align-items:center;
+}
+
+.index-card{
+  position:relative;
+}
+
+.index-card strong{
+  letter-spacing:-.02em;
+}
+
+.market-status{
+  min-width:88px;
+}
+
+.mode{
+  box-shadow:inset 0 0 14px rgba(21,151,255,.025);
+}
+
+/* =========================================================
+   4. KPI STRIP — STRONGER INFORMATION HIERARCHY
+========================================================= */
+
+.kpi-card{
+  position:relative;
+  overflow:hidden;
+}
+
+.kpi-card::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:2px;
+  background:#17334b;
+  opacity:.7;
+}
+
+.kpi-card.edge-kpi::before{
+  background:#27506b;
+}
+
+.kpi-card span{
+  letter-spacing:.02em;
+}
+
+.kpi-card strong{
+  letter-spacing:-.01em;
+}
+
+/* =========================================================
+   5. DASHBOARD PRIMARY AREA
+========================================================= */
+
+.equity-panel,
+.allocation-panel{
+  box-shadow:0 8px 28px rgba(0,0,0,.12);
+}
+
+.equity-placeholder{
+  box-shadow:inset 0 0 30px rgba(0,0,0,.16);
+}
+
+.placeholder-message strong{
+  letter-spacing:.01em;
+}
+
+.allocation-panel .allocation-ring{
+  box-shadow:0 0 22px rgba(21,151,255,.05);
+}
+
+.recent-panel,
+.market-overview-panel{
+  box-shadow:0 6px 20px rgba(0,0,0,.10);
+}
+
+/* =========================================================
+   6. LIVE MARKET — PRIMARY WORKSPACE
+========================================================= */
+
+.live-market-grid{
+  position:relative;
+}
+
+.chart-panel{
+  box-shadow:0 10px 30px rgba(0,0,0,.16);
+}
+
+.chart-panel .panel-title{
+  padding-bottom:1px;
+}
+
+.chart-panel .panel-title h2{
+  letter-spacing:-.01em;
+}
+
+.chart{
+  box-shadow:
+    inset 0 0 35px rgba(0,0,0,.18),
+    0 0 0 1px rgba(21,151,255,.025);
+}
+
+.chart-footer{
+  border-top:1px solid rgba(23,48,71,.55);
+  margin-top:7px;
+  padding-top:8px;
+}
+
+.strategy{
+  position:relative;
+  overflow:hidden;
+  box-shadow:0 10px 30px rgba(0,0,0,.16);
+}
+
+.strategy::before{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  top:0;
+  height:2px;
+  background:#1b2c3d;
+  opacity:.75;
+}
+
+.strategy .signal{
+  text-shadow:0 0 18px rgba(255,173,32,.08);
+}
+
+/* =========================================================
+   7. STRATEGY & EDGE
+========================================================= */
+
+.three-panel-grid .panel{
+  position:relative;
+  min-height:205px;
+}
+
+.three-panel-grid .panel::after{
+  content:"";
+  position:absolute;
+  left:11px;
+  right:11px;
+  bottom:0;
+  height:1px;
+  background:linear-gradient(90deg,transparent,#17364e,transparent);
+  opacity:.7;
+}
+
+.performance-list div{
+  transition:border-color .15s ease,background .15s ease;
+}
+
+.performance-list div:hover{
+  border-color:#23445f;
+  background:#081521;
+}
+
+.edge-health-empty,
+.trade-empty{
+  border-radius:6px;
+}
+
+/* =========================================================
+   8. DIAGNOSTICS — SECONDARY VISUAL WEIGHT
+========================================================= */
+
+.legacy-section{
+  position:relative;
+}
+
+.legacy-section > .section-heading{
+  margin-top:22px;
+}
+
+.metrics article{
+  transition:border-color .15s ease;
+}
+
+.metrics article:hover{
+  border-color:#23445f;
+}
+
+.health{
+  box-shadow:0 6px 22px rgba(0,0,0,.10);
+}
+
+/* =========================================================
+   9. LOWER WORKSPACE
+========================================================= */
+
+.bottom-grid{
+  margin-top:10px;
+}
+
+.bottom-grid .panel{
+  min-height:155px;
+}
+
+/* =========================================================
+   10. DESKTOP COMPOSITION
+========================================================= */
+
+@media(min-width:1101px){
+
+  .main{
+    padding-left:18px;
+    padding-right:18px;
+  }
+
+  .topbar{
+    margin-bottom:14px;
+  }
+
+  .dashboard-grid{
+    gap:11px;
+  }
+
+  .content-grid{
+    gap:11px;
+  }
+
+  .three-panel-grid{
+    gap:11px;
+  }
+
+  .chart{
+    height:350px;
+  }
+
+  .strategy{
+    min-height:416px;
+  }
+
+  .three-panel-grid .panel{
+    min-height:210px;
+  }
+}
+
+/* =========================================================
+   11. TABLET
+========================================================= */
+
+@media(max-width:1100px) and (min-width:761px){
+
+  .sidebar{
+    width:130px;
+    flex-basis:130px;
+  }
+
+  .main{
+    padding-left:12px;
+    padding-right:12px;
+  }
+
+  .kpi-grid{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+
+  .dashboard-grid{
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "equity"
+      "allocation"
+      "recent"
+      "market";
+  }
+
+  .three-panel-grid{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .bottom-grid{
+    grid-template-columns:1fr 1fr;
+  }
+}
+
+/* =========================================================
+   12. MOBILE — CLEAN FINAL COMPOSITION
+========================================================= */
+
+@media(max-width:760px){
+
+  .main{
+    padding:10px 10px 22px;
+  }
+
+  .topbar{
+    margin-bottom:10px;
+  }
+
+  .kpi-grid{
+    gap:7px;
+  }
+
+  .kpi-card{
+    min-height:78px;
+  }
+
+  .dashboard-grid{
+    gap:8px;
+  }
+
+  .equity-panel,
+  .allocation-panel{
+    min-height:0;
+  }
+
+  .equity-placeholder{
+    height:135px;
+  }
+
+  .allocation-ring{
+    width:92px;
+    height:92px;
+  }
+
+  .mini-market{
+    grid-template-columns:1fr;
+  }
+
+  .content-grid{
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+
+  .chart-panel{
+    order:1;
+  }
+
+  .strategy{
+    order:2;
+    min-height:350px;
+  }
+
+  .chart{
+    height:290px;
+  }
+
+  .three-panel-grid{
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+
+  .three-panel-grid .panel{
+    min-height:185px;
+  }
+
+  .metrics{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .health-grid{
+    grid-template-columns:1fr;
+    gap:12px;
+  }
+
+  .bottom-grid{
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+}
+
+/* =========================================================
+   13. VERY SMALL PHONES
+========================================================= */
+
+@media(max-width:400px){
+
+  .main{
+    padding-left:8px;
+    padding-right:8px;
+  }
+
+  .market-strip{
+    gap:6px;
+  }
+
+  .index-card strong{
+    font-size:16px;
+  }
+
+  .kpi-card{
+    padding:10px;
+  }
+
+  .equity-placeholder{
+    height:125px;
+  }
+
+  .chart{
+    height:270px;
+  }
+
+  .range-controls{
+    gap:3px;
+  }
+
+  .range-controls button{
+    padding-left:6px;
+    padding-right:6px;
+  }
+
+  .metrics{
+    grid-template-columns:1fr;
+  }
+}
+
+/* =========================================================
+   14. TOUCH / ACCESSIBILITY
+========================================================= */
+
+@media(pointer:coarse){
+
+  .sidebar nav a{
+    min-height:46px;
+  }
+
+  .range-controls button,
+  .panel-actions button{
+    min-height:34px;
+  }
+
+  .settings{
+    min-width:38px;
+    min-height:38px;
+  }
+}
