@@ -1,7 +1,7 @@
 /*
 ===========================================================
  TradeMind Pro — V2 Dashboard
- STEP 4.4 — CURRENT HTML / CSS ALIGNED LIVE LAYER
+ STEP 4.8 — REAL CANDLES + REAL FRONTEND INDICATORS
  ----------------------------------------------------------
  READ-ONLY PRESENTATION LAYER
 
@@ -571,6 +571,74 @@
         transform:translateY(-50%);
       }
 
+      .v2-indicator-svg{
+        position:absolute;
+        inset:0;
+        width:100%;
+        height:100%;
+        overflow:visible;
+        pointer-events:none;
+        z-index:4;
+      }
+
+      .v2-indicator-line{
+        fill:none;
+        stroke-width:0.8;
+        vector-effect:non-scaling-stroke;
+      }
+
+      .v2-ema9{
+        stroke:#19a7ff;
+      }
+
+      .v2-ema21{
+        stroke:#ff9f1a;
+      }
+
+      .v2-vwap{
+        stroke:#a96cff;
+      }
+
+      .v2-indicator-legend{
+        position:absolute;
+        left:0;
+        top:0;
+        display:flex;
+        flex-direction:column;
+        gap:3px;
+        padding:6px 8px;
+        background:rgba(5,12,21,.78);
+        border-radius:4px;
+        color:#8fa2b8;
+        font-size:8px;
+        line-height:1.2;
+        pointer-events:none;
+        z-index:8;
+      }
+
+      .v2-indicator-legend div{
+        display:flex;
+        align-items:center;
+        gap:4px;
+        white-space:nowrap;
+      }
+
+      .v2-indicator-legend b{
+        color:#d9e2ed;
+        font-weight:700;
+      }
+
+      .v2-dot{
+        width:7px;
+        height:2px;
+        display:inline-block;
+      }
+
+      .v2-dot.ema9{background:#19a7ff}
+      .v2-dot.ema21{background:#ff9f1a}
+      .v2-dot.vwap{background:#a96cff}
+      .v2-dot.volume{background:#2d6f91}
+
       .chart-overlay{
         z-index:5;
       }
@@ -580,69 +648,501 @@
       .chart-axis-x{
         z-index:7;
       }
+
+      /* ---- V2.7 chart layout corrections ---- */
+
+      .chart-axis-y{
+        position:absolute;
+        left:0;
+        top:8%;
+        bottom:18%;
+        width:7%;
+        display:flex;
+        flex-direction:column;
+        justify-content:space-between;
+        align-items:flex-end;
+        padding-right:6px;
+        color:#71839a;
+        font-size:8px;
+        line-height:1;
+        pointer-events:none;
+      }
+
+      .chart-axis-x{
+        position:absolute;
+        left:8%;
+        right:8%;
+        bottom:2%;
+        height:12%;
+        display:flex;
+        align-items:flex-end;
+        justify-content:space-between;
+        color:#71839a;
+        font-size:8px;
+        line-height:1;
+        pointer-events:none;
+      }
+
+      .chart-indicator-legend{
+        position:absolute;
+        left:10px;
+        top:10px;
+        display:flex;
+        flex-direction:column;
+        gap:3px;
+        color:#9aabc0;
+        font-size:8px;
+        line-height:1.1;
+        pointer-events:none;
+      }
+
+      .chart-indicator-legend b{
+        color:#d6deea;
+        font-weight:700;
+      }
+
+      .chart-overlay{
+        position:absolute;
+        inset:0;
+        pointer-events:none;
+      }
+
+      .chart-crosshair{
+        display:none;
+      }
+
+      .chart-tooltip{
+        position:absolute;
+        right:10px;
+        top:10px;
+        display:none;
+        flex-direction:column;
+        gap:3px;
+        min-width:120px;
+        padding:8px 9px;
+        border:1px solid #29415c;
+        border-radius:6px;
+        background:rgba(7,16,26,.96);
+        color:#b9c7d8;
+        font-size:8px;
+        line-height:1.2;
+        z-index:10;
+        pointer-events:none;
+      }
+
+      .chart-tooltip b{
+        color:#f5f7fb;
+        font-size:9px;
+      }
+
+      .chart-price{
+        right:0;
+        min-width:66px;
+        text-align:center;
+        white-space:nowrap;
+      }
+
+      .v2-live-candle{
+        z-index:2;
+      }
+
+      .chart-volume{
+        z-index:2;
+      }
+
+      .chart-plot{
+        z-index:3;
+      }
+
+      .grid{
+        z-index:0;
+      }
     `;
 
     document.head.appendChild(style);
   }
 
-  function generateDemoCandles() {
-    /*
-     * Presentation-only chart until V2 is connected to the
-     * historical candle endpoint. It never feeds the strategy.
-     */
-    const candles = [];
-    let price = 24205;
+  function normalizeCandle(raw) {
+    if (!raw || typeof raw !== "object") return null;
 
-    for (let i = 0; i < 48; i++) {
-      const drift =
-        2.5 +
-        Math.sin(i / 5) * 2;
+    const open = numberOrNull(raw.o ?? raw.open);
+    const high = numberOrNull(raw.h ?? raw.high);
+    const low = numberOrNull(raw.l ?? raw.low);
+    const close = numberOrNull(raw.c ?? raw.close);
+    const volume = numberOrNull(raw.v ?? raw.volume) ?? 0;
+    const ts = numberOrNull(raw.ts ?? raw.timestamp ?? raw.time);
 
-      const noise =
-        Math.sin(i * 1.77) * 7 +
-        Math.cos(i * .63) * 4;
-
-      const open =
-        price;
-
-      const close =
-        open +
-        drift +
-        noise;
-
-      const high =
-        Math.max(open, close) +
-        5 +
-        Math.abs(
-          Math.sin(i)
-        ) * 8;
-
-      const low =
-        Math.min(open, close) -
-        5 -
-        Math.abs(
-          Math.cos(i)
-        ) * 7;
-
-      const volume =
-        .35 +
-        Math.abs(
-          Math.sin(i * .51)
-        ) * 1.1;
-
-      candles.push({
-        open,
-        high,
-        low,
-        close,
-        volume
-      });
-
-      price =
-        close;
+    if (
+      open === null ||
+      high === null ||
+      low === null ||
+      close === null
+    ) {
+      return null;
     }
 
-    return candles;
+    return {
+      ts,
+      open,
+      high,
+      low,
+      close,
+      volume
+    };
+  }
+
+  function extractHistoricalCandles(data) {
+    if (!data || typeof data !== "object") {
+      return [];
+    }
+
+    /*
+     * INDstocks historical response:
+     * {
+     *   data: {
+     *     NIDX_40000001: {
+     *       candles: [
+     *         { ts, o, h, l, c, v },
+     *         ...
+     *       ]
+     *     }
+     *   }
+     * }
+     */
+    const root =
+      data.data && typeof data.data === "object"
+        ? data.data
+        : data;
+
+    const nifty =
+      root["NIDX_40000001"] ||
+      root["NIDX:40000001"] ||
+      root["40000001"] ||
+      root.nifty ||
+      root.NIFTY ||
+      null;
+
+    let rawCandles =
+      Array.isArray(nifty?.candles)
+        ? nifty.candles
+        : Array.isArray(nifty)
+          ? nifty
+          : [];
+
+    /*
+     * Fallback for APIs that return a direct array.
+     */
+    if (!rawCandles.length && Array.isArray(root)) {
+      rawCandles = root;
+    }
+
+    return rawCandles
+      .map(normalizeCandle)
+      .filter(Boolean)
+      .sort(
+        (a, b) =>
+          (a.ts ?? 0) -
+          (b.ts ?? 0)
+      );
+  }
+
+  async function fetchCandles() {
+    try {
+      const response = await fetch(
+        `/api/candles?interval=5minute&_v2=${Date.now()}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Accept": "application/json",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache"
+          }
+        }
+      );
+
+      const text = await response.text();
+
+      let result;
+
+      try {
+        result = JSON.parse(text);
+      } catch {
+        throw new Error(
+          `Invalid JSON from /api/candles (HTTP ${response.status})`
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `Candle API HTTP ${response.status}`
+        );
+      }
+
+      if (result?.success === false) {
+        throw new Error(
+          typeof result.error === "string"
+            ? result.error
+            : JSON.stringify(result.error || result)
+        );
+      }
+
+      const candles =
+        extractHistoricalCandles(result);
+
+      if (!candles.length) {
+        throw new Error(
+          "No NIFTY 5-minute candles returned"
+        );
+      }
+
+      /*
+       * Keep the chart readable. The backend can return up to
+       * seven days of 5-minute candles; V2 displays the most
+       * recent 78 candles (~one trading day plus a little context).
+       */
+      state.candles =
+        candles.slice(-78);
+
+      renderChart();
+
+      console.info(
+        "[TradeMind V2] Historical candles loaded",
+        {
+          returned: candles.length,
+          displayed: state.candles.length,
+          last: state.candles[state.candles.length - 1]
+        }
+      );
+
+    } catch (error) {
+      console.error(
+        "[TradeMind V2] candle refresh failed:",
+        error
+      );
+
+      /*
+       * Do not replace real candles with synthetic candles.
+       * If the historical endpoint fails, preserve the last
+       * successfully loaded chart instead.
+       */
+    }
+  }
+
+  function mergeLiveQuoteIntoCurrentCandle() {
+    if (
+      state.nifty === null ||
+      !state.candles.length
+    ) {
+      return;
+    }
+
+    const last =
+      state.candles[state.candles.length - 1];
+
+    if (!last) return;
+
+    /*
+     * Only update the most recent historical candle.
+     * This keeps OHLC history sourced from /api/candles
+     * while allowing the currently forming candle to track
+     * the live quote.
+     */
+    last.close = state.nifty;
+    last.high = Math.max(
+      last.high,
+      state.nifty
+    );
+    last.low = Math.min(
+      last.low,
+      state.nifty
+    );
+
+    renderChart();
+  }
+
+
+  /* =========================================================
+     REAL INDICATORS — FRONTEND DISPLAY ONLY
+     Calculated from the real NIFTY 5-minute candles already
+     loaded by V2. No backend/strategy state is modified.
+  ========================================================= */
+
+  function calculateEMA(candles, period) {
+    if (!candles.length) return [];
+
+    const multiplier = 2 / (period + 1);
+    const result = [];
+    let ema = null;
+
+    candles.forEach((candle, index) => {
+      if (index === 0) {
+        ema = candle.close;
+      } else {
+        ema =
+          (candle.close - ema) * multiplier +
+          ema;
+      }
+
+      result.push(ema);
+    });
+
+    return result;
+  }
+
+  function calculateVWAP(candles) {
+    let cumulativePV = 0;
+    let cumulativeVolume = 0;
+
+    return candles.map(candle => {
+      const typicalPrice =
+        (candle.high + candle.low + candle.close) / 3;
+
+      const volume =
+        Number.isFinite(candle.volume) &&
+        candle.volume > 0
+          ? candle.volume
+          : 0;
+
+      cumulativePV +=
+        typicalPrice * volume;
+
+      cumulativeVolume += volume;
+
+      return cumulativeVolume > 0
+        ? cumulativePV / cumulativeVolume
+        : typicalPrice;
+    });
+  }
+
+  function createIndicatorPath(values, min, max) {
+    if (!values.length) return "";
+
+    const span = max - min || 1;
+    const lastIndex =
+      Math.max(1, values.length - 1);
+
+    return values
+      .map((value, index) => {
+        const x =
+          (index / lastIndex) * 100;
+
+        const y =
+          ((max - value) / span) * 100;
+
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(3)} ${y.toFixed(3)}`;
+      })
+      .join(" ");
+  }
+
+  function renderRealIndicators(candles, min, max) {
+    const plot = $("#v2-chart-plot");
+    if (!plot || !candles.length) return;
+
+    plot.querySelector(
+      ".v2-indicator-svg"
+    )?.remove();
+
+    plot.querySelector(
+      ".v2-indicator-legend"
+    )?.remove();
+
+    const ema9 =
+      calculateEMA(candles, 9);
+
+    const ema21 =
+      calculateEMA(candles, 21);
+
+    const vwap =
+      calculateVWAP(candles);
+
+    const svg =
+      document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg"
+      );
+
+    svg.classList.add(
+      "v2-indicator-svg"
+    );
+
+    svg.setAttribute(
+      "viewBox",
+      "0 0 100 100"
+    );
+
+    svg.setAttribute(
+      "preserveAspectRatio",
+      "none"
+    );
+
+    svg.innerHTML = `
+      <path
+        class="v2-indicator-line v2-ema9"
+        d="${createIndicatorPath(
+          ema9,
+          min,
+          max
+        )}"
+      />
+      <path
+        class="v2-indicator-line v2-ema21"
+        d="${createIndicatorPath(
+          ema21,
+          min,
+          max
+        )}"
+      />
+      <path
+        class="v2-indicator-line v2-vwap"
+        d="${createIndicatorPath(
+          vwap,
+          min,
+          max
+        )}"
+      />
+    `;
+
+    plot.appendChild(svg);
+
+    const legend =
+      document.createElement("div");
+
+    legend.className =
+      "v2-indicator-legend";
+
+    const lastEMA9 =
+      ema9[ema9.length - 1];
+
+    const lastEMA21 =
+      ema21[ema21.length - 1];
+
+    const lastVWAP =
+      vwap[vwap.length - 1];
+
+    legend.innerHTML = `
+      <div><span class="v2-dot ema9"></span>EMA 9 <b>${formatPrice(lastEMA9)}</b></div>
+      <div><span class="v2-dot ema21"></span>EMA 21 <b>${formatPrice(lastEMA21)}</b></div>
+      <div><span class="v2-dot vwap"></span>VWAP <b>${formatPrice(lastVWAP)}</b></div>
+      <div><span class="v2-dot volume"></span>Volume <b>${formatVolume(candles[candles.length - 1].volume)}</b></div>
+    `;
+
+    plot.appendChild(legend);
+  }
+
+  function formatVolume(value) {
+    const n = numberOrNull(value);
+    if (n === null) return "--";
+
+    if (n >= 1000000) {
+      return `${(n / 1000000).toFixed(2)}M`;
+    }
+
+    if (n >= 1000) {
+      return `${(n / 1000).toFixed(1)}K`;
+    }
+
+    return n.toFixed(0);
   }
 
   function renderChart() {
@@ -667,6 +1167,9 @@
     $$(".ema", chart).forEach(
       element => element.remove()
     );
+
+    $$(".chart-indicator-legend", chart)
+      .forEach(element => element.remove());
 
     plot.innerHTML = "";
     volume.innerHTML = "";
@@ -694,6 +1197,12 @@
 
     const span =
       max - min || 1;
+
+    renderRealIndicators(
+      candles,
+      min,
+      max
+    );
 
     candles.forEach(
       (candle, index) => {
@@ -926,7 +1435,12 @@
   function render() {
     updateIndexCards();
     updateTimestamp();
-    updateCurrentPrice();
+
+    if (state.candles.length) {
+      mergeLiveQuoteIntoCurrentCandle();
+    } else {
+      updateCurrentPrice();
+    }
   }
 
   function start() {
@@ -936,24 +1450,31 @@
 
     addChartStyles();
 
-    state.candles =
-      generateDemoCandles();
-
-    renderChart();
     wireRanges();
     wireButtons();
 
     render();
 
     console.info(
-      "[TradeMind V2] ACTIVE — read-only /quotes / 5s"
+      "[TradeMind V2] ACTIVE — read-only /quotes 5s /candles 60s"
     );
+
+    /*
+     * Load real NIFTY 5-minute OHLCV candles first.
+     * The chart never falls back to synthetic candles.
+     */
+    fetchCandles();
 
     fetchQuotes();
 
     window.setInterval(
       fetchQuotes,
       5000
+    );
+
+    window.setInterval(
+      fetchCandles,
+      60000
     );
   }
 
