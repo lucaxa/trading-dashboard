@@ -504,3 +504,156 @@
     min-height:38px;
   }
 }
+
+
+/* =========================================================
+   15. STEP 10.1 — MOBILE DENSITY POLISH
+   ---------------------------------------------------------
+   FRONTEND PRESENTATION ONLY.
+   No API, strategy, learning, evidence or trading logic.
+   Purpose:
+   - Keep Backtest Summary compact on mobile
+   - Preserve 2×2 stat presentation
+   - Reduce unnecessary System Health height
+   - Improve lower-workspace density without squeezing text
+========================================================= */
+
+/* ---------- BACKTEST SUMMARY ---------- */
+
+.stats{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px;
+}
+
+.stats div{
+  min-width:0;
+}
+
+/* ---------- MOBILE DENSITY ---------- */
+
+@media(max-width:760px){
+
+  /* Keep the backtest card compact instead of creating
+     four full-width rows on a phone. */
+  .stats{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:6px;
+  }
+
+  .stats div{
+    padding:8px;
+    min-height:42px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:6px;
+    font-size:9px;
+  }
+
+  .stats div b{
+    white-space:nowrap;
+  }
+
+  .donut{
+    width:86px;
+    height:86px;
+    margin:7px auto;
+  }
+
+  .donut b{
+    font-size:16px;
+  }
+
+  .donut span{
+    font-size:6px;
+  }
+
+  /* Preserve the two-column health presentation on
+     normal phones where enough width exists. */
+  .health-grid{
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+  }
+
+  .health-grid>div{
+    gap:5px 8px;
+  }
+
+  .health-grid span{
+    font-size:7px;
+  }
+
+  .health-grid b{
+    font-size:8px;
+  }
+
+  /* Lower workspace cards should remain compact but readable. */
+  .bottom-grid .panel{
+    min-height:140px;
+  }
+
+  .evidence{
+    gap:8px;
+  }
+
+  .evidence .donut{
+    flex-basis:78px;
+    width:78px;
+    height:78px;
+  }
+}
+
+/* ---------- VERY SMALL PHONES ---------- */
+
+@media(max-width:430px){
+
+  .stats{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+
+  .stats div{
+    padding:7px;
+    font-size:8px;
+  }
+
+  .health-grid{
+    grid-template-columns:1fr;
+    gap:9px;
+  }
+
+  .health-grid>div{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .bottom-grid .panel{
+    min-height:135px;
+  }
+}
+
+/* ---------- EXTRA NARROW DEVICES ---------- */
+
+@media(max-width:360px){
+
+  .stats{
+    gap:5px;
+  }
+
+  .stats div{
+    padding:6px;
+    font-size:7px;
+  }
+
+  .donut{
+    width:78px;
+    height:78px;
+  }
+
+  .health-grid>div{
+    gap:4px 6px;
+  }
+}
+
+/* =========================================================
+   STEP 10.1 — END
+========================================================= */
