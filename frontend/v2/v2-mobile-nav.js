@@ -1,245 +1,580 @@
-/* TradeMind Pro V2 — Step 10.4A Mobile Drawer Correction */
+/*
+===========================================================
+ TradeMind Pro V2
+ Step 10.4B — Mobile Layout + Persistent Header
+ ----------------------------------------------------------
+ PURPOSE:
+ - Remove desktop sidebar space on mobile
+ - Make sidebar an overlay
+ - Keep mobile header visible while scrolling
+ - Preserve existing navigation behaviour
+ - Desktop layout remains untouched
+ - Chart / API / Phase 11 untouched
+===========================================================
+*/
+
 (() => {
   "use strict";
 
   function initMobileNavigation() {
     const sidebar = document.querySelector(".sidebar");
     const topbar = document.querySelector(".topbar");
+    const appShell = document.querySelector(".app-shell");
 
-    if (!sidebar || !topbar) return;
-    if (document.querySelector("#v2-mobile-menu-button")) return;
+    if (!sidebar || !topbar) {
+      console.warn(
+        "[TradeMind V2] Step 10.4B: sidebar/topbar not found."
+      );
+      return;
+    }
 
-    const button = document.createElement("button");
+    /*
+    -------------------------------------------------------
+    Avoid duplicate initialization
+    -------------------------------------------------------
+    */
+    if (document.querySelector("#v2-mobile-layout-style")) {
+      return;
+    }
 
-    button.id = "v2-mobile-menu-button";
-    button.type = "button";
-    button.setAttribute("aria-label", "Open navigation");
-    button.setAttribute("aria-expanded", "false");
-    button.innerHTML = "☰";
+    /*
+    -------------------------------------------------------
+    Mobile menu button
+    -------------------------------------------------------
+    */
+    let menuButton = document.querySelector("#v2-mobile-menu-button");
 
-    const backdrop = document.createElement("div");
+    if (!menuButton) {
+      menuButton = document.createElement("button");
 
-    backdrop.id = "v2-mobile-backdrop";
-    backdrop.setAttribute("aria-hidden", "true");
+      menuButton.id = "v2-mobile-menu-button";
+      menuButton.type = "button";
+      menuButton.setAttribute("aria-label", "Open navigation");
+      menuButton.setAttribute("aria-expanded", "false");
 
-    document.body.appendChild(backdrop);
+      menuButton.innerHTML = "☰";
 
+      topbar.insertBefore(
+        menuButton,
+        topbar.firstChild
+      );
+    }
+
+    /*
+    -------------------------------------------------------
+    Backdrop
+    -------------------------------------------------------
+    */
+    let backdrop = document.querySelector("#v2-mobile-backdrop");
+
+    if (!backdrop) {
+      backdrop = document.createElement("div");
+
+      backdrop.id = "v2-mobile-backdrop";
+      backdrop.setAttribute("aria-hidden", "true");
+
+      document.body.appendChild(backdrop);
+    }
+
+    /*
+    -------------------------------------------------------
+    Mobile layout CSS
+    -------------------------------------------------------
+    */
     const style = document.createElement("style");
 
-    style.id = "v2-mobile-navigation-style";
+    style.id = "v2-mobile-layout-style";
 
     style.textContent = `
+
+      /* =================================================
+         DESKTOP — NO CHANGE
+         ================================================= */
+
       #v2-mobile-menu-button {
         display: none;
-        width: 40px;
-        height: 40px;
-        flex: 0 0 40px;
-        border: 1px solid #1d3047;
-        border-radius: 9px;
-        background: #0d1725;
-        color: #dce8f5;
-        font-size: 20px;
-        line-height: 1;
-        cursor: pointer;
-        -webkit-tap-highlight-color: transparent;
-        touch-action: manipulation;
-      }
-
-      #v2-mobile-menu-button:active {
-        transform: scale(.97);
       }
 
       #v2-mobile-backdrop {
         display: none;
       }
 
+
+      /* =================================================
+         MOBILE
+         ================================================= */
+
       @media (max-width: 760px) {
 
-        #v2-mobile-menu-button {
-          display: grid;
-          place-items: center;
+        html,
+        body {
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          margin: 0;
+          padding: 0;
+          overflow-x: hidden;
         }
+
+
+        /* -----------------------------------------------
+           CRITICAL FIX:
+           Remove the desktop sidebar column.
+           ----------------------------------------------- */
+
+        .app-shell {
+          display: block !important;
+
+          width: 100% !important;
+          min-width: 0 !important;
+          max-width: 100% !important;
+
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+
+
+        /* -----------------------------------------------
+           Sidebar becomes an overlay.
+           It no longer consumes page width.
+           ----------------------------------------------- */
 
         .sidebar {
           display: flex !important;
-          position: fixed;
-          z-index: 10000;
 
-          top: 0;
-          left: 0;
-          bottom: 0;
+          position: fixed !important;
 
-          width: min(300px, 78vw);
-          max-width: 300px;
+          top: 0 !important;
+          left: 0 !important;
+          bottom: 0 !important;
 
-          padding: 16px 10px;
-          margin: 0;
+          width: min(300px, 82vw) !important;
+          max-width: 300px !important;
 
-          transform: translate3d(-105%, 0, 0);
-          transition: transform .22s ease;
+          height: 100dvh !important;
 
-          box-shadow: 18px 0 45px rgba(0,0,0,.45);
+          margin: 0 !important;
 
-          overflow-y: auto;
-          overflow-x: hidden;
+          z-index: 10000 !important;
 
-          overscroll-behavior: contain;
+          transform: translate3d(-105%, 0, 0) !important;
 
-          -webkit-overflow-scrolling: touch;
+          transition:
+            transform .22s ease !important;
 
-          touch-action: pan-y;
+          overflow-x: hidden !important;
+          overflow-y: auto !important;
+
+          overscroll-behavior: contain !important;
+
+          -webkit-overflow-scrolling: touch !important;
+
+          box-sizing: border-box !important;
         }
+
 
         .sidebar.v2-mobile-open {
-          transform: translate3d(0, 0, 0);
+          transform: translate3d(0, 0, 0) !important;
         }
 
-        #v2-mobile-backdrop.v2-mobile-open {
-          display: block;
 
-          position: fixed;
-          z-index: 9999;
+        /* -----------------------------------------------
+           MAIN CONTENT
+           ----------------------------------------------- */
 
-          inset: 0;
+        .main,
+        .main-content,
+        .content,
+        .workspace,
+        .page-content {
+          width: 100% !important;
+          min-width: 0 !important;
+          max-width: 100% !important;
 
-          background: rgba(0,0,0,.58);
+          margin-left: 0 !important;
+          padding-left: 0 !important;
         }
 
-        .sidebar nav {
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-          flex: 1;
-        }
 
-        .sidebar nav a {
-          min-height: 48px;
-          width: 100%;
-
-          flex-direction: row;
-          justify-content: flex-start;
-
-          gap: 12px;
-          padding: 0 14px;
-
-          font-size: 13px;
-          border-radius: 9px;
-
-          touch-action: manipulation;
-
-          -webkit-tap-highlight-color: transparent;
-        }
-
-        .sidebar nav a span {
-          font-size: 13px;
-        }
-
-        .sidebar-footer {
-          margin-top: auto;
-          padding-top: 14px;
-        }
+        /* -----------------------------------------------
+           TOPBAR / MOBILE HEADER
+           ----------------------------------------------- */
 
         .topbar {
-          grid-template-columns: auto 1fr auto;
-          align-items: center;
+          position: sticky !important;
+
+          top: 0 !important;
+
+          z-index: 9000 !important;
+
+          width: 100% !important;
+          min-width: 0 !important;
+
+          box-sizing: border-box !important;
+
+          display: flex !important;
+
+          align-items: center !important;
+
+          gap: 10px !important;
+
+          padding-left: 12px !important;
+          padding-right: 12px !important;
         }
 
-        .mobile-brand {
-          min-width: 0;
+
+        /* -----------------------------------------------
+           MENU BUTTON
+           ----------------------------------------------- */
+
+        #v2-mobile-menu-button {
+          display: grid !important;
+
+          place-items: center !important;
+
+          width: 40px !important;
+          height: 40px !important;
+
+          flex: 0 0 40px !important;
+
+          margin: 0 !important;
+
+          padding: 0 !important;
+
+          border: 1px solid #1d3047 !important;
+
+          border-radius: 9px !important;
+
+          background: #0d1725 !important;
+
+          color: #dce8f5 !important;
+
+          font-size: 20px !important;
+
+          line-height: 1 !important;
+
+          cursor: pointer !important;
+
+          touch-action: manipulation !important;
+
+          -webkit-tap-highlight-color: transparent !important;
         }
 
-        .mobile-brand strong {
-          white-space: nowrap;
-          font-size: 12px;
+
+        #v2-mobile-menu-button:active {
+          transform: scale(.97);
+        }
+
+
+        /* -----------------------------------------------
+           BACKDROP
+           ----------------------------------------------- */
+
+        #v2-mobile-backdrop.v2-mobile-open {
+          display: block !important;
+
+          position: fixed !important;
+
+          inset: 0 !important;
+
+          z-index: 9999 !important;
+
+          background: rgba(0, 0, 0, .58) !important;
+        }
+
+
+        /* -----------------------------------------------
+           BODY LOCK WHEN DRAWER IS OPEN
+           ----------------------------------------------- */
+
+        body.v2-mobile-nav-open {
+          overflow: hidden !important;
+        }
+
+
+        /* -----------------------------------------------
+           NAV ITEMS
+           ----------------------------------------------- */
+
+        .sidebar nav {
+          display: flex !important;
+
+          flex-direction: column !important;
+
+          gap: 5px !important;
+
+          width: 100% !important;
+        }
+
+
+        .sidebar nav a {
+          width: 100% !important;
+
+          min-height: 48px !important;
+
+          box-sizing: border-box !important;
+
+          display: flex !important;
+
+          align-items: center !important;
+
+          justify-content: flex-start !important;
+
+          gap: 12px !important;
+
+          padding: 0 14px !important;
+
+          touch-action: manipulation !important;
+
+          -webkit-tap-highlight-color: transparent !important;
+        }
+
+
+        /* -----------------------------------------------
+           MOBILE CONTENT WIDTH
+           ----------------------------------------------- */
+
+        .container,
+        .dashboard,
+        .dashboard-container,
+        .page,
+        main {
+          width: 100% !important;
+          max-width: 100% !important;
+
+          min-width: 0 !important;
+
+          box-sizing: border-box !important;
+        }
+
+
+        /* -----------------------------------------------
+           GRID SECTIONS
+           ----------------------------------------------- */
+
+        .grid,
+        .dashboard-grid,
+        .workspace-grid {
+          max-width: 100% !important;
+          min-width: 0 !important;
+        }
+
+
+        /* -----------------------------------------------
+           CARDS
+           ----------------------------------------------- */
+
+        .card,
+        .panel,
+        .section {
+          max-width: 100% !important;
+          box-sizing: border-box !important;
         }
       }
+
+
+      /* =================================================
+         SMALL PHONES
+         ================================================= */
 
       @media (max-width: 420px) {
 
         #v2-mobile-menu-button {
-          width: 38px;
-          height: 38px;
-          flex-basis: 38px;
-        }
+          width: 38px !important;
+          height: 38px !important;
 
-        .mobile-brand strong {
-          display: none;
+          flex-basis: 38px !important;
         }
 
         .sidebar {
-          width: min(300px, 82vw);
+          width: min(300px, 84vw) !important;
         }
       }
+
     `;
 
     document.head.appendChild(style);
 
-    topbar.insertBefore(button, topbar.firstChild);
+
+    /*
+    -------------------------------------------------------
+    Open / close
+    -------------------------------------------------------
+    */
 
     function openMenu() {
       sidebar.classList.add("v2-mobile-open");
       backdrop.classList.add("v2-mobile-open");
 
-      button.setAttribute("aria-expanded", "true");
-      button.setAttribute("aria-label", "Close navigation");
+      document.body.classList.add(
+        "v2-mobile-nav-open"
+      );
 
-      button.innerHTML = "×";
+      menuButton.setAttribute(
+        "aria-expanded",
+        "true"
+      );
 
-      document.body.style.overflow = "hidden";
+      menuButton.setAttribute(
+        "aria-label",
+        "Close navigation"
+      );
+
+      menuButton.innerHTML = "×";
     }
+
 
     function closeMenu() {
       sidebar.classList.remove("v2-mobile-open");
       backdrop.classList.remove("v2-mobile-open");
 
-      button.setAttribute("aria-expanded", "false");
-      button.setAttribute("aria-label", "Open navigation");
+      document.body.classList.remove(
+        "v2-mobile-nav-open"
+      );
 
-      button.innerHTML = "☰";
+      menuButton.setAttribute(
+        "aria-expanded",
+        "false"
+      );
 
-      document.body.style.overflow = "";
+      menuButton.setAttribute(
+        "aria-label",
+        "Open navigation"
+      );
+
+      menuButton.innerHTML = "☰";
     }
 
-    button.addEventListener("click", () => {
-      sidebar.classList.contains("v2-mobile-open")
-        ? closeMenu()
-        : openMenu();
-    });
 
-    backdrop.addEventListener("click", closeMenu);
+    /*
+    -------------------------------------------------------
+    Button
+    -------------------------------------------------------
+    */
 
-    sidebar.querySelectorAll("nav a").forEach(link => {
-      link.addEventListener("click", () => {
-        if (window.innerWidth <= 760) {
-          setTimeout(closeMenu, 80);
+    menuButton.addEventListener(
+      "click",
+      () => {
+        if (
+          sidebar.classList.contains(
+            "v2-mobile-open"
+          )
+        ) {
+          closeMenu();
+        } else {
+          openMenu();
         }
+      }
+    );
+
+
+    /*
+    -------------------------------------------------------
+    Backdrop
+    -------------------------------------------------------
+    */
+
+    backdrop.addEventListener(
+      "click",
+      closeMenu
+    );
+
+
+    /*
+    -------------------------------------------------------
+    Navigation links
+    -------------------------------------------------------
+    */
+
+    sidebar
+      .querySelectorAll("a")
+      .forEach(link => {
+
+        link.addEventListener(
+          "click",
+          () => {
+
+            if (
+              window.innerWidth <= 760
+            ) {
+              setTimeout(
+                closeMenu,
+                80
+              );
+            }
+
+          }
+        );
+
       });
-    });
 
-    document.addEventListener("keydown", event => {
-      if (event.key === "Escape") {
-        closeMenu();
-      }
-    });
 
-    window.addEventListener("resize", () => {
-      if (window.innerWidth > 760) {
-        closeMenu();
+    /*
+    -------------------------------------------------------
+    ESC
+    -------------------------------------------------------
+    */
+
+    document.addEventListener(
+      "keydown",
+      event => {
+
+        if (
+          event.key === "Escape"
+        ) {
+          closeMenu();
+        }
+
       }
-    });
+    );
+
+
+    /*
+    -------------------------------------------------------
+    Resize
+    -------------------------------------------------------
+    */
+
+    window.addEventListener(
+      "resize",
+      () => {
+
+        if (
+          window.innerWidth > 760
+        ) {
+          closeMenu();
+        }
+
+      }
+    );
+
 
     console.info(
-      "[TradeMind V2] Step 10.4A mobile navigation ready."
+      "[TradeMind V2] Step 10.4B mobile layout ready — frontend only."
     );
   }
 
-  if (document.readyState === "loading") {
+
+  /*
+  ---------------------------------------------------------
+   Initialize
+  ---------------------------------------------------------
+  */
+
+  if (
+    document.readyState === "loading"
+  ) {
+
     document.addEventListener(
       "DOMContentLoaded",
       initMobileNavigation,
       { once: true }
     );
+
   } else {
+
     initMobileNavigation();
+
   }
+
 })();
