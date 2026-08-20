@@ -1,1 +1,153 @@
+/*
+===========================================================
+ TradeMind Pro — V2
+ STEP 10.4G — MOBILE SIDEBAR TOUCH / SCROLL FIX
+ ----------------------------------------------------------
+ PURPOSE
+ -------
+ Restore touch interaction and independent scrolling for the
+ mobile navigation drawer.
 
+ ROOT CAUSE
+ ----------
+ The mobile backdrop was above the sidebar in the stacking
+ order, so it intercepted all touch/pointer events.
+
+ FIX
+ ---
+ Sidebar   = 10001
+ Backdrop  = 9999
+ Topbar    = 9000
+
+ SAFETY
+ ------
+ - Mobile only
+ - No v2.js changes
+ - No API changes
+ - No chart changes
+ - No Phase 11 changes
+ - Desktop untouched
+===========================================================
+*/
+
+@media (max-width: 760px) {
+
+  /*
+   --------------------------------------------------------
+   MOBILE SIDEBAR
+   --------------------------------------------------------
+   */
+
+  .app-shell > .sidebar,
+  .sidebar.v2-mobile-open {
+
+    /*
+     * MUST remain above the backdrop.
+     */
+    z-index: 10001 !important;
+
+    /*
+     * Keep the drawer below the frozen topbar.
+     */
+    top: var(
+      --tm-v2-mobile-topbar-height,
+      150px
+    ) !important;
+
+    height: calc(
+      100dvh -
+      var(--tm-v2-mobile-topbar-height, 150px)
+    ) !important;
+
+    max-height: calc(
+      100dvh -
+      var(--tm-v2-mobile-topbar-height, 150px)
+    ) !important;
+
+    bottom: auto !important;
+
+    /*
+     * The sidebar itself owns vertical scrolling.
+     */
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+
+    /*
+     * Allow normal vertical finger scrolling.
+     */
+    touch-action: pan-y !important;
+
+    /*
+     * iOS momentum scrolling.
+     */
+    -webkit-overflow-scrolling: touch !important;
+
+    /*
+     * Keep scrolling contained inside the drawer.
+     */
+    overscroll-behavior-y: contain !important;
+
+    /*
+     * Make sure the drawer can receive touch events.
+     */
+    pointer-events: auto !important;
+
+    /*
+     * Prevent accidental text selection while dragging.
+     */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /*
+   --------------------------------------------------------
+   SIDEBAR NAVIGATION
+   --------------------------------------------------------
+   */
+
+  .sidebar nav {
+    pointer-events: auto !important;
+    touch-action: pan-y !important;
+  }
+
+  .sidebar nav a {
+    pointer-events: auto !important;
+
+    /*
+     * Navigation taps should remain normal taps.
+     */
+    touch-action: manipulation !important;
+
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /*
+   --------------------------------------------------------
+   BACKDROP
+   --------------------------------------------------------
+   */
+
+  #v2-mobile-backdrop {
+    z-index: 9999 !important;
+
+    /*
+     * Backdrop remains clickable outside the drawer.
+     */
+    pointer-events: auto !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   TOPBAR
+   --------------------------------------------------------
+   */
+
+  .app-shell > .main > .topbar {
+    z-index: 9000 !important;
+  }
+
+  #v2-mobile-menu-button {
+    z-index: 9002 !important;
+    pointer-events: auto !important;
+  }
+}
