@@ -1,0 +1,99 @@
+/*
+===========================================================
+ TradeMind Pro — V2
+ STEP 10.3C — DESKTOP SIDEBAR FIX
+ Frontend presentation only
+===========================================================
+
+PURPOSE
+-------
+Keep the desktop V2 sidebar fixed to the viewport while the
+main dashboard content scrolls normally.
+
+SAFEGUARDS
+----------
+- Desktop only.
+- Mobile/tablet drawer behavior is untouched.
+- No chart/controller changes.
+- No API/backend changes.
+- No Phase 11 changes.
+===========================================================
+*/
+
+@media (min-width: 761px) {
+
+  :root {
+    --tm-v2-sidebar-width: 170px;
+  }
+
+  /*
+   * Lock the sidebar to the viewport.
+   * It no longer moves upward when the page scrolls.
+   */
+  .app-shell > .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+
+    width: var(--tm-v2-sidebar-width);
+    height: 100vh;
+    min-height: 100vh;
+
+    z-index: 1000;
+
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /*
+   * Move the desktop content area clear of the fixed sidebar.
+   * The existing internal layout remains unchanged.
+   */
+  .app-shell > .main {
+    margin-left: var(--tm-v2-sidebar-width);
+    min-width: 0;
+  }
+
+  /*
+   * Keep the sidebar visually stable while the page moves.
+   */
+  .app-shell > .sidebar,
+  .app-shell > .sidebar * {
+    scrollbar-width: thin;
+  }
+
+  /*
+   * Prevent the desktop sidebar from accidentally becoming
+   * horizontally scrollable.
+   */
+  .app-shell > .sidebar {
+    scrollbar-gutter: stable;
+  }
+}
+
+/*
+-----------------------------------------------------------
+ MOBILE / TABLET SAFETY
+-----------------------------------------------------------
+Do not apply desktop fixed-sidebar geometry below 761px.
+The existing mobile navigation/drawer remains in control.
+-----------------------------------------------------------
+*/
+
+@media (max-width: 760px) {
+  .app-shell > .sidebar {
+    position: static;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+  }
+
+  .app-shell > .main {
+    margin-left: 0;
+  }
+}
