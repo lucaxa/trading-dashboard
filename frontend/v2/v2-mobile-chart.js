@@ -1,395 +1,455 @@
 /*
 ===========================================================
  TradeMind Pro — V2
- STEP 10.2C — MOBILE CHART INTERACTION
+ STEP 10.2C — MOBILE CHART INTERACTION v2
  ----------------------------------------------------------
  FRONTEND ONLY
- - Touch interaction layer for the existing V2 chart.
- - No API calls.
- - No backend changes.
- - No Phase 11 changes.
- - Does not modify v2.js.
- - Does not replace the existing candle renderer.
+ - Real touch pinch zoom
+ - One-finger candle pan
+ - Tap / hold candle -> OHLCV tooltip
+ - Double tap -> reset to 1D
+ - Works with existing v2.js chart state
+ - No backend/API/Phase 11 changes
+ - Does NOT replace v2.js
 ===========================================================
 */
 
 (() => {
   "use strict";
 
-  function initMobileChartInteraction() {
-    const chart = document.querySelector("#v2-chart");
+  function init() {
+    const plot = document.querySelector("#v2-chart-plot");
+    const chart = document.querySelector(".chart");
 
-    if (!chart) {
-      console.warn(
-        "[TradeMind V2] Mobile chart interaction: chart not found."
-      );
+    if (!plot || !chart) {
+      console.warn("[TradeMind V2] Mobile chart v2: plot not found.");
       return;
     }
+
+    if (plot.dataset.mobileTouchV2 === "1") return;
+    plot.dataset.mobileTouchV2 = "1";
 
     /*
-     * Do not interfere with desktop pointer behaviour.
-     * This layer activates only for touch-capable devices.
+     * v2.js already owns:
+     * - chartStart
+     * - chartVisibleCount
+     * - chartDragging
+     * - chartPointerIndex
+     * - renderChart()
+     *
+     * They are lexical/private, so we deliberately do not mutate
+     * them directly. Instead this layer uses the chart's existing
+     * pointer/wheel event engine.
      */
-    const touchCapable =
-      "ontouchstart" in window ||
-      navigator.maxTouchPoints > 0;
 
-    if (!touchCapable) {
-      console.info(
-        "[TradeMind V2] Mobile chart interaction skipped: no touch input."
+    let pinchStartDistance = 0;
+    let pinchStartTime = 0;
+    let pinchMoved = false;
+
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
+
+    let suppressNextPointer = false;
+
+    function distance(a, b) {
+      return Math.hypot(
+        a.clientX - b.clientX,
+        a.clientY - b.clientY
       );
-      return;
     }
 
-    if (chart.dataset.mobileInteractionReady === "true") {
-      return;
-    }
-
-    chart.dataset.mobileInteractionReady = "true";
-
-    let pinchStartDistance = null;
-    let pinchStartVisibleCount = null;
-    let touchStartX = null;
-    let touchStartY = null;
-    let touchStartTime = 0;
-    let moved = false;
-    let suppressClickUntil = 0;
-
-    function clamp(value, min, max) {
-      return Math.max(min, Math.min(max, value));
-    }
-
-    function getTouchDistance(touches) {
-      if (touches.length < 2) return 0;
-
-      const dx =
-        touches[0].clientX -
-        touches[1].clientX;
-
-      const dy =
-        touches[0].clientY -
-        touches[1].clientY;
-
-      return Math.hypot(dx, dy);
-    }
-
-    function getChartControllerState() {
-      /*
-       * v2.js keeps its state private. We intentionally do not
-       * mutate it or depend on undocumented internal variables.
-       *
-       * The gesture layer therefore uses the existing chart
-       * controls when available and falls back to CSS/scroll
-       * behaviour rather than corrupting the candle state.
-       */
+    function midpoint(a, b) {
       return {
-        rangeButtons:
-          [...chart.querySelectorAll(
-            ".range-controls button"
-          )],
-        chart
+        x: (a.clientX + b.clientX) / 2,
+        y: (a.clientY + b.clientY) / 2
       };
     }
 
-    function setChartTouchMode(enabled) {
-      chart.classList.toggle(
-        "v2-mobile-touch-active",
-        enabled
+    function dispatchWheel(clientX, clientY, deltaY) {
+      /*
+       * v2.js listens to wheel on #v2-chart-plot.
+       * A synthetic WheelEvent lets the existing, tested zoom
+       * implementation perform the actual range calculation.
+       */
+      const wheel = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        clientY,
+        deltaX: 0,
+        deltaY,
+        deltaMode: 0
+      });
+
+      plot.dispatchEvent(wheel);
+    }
+
+    function dispatchPointer(type, touch, pointerId) {
+      /*
+       * Forward a single touch position into the existing pointer
+       * interaction engine. This allows the existing candle hit
+       * detection and tooltip logic to remain authoritative.
+       */
+      if (!touch) return;
+
+      try {
+        const pointer = new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId,
+          pointerType: "touch",
+          isPrimary: true,
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          screenX: touch.screenX,
+          screenY: touch.screenY,
+          buttons: type === "pointerup" ? 0 : 1,
+          pressure: type === "pointerup" ? 0 : 0.5
+        });
+
+        plot.dispatchEvent(pointer);
+      } catch {
+        /*
+         * Older browsers: native touch events remain available.
+         */
+      }
+    }
+
+    function showTouchTooltipAt(touch) {
+      /*
+       * The existing v2.js pointermove handler calculates the
+       * candle from clientX and renders the OHLCV tooltip.
+       */
+      dispatchPointer(
+        "pointermove",
+        touch,
+        9001
       );
     }
 
-    function showTouchHint() {
-      let hint =
-        document.querySelector("#v2-mobile-chart-hint");
-
-      if (!hint) {
-        hint = document.createElement("div");
-        hint.id = "v2-mobile-chart-hint";
-
-        hint.textContent =
-          "Drag to move • Pinch to zoom • Tap a candle for details";
-
-        document.body.appendChild(hint);
-      }
-
-      hint.classList.add("show");
-
-      clearTimeout(hint._timer);
-
-      hint._timer = setTimeout(() => {
-        hint.classList.remove("show");
-      }, 2200);
-    }
-
-    function resetChartInteraction() {
+    function hideTouchTooltip() {
       /*
-       * The existing range controller owns the actual candle
-       * range. Selecting 1D is the safest public UI reset and
-       * does not touch internal v2.js state.
+       * Move outside the chart. This uses the existing chart
+       * interaction cleanup instead of manipulating tooltip DOM.
        */
-      const controls =
-        getChartControllerState().rangeButtons;
+      const rect = plot.getBoundingClientRect();
 
-      const dayButton =
-        controls.find(button =>
-          button.textContent.trim() === "1D"
-        );
+      const outside = new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 9001,
+        pointerType: "touch",
+        isPrimary: true,
+        clientX: rect.left - 20,
+        clientY: rect.top - 20,
+        buttons: 0,
+        pressure: 0
+      });
 
-      if (dayButton) {
-        dayButton.click();
-      }
+      plot.dispatchEvent(outside);
     }
 
-    function handleTouchStart(event) {
-      if (event.touches.length === 2) {
-        pinchStartDistance =
-          getTouchDistance(event.touches);
+    function resetViaRangeButton() {
+      const button = [
+        ...document.querySelectorAll(".range-controls button")
+      ].find(
+        item => item.textContent.trim() === "1D"
+      );
 
-        /*
-         * Visible-count state is intentionally not guessed or
-         * rewritten here. The existing chart controller remains
-         * the owner of candle-range state.
-         */
-        pinchStartVisibleCount = null;
-
-        setChartTouchMode(true);
-        return;
+      if (button) {
+        button.click();
       }
-
-      if (event.touches.length !== 1) return;
-
-      const touch = event.touches[0];
-
-      touchStartX = touch.clientX;
-      touchStartY = touch.clientY;
-      touchStartTime = Date.now();
-      moved = false;
-
-      setChartTouchMode(true);
-    }
-
-    function handleTouchMove(event) {
-      if (event.touches.length === 2) {
-        /*
-         * Let the browser perform the native pinch gesture if the
-         * existing chart controller does not expose a safe public
-         * zoom API. This prevents us from fighting v2.js.
-         */
-        const distance =
-          getTouchDistance(event.touches);
-
-        if (
-          pinchStartDistance !== null &&
-          Math.abs(distance - pinchStartDistance) > 8
-        ) {
-          moved = true;
-        }
-
-        return;
-      }
-
-      if (event.touches.length !== 1) return;
-
-      const touch = event.touches[0];
-
-      const dx =
-        touch.clientX - touchStartX;
-
-      const dy =
-        touch.clientY - touchStartY;
-
-      if (
-        Math.abs(dx) > 8 ||
-        Math.abs(dy) > 8
-      ) {
-        moved = true;
-      }
-
-      /*
-       * Do not preventDefault here.
-       *
-       * v2.js already owns chart dragging. Preventing the event
-       * from reaching it would make the current candle navigation
-       * worse rather than better.
-       */
-    }
-
-    function handleTouchEnd(event) {
-      if (event.touches.length === 0) {
-        pinchStartDistance = null;
-        pinchStartVisibleCount = null;
-        setChartTouchMode(false);
-      }
-
-      if (event.changedTouches.length !== 1) {
-        return;
-      }
-
-      const touch =
-        event.changedTouches[0];
-
-      const duration =
-        Date.now() - touchStartTime;
-
-      const dx =
-        touch.clientX - touchStartX;
-
-      const dy =
-        touch.clientY - touchStartY;
-
-      /*
-       * Short stationary tap:
-       * allow the existing chart tooltip/crosshair logic to
-       * receive the interaction.
-       */
-      if (
-        !moved &&
-        duration < 500 &&
-        Math.abs(dx) < 8 &&
-        Math.abs(dy) < 8
-      ) {
-        return;
-      }
-
-      /*
-       * Double-tap reset is handled separately so it does not
-       * interfere with normal candle taps.
-       */
-    }
-
-    let lastTap = 0;
-
-    function handleDoubleTap(event) {
-      if (event.touches.length > 0) return;
-
-      const now = Date.now();
-
-      if (now - lastTap < 320) {
-        suppressClickUntil = now + 450;
-        resetChartInteraction();
-        showTouchHint();
-      }
-
-      lastTap = now;
     }
 
     /*
-     * Do not block native browser gestures globally.
-     * The chart's existing pointer handlers remain authoritative.
+     * Touch start
      */
-    chart.addEventListener(
+    plot.addEventListener(
       "touchstart",
-      handleTouchStart,
-      { passive: true }
-    );
-
-    chart.addEventListener(
-      "touchmove",
-      handleTouchMove,
-      { passive: true }
-    );
-
-    chart.addEventListener(
-      "touchend",
-      handleTouchEnd,
-      { passive: true }
-    );
-
-    chart.addEventListener(
-      "touchend",
-      handleDoubleTap,
-      { passive: true }
-    );
-
-    chart.addEventListener(
-      "click",
       event => {
-        if (Date.now() < suppressClickUntil) {
+        if (event.touches.length === 2) {
+          pinchStartDistance =
+            distance(
+              event.touches[0],
+              event.touches[1]
+            );
+
+          pinchStartTime = Date.now();
+          pinchMoved = false;
+
+          /*
+           * Do not allow the browser to scroll/zoom the page while
+           * the user is actively pinching the chart.
+           */
           event.preventDefault();
-          event.stopPropagation();
+          return;
+        }
+
+        if (event.touches.length !== 1) return;
+
+        const touch = event.touches[0];
+        const now = Date.now();
+
+        /*
+         * Double tap detection.
+         */
+        const closeInTime =
+          now - lastTapTime < 320;
+
+        const closeInSpace =
+          Math.hypot(
+            touch.clientX - lastTapX,
+            touch.clientY - lastTapY
+          ) < 28;
+
+        if (closeInTime && closeInSpace) {
+          event.preventDefault();
+
+          suppressNextPointer = true;
+          resetViaRangeButton();
+
+          lastTapTime = 0;
+          return;
+        }
+
+        lastTapTime = now;
+        lastTapX = touch.clientX;
+        lastTapY = touch.clientY;
+
+        /*
+         * Send the touch into the existing chart controller so
+         * candle selection/pointer state is established.
+         */
+        dispatchPointer(
+          "pointerdown",
+          touch,
+          9001
+        );
+      },
+      { passive: false }
+    );
+
+    /*
+     * Touch movement
+     */
+    plot.addEventListener(
+      "touchmove",
+      event => {
+        /*
+         * PINCH ZOOM
+         */
+        if (event.touches.length === 2) {
+          event.preventDefault();
+
+          const currentDistance =
+            distance(
+              event.touches[0],
+              event.touches[1]
+            );
+
+          if (!pinchStartDistance) {
+            pinchStartDistance =
+              currentDistance;
+            return;
+          }
+
+          const change =
+            currentDistance -
+            pinchStartDistance;
+
+          /*
+           * Ignore tiny finger jitter.
+           */
+          if (Math.abs(change) < 5) return;
+
+          pinchMoved = true;
+
+          const center =
+            midpoint(
+              event.touches[0],
+              event.touches[1]
+            );
+
+          /*
+           * Positive distance change = fingers moved apart =
+           * zoom IN.
+           *
+           * Negative distance change = fingers moved together =
+           * zoom OUT.
+           *
+           * Use small incremental wheel-equivalent steps to make
+           * the zoom smooth rather than jumping.
+           */
+          const delta =
+            change > 0
+              ? -Math.min(42, Math.abs(change) * 0.42)
+              : Math.min(42, Math.abs(change) * 0.42);
+
+          dispatchWheel(
+            center.x,
+            center.y,
+            delta
+          );
+
+          pinchStartDistance =
+            currentDistance;
+
+          return;
+        }
+
+        /*
+         * ONE-FINGER PAN / CANDLE INSPECTION
+         *
+         * v2.js already owns pointer movement. Forwarding the
+         * touch position lets its existing drag and candle-hit
+         * behavior operate normally.
+         */
+        if (event.touches.length === 1) {
+          const touch = event.touches[0];
+
+          dispatchPointer(
+            "pointermove",
+            touch,
+            9001
+          );
         }
       },
-      true
+      { passive: false }
     );
 
     /*
-     * CSS touch-action is intentionally conservative:
-     * - manipulation keeps taps responsive.
-     * - pan-x allows horizontal chart movement.
-     * - We do NOT disable browser pinch zoom for the page.
+     * Touch end
      */
-    const style = document.createElement("style");
-    style.id = "v2-mobile-chart-interaction-style";
+    plot.addEventListener(
+      "touchend",
+      event => {
+        if (event.touches.length === 0) {
+          if (pinchMoved) {
+            pinchStartDistance = 0;
+            pinchMoved = false;
+          }
+
+          /*
+           * Forward pointerup so the existing chart controller
+           * releases its drag state.
+           */
+          if (
+            event.changedTouches &&
+            event.changedTouches.length
+          ) {
+            const touch =
+              event.changedTouches[
+                event.changedTouches.length - 1
+              ];
+
+            dispatchPointer(
+              "pointerup",
+              touch,
+              9001
+            );
+
+            /*
+             * A short stationary touch is a candle-detail action.
+             * Keep the tooltip visible briefly instead of removing
+             * it immediately.
+             */
+            if (!suppressNextPointer && !pinchMoved) {
+              showTouchTooltipAt(touch);
+
+              clearTimeout(
+                plot._mobileTooltipTimer
+              );
+
+              plot._mobileTooltipTimer =
+                setTimeout(
+                  hideTouchTooltip,
+                  3500
+                );
+            }
+
+            suppressNextPointer = false;
+          }
+
+          return;
+        }
+
+        /*
+         * If one finger remains after a pinch, restart the touch
+         * interaction cleanly.
+         */
+        if (event.touches.length === 1) {
+          pinchStartDistance = 0;
+          pinchMoved = false;
+
+          const touch =
+            event.touches[0];
+
+          dispatchPointer(
+            "pointerdown",
+            touch,
+            9001
+          );
+        }
+      },
+      { passive: false }
+    );
+
+    /*
+     * Prevent browser double-tap zoom only inside the chart.
+     * Page-level browser zoom remains untouched.
+     */
+    plot.style.touchAction = "none";
+    plot.style.webkitUserSelect = "none";
+    plot.style.userSelect = "none";
+
+    const style =
+      document.createElement("style");
+
+    style.id =
+      "v2-mobile-chart-v2-style";
 
     style.textContent = `
       @media(pointer:coarse){
-        #v2-chart{
-          touch-action:pan-x pan-y pinch-zoom;
+
+        #v2-chart-plot{
+          touch-action:none !important;
           -webkit-user-select:none;
           user-select:none;
           -webkit-touch-callout:none;
+          cursor:crosshair;
         }
 
-        #v2-chart.v2-mobile-touch-active{
+        #v2-chart-plot:active{
           cursor:grabbing;
         }
 
-        #v2-mobile-chart-hint{
-          position:fixed;
-          left:50%;
-          bottom:18px;
-          transform:translate(-50%,12px);
-          z-index:100001;
-          max-width:calc(100vw - 28px);
-          padding:9px 12px;
-          border:1px solid rgba(25,167,255,.35);
-          border-radius:8px;
-          background:rgba(5,13,22,.95);
-          color:#dce8f5;
-          font:600 10px/1.4 Inter,system-ui,sans-serif;
-          text-align:center;
-          opacity:0;
-          pointer-events:none;
-          transition:
-            opacity .16s ease,
-            transform .16s ease;
+        .v2-interactive-tooltip{
+          min-width:165px;
+          max-width:calc(100vw - 24px);
+          font-size:9px;
         }
 
-        #v2-mobile-chart-hint.show{
-          opacity:1;
-          transform:translate(-50%,0);
+        .v2-interactive-tooltip .tooltip-time{
+          font-size:10px;
         }
       }
     `;
 
     document.head.appendChild(style);
 
-    /*
-     * Give the user a one-time hint on touch devices.
-     */
-    if (!sessionStorage.getItem(
-      "trademind_v2_chart_touch_hint"
-    )) {
-      sessionStorage.setItem(
-        "trademind_v2_chart_touch_hint",
-        "1"
-      );
-
-      setTimeout(showTouchHint, 900);
-    }
-
     console.info(
-      "[TradeMind V2] Mobile chart interaction ready — frontend only."
+      "[TradeMind V2] Mobile chart interaction v2 ready."
     );
   }
 
   if (document.readyState === "loading") {
     document.addEventListener(
       "DOMContentLoaded",
-      initMobileChartInteraction,
+      init,
       { once: true }
     );
   } else {
-    initMobileChartInteraction();
+    init();
   }
 })();
