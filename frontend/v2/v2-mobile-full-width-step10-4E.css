@@ -1,0 +1,264 @@
+/*
+===========================================================
+ TradeMind Pro — V2
+ STEP 10.4E — MOBILE FULL-WIDTH DASHBOARD
+ ----------------------------------------------------------
+ Purpose:
+ - Remove leftover desktop sidebar geometry on mobile
+ - Make the dashboard occupy the complete phone viewport
+ - Keep mobile sidebar as a drawer only when opened
+ - Preserve fixed mobile topbar
+ - Preserve chart / Phase 11 / API / backend behavior
+
+ NO:
+ - v2.js changes
+ - chart changes
+ - API changes
+ - Phase 11 changes
+===========================================================
+*/
+
+@media (max-width: 760px) {
+
+  /*
+   --------------------------------------------------------
+   1. Reset desktop sidebar spacing from the MAIN container
+   --------------------------------------------------------
+   */
+
+  .app-shell {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .app-shell > .main {
+    width: 100% !important;
+    max-width: 100% !important;
+
+    /*
+     * This is the important fix.
+     * Mobile must NEVER reserve desktop sidebar width.
+     */
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+
+    padding-left: 7px !important;
+    padding-right: 7px !important;
+
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   2. Prevent any desktop sidebar width from affecting
+      the mobile document flow.
+   --------------------------------------------------------
+   */
+
+  .app-shell > .sidebar {
+    margin-left: 0 !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   3. Normal mobile content must use the entire width.
+   --------------------------------------------------------
+   */
+
+  .main > * {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   4. All major dashboard sections stay full width.
+   --------------------------------------------------------
+   */
+
+  .kpi-grid,
+  .dashboard-grid,
+  .content-grid,
+  .three-panel-grid,
+  .bottom-grid,
+  .live-market-grid {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   5. Panels must not retain desktop grid width.
+   --------------------------------------------------------
+   */
+
+  .panel,
+  .kpi-card,
+  .chart-panel,
+  .strategy,
+  .equity-panel,
+  .allocation-panel,
+  .recent-panel,
+  .market-overview-panel {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   6. Mobile topbar remains full width.
+   --------------------------------------------------------
+   */
+
+  .app-shell > .main > .topbar {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   7. The fixed mobile drawer is allowed to have its own
+      width when opened. It must NOT affect .main.
+   --------------------------------------------------------
+   */
+
+  .app-shell > .sidebar.v2-mobile-open {
+    width: min(280px, 82vw) !important;
+    max-width: 82vw !important;
+    margin-left: 0 !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   8. Make sure opening/closing the drawer never shifts
+      the dashboard sideways.
+   --------------------------------------------------------
+   */
+
+  body {
+    overflow-x: hidden !important;
+  }
+
+  html {
+    overflow-x: hidden !important;
+  }
+}
+/*
+===========================================================
+ TradeMind Pro — V2
+ STEP 10.4F — MOBILE SIDEBAR DRAWER POSITION
+ ----------------------------------------------------------
+ Fix:
+ - Mobile sidebar currently starts at viewport top
+ - Fixed topbar covers the first navigation items
+ - Drawer must begin BELOW the fixed topbar
+ - Drawer remains independently scrollable
+ - Desktop sidebar untouched
+===========================================================
+*/
+
+@media (max-width: 760px) {
+
+  /*
+   --------------------------------------------------------
+   MOBILE SIDEBAR / DRAWER
+   --------------------------------------------------------
+   */
+
+  .sidebar {
+    top: var(
+      --tm-v2-mobile-topbar-height,
+      150px
+    ) !important;
+
+    height: calc(
+      100dvh -
+      var(--tm-v2-mobile-topbar-height, 150px)
+    ) !important;
+
+    max-height: calc(
+      100dvh -
+      var(--tm-v2-mobile-topbar-height, 150px)
+    ) !important;
+
+    bottom: auto !important;
+
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+
+    z-index: 9998 !important;
+
+    box-sizing: border-box !important;
+
+    /*
+     * Keep the drawer visually below the frozen topbar.
+     */
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+
+    /*
+     * Prevent iOS rubber-band scrolling from exposing
+     * content behind the drawer.
+     */
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /*
+   --------------------------------------------------------
+   ENSURE OPEN MOBILE DRAWER USES SAME POSITION
+   --------------------------------------------------------
+   */
+
+  .sidebar.v2-mobile-open {
+    top: var(
+      --tm-v2-mobile-topbar-height,
+      150px
+    ) !important;
+
+    height: calc(
+      100dvh -
+      var(--tm-v2-mobile-topbar-height, 150px)
+    ) !important;
+
+    max-height: calc(
+      100dvh -
+      var(--tm-v2-mobile-topbar-height, 150px)
+    ) !important;
+
+    bottom: auto !important;
+
+    z-index: 9998 !important;
+  }
+
+  /*
+   --------------------------------------------------------
+   NAVIGATION CONTENT
+   --------------------------------------------------------
+   */
+
+  .sidebar nav,
+  .sidebar .nav,
+  .sidebar .nav-list {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /*
+   * Give the first navigation item a little breathing room.
+   */
+  .sidebar .nav-item:first-child {
+    margin-top: 8px;
+  }
+
+}
