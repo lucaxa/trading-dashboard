@@ -1,780 +1,1790 @@
 /*
-============================================================
- TradeMind Pro
- Phase 11 — Episode / Outcome Analyzer V1
- Research-only / Isolated
+TradeMind Pro
+Phase 11 — Episode Outcome Analyzer V3
 
- PURPOSE
- -------
- Convert Phase 11 Evidence V2 observation streams into
- independent signal episodes and conservatively evaluate
- their subsequent captured price path.
+RESEARCH ONLY
+--------------
 
- SAFETY
- ------
- - READ-ONLY analysis
- - Does NOT modify V10.25
- - Does NOT modify learning-engine.js
- - Does NOT modify frontend
- - Does NOT modify Phase 11 evidence
- - Does NOT place broker orders
- - Does NOT feed learning
- - Does NOT promote strategy
+Purpose:
+Reconstruct the V10.25 paper-position lifecycle for genuine
+Phase 11 signal episodes using historical 5-minute candles.
 
- IMPORTANT
- ---------
- Observation != signal episode != trade.
+This tool:
+- does not modify V10.25
+- does not learn
+- does not optimize parameters
+- does not place orders
+- does not modify production code
 
- Outcomes are only classified when the available evidence
- proves the result.
+Usage:
 
- TARGET  -> +2R
- STOP    -> -1R
- UNRESOLVED -> cannot prove either
- INSUFFICIENT -> insufficient usable evidence
-
-============================================================
+node analyzer.js <evidence.json> <candles.json> <output.json>
 */
 
 "use strict";
 
 const fs = require("fs");
-const path = require("path");
 
-const ANALYZER_VERSION = "PHASE11_EPISODE_OUTCOME_ANALYZER_V1";
+const VERSION =
+    "PHASE11_EPISODE_OUTCOME_ANALYZER_V3";
 
-const VALID_SIGNALS = new Set(["BUY", "SELL"]);
-const ALL_SIGNALS = new Set(["BUY", "SELL", "WAIT"]);
+const ENGINE =
+    "V10.25";
+
+const TIMEFRAME =
+    "5minute";
+
+const CONFIG = Object.freeze({
+
+    ATR_PERIOD: 14,
+
+    ATR_STOP_MULTIPLIER: 1.5,
+
+    RISK_REWARD: 2,
+
+    MAX_ENTRY_GAP_ATR: 0.25,
+
+    COOLDOWN_CANDLES: 3,
+
+    ENTRY_START_MINUTES:
+        9 * 60 + 20,
+
+    ENTRY_END_MINUTES:
+        15 * 60,
+
+    SESSION_CLOSE_MINUTES:
+        15 * 60 + 25
+
+});
+
 
 /*
-------------------------------------------------------------
- Helpers
-------------------------------------------------------------
+============================================================
+ BASIC HELPERS
+============================================================
 */
 
 function finiteNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
 
-function isoTime(value) {
-  const t = new Date(value);
-  return Number.isFinite(t.getTime()) ? t.toISOString() : null;
-}
+    if (
+        value === null ||
+        value === undefined ||
+        value === ""
+    ) {
+        return null;
+    }
 
-function timestampMs(value) {
-  const t = new Date(value);
-  return Number.isFinite(t.getTime()) ? t.getTime() : null;
-}
-
-function directionOf(signal) {
-  if (signal === "BUY") return 1;
-  if (signal === "SELL") return -1;
-  return 0;
-}
-
-function normaliseObservation(raw, index) {
-  if (!raw || typeof raw !== "object") {
-    return {
-      valid: false,
-      index,
-      error: "Observation is not an object"
-    };
-  }
-
-  const timestamp =
-    raw.timestamp ??
-    raw.time ??
-    raw.capturedAt ??
-    raw.observedAt;
-
-  const signal = String(raw.signal || "").trim().toUpperCase();
-
-  const price = finiteNumber(
-    raw.price ??
-    raw.lastPrice ??
-    raw.ltp
-  );
-
-  const entry = finiteNumber(
-    raw.entry ??
-    raw.entryPrice
-  );
-
-  const stop = finiteNumber(
-    raw.stop ??
-    raw.stopLoss ??
-    raw.sl
-  );
-
-  const target = finiteNumber(
-    raw.target ??
-    raw.targetPrice ??
-    raw.tp
-  );
-
-  return {
-    valid:
-      Boolean(timestampMs(timestamp)) &&
-      ALL_SIGNALS.has(signal) &&
-      price !== null,
-
-    index,
-    timestamp: isoTime(timestamp),
-    timestampMs: timestampMs(timestamp),
-
-    signal,
-    price,
-    entry,
-    stop,
-    target,
-
-    confidence: finiteNumber(raw.confidence),
-    buyScore: finiteNumber(raw.buyScore),
-    sellScore: finiteNumber(raw.sellScore),
-
-    fingerprint:
-      raw.fingerprint ??
-      raw.decisionFingerprint ??
-      null
-  };
-}
-
-/*
-------------------------------------------------------------
- Evidence extraction
-------------------------------------------------------------
-*/
-
-function extractObservations(document) {
-  if (!document || typeof document !== "object") {
-    throw new Error("Evidence document must be an object.");
-  }
-
-  const observations =
-    Array.isArray(document.observations)
-      ? document.observations
-      : [];
-
-  return observations
-    .map(normaliseObservation)
-    .filter(o => o.valid)
-    .sort((a, b) => a.timestampMs - b.timestampMs);
-}
-
-/*
-------------------------------------------------------------
- Episode construction
-------------------------------------------------------------
-
- IMPORTANT:
- We do not treat every observation as a trade.
-
- A directional episode starts when a BUY/SELL state appears
- and continues while that directional state remains active.
-
- WAIT or opposite direction closes the current episode.
-
- We also use the signal + entry/stop/target structure as
- supporting evidence, but we never manufacture an episode
- from a malformed record.
-------------------------------------------------------------
-*/
-
-function createEpisode(startObservation, episodeNumber) {
-  const direction = directionOf(startObservation.signal);
-
-  return {
-    episode: episodeNumber,
-
-    signal: startObservation.signal,
-
-    startTimestamp: startObservation.timestamp,
-
-    endTimestamp: null,
-
-    startObservationIndex: startObservation.index,
-    endObservationIndex: null,
-
-    entry: startObservation.entry ?? startObservation.price,
-    stop: startObservation.stop,
-    target: startObservation.target,
-
-    initialPrice: startObservation.price,
-
-    initialConfidence: startObservation.confidence,
-
-    observations: 1,
-
-    direction,
-
-    outcome: "OPEN",
-
-    outcomeTimestamp: null,
-
-    outcomePrice: null,
-
-    mfePoints: null,
-    maePoints: null,
-
-    mfeR: null,
-    maeR: null,
-
-    rMultiple: null,
-
-    reason: null
-  };
-}
-
-function isSameEpisode(current, observation) {
-  if (!current) return false;
-
-  if (observation.signal !== current.signal) {
-    return false;
-  }
-
-  /*
-   Same directional signal remains one episode.
-
-   We deliberately do NOT split merely because entry/SL/target
-   values changed between heartbeat observations.
-  */
-
-  return true;
-}
-
-function closeEpisode(episode, observation, reason) {
-  episode.endTimestamp = observation
-    ? observation.timestamp
-    : episode.endTimestamp;
-
-  episode.endObservationIndex = observation
-    ? observation.index
-    : episode.endObservationIndex;
-
-  episode.reason = reason;
-
-  return episode;
-}
-
-function buildEpisodes(observations) {
-  const episodes = [];
-
-  let current = null;
-  let episodeNumber = 0;
-
-  for (const observation of observations) {
-
-    if (!VALID_SIGNALS.has(observation.signal)) {
-
-      if (current) {
-        closeEpisode(
-          current,
-          observation,
-          "NON_DIRECTIONAL_SIGNAL"
+    const n =
+        Number(
+            String(value)
+                .trim()
+                .replace(/,/g, "")
         );
 
-        episodes.push(current);
-        current = null;
-      }
-
-      continue;
-    }
-
-    if (!current) {
-      episodeNumber += 1;
-
-      current = createEpisode(
-        observation,
-        episodeNumber
-      );
-
-      continue;
-    }
-
-    if (isSameEpisode(current, observation)) {
-      current.observations += 1;
-      continue;
-    }
-
-    closeEpisode(
-      current,
-      observation,
-      "SIGNAL_CHANGED"
-    );
-
-    episodes.push(current);
-
-    episodeNumber += 1;
-
-    current = createEpisode(
-      observation,
-      episodeNumber
-    );
-  }
-
-  if (current) {
-    closeEpisode(
-      current,
-      null,
-      "SESSION_END"
-    );
-
-    episodes.push(current);
-  }
-
-  return episodes;
+    return Number.isFinite(n)
+        ? n
+        : null;
 }
+
+
+function timestampMs(value) {
+
+    if (
+        value === null ||
+        value === undefined
+    ) {
+        return null;
+    }
+
+    if (
+        typeof value === "number"
+    ) {
+
+        if (!Number.isFinite(value)) {
+            return null;
+        }
+
+        return value < 100000000000
+            ? value * 1000
+            : value;
+    }
+
+    const numeric =
+        Number(value);
+
+    if (
+        Number.isFinite(numeric)
+    ) {
+
+        return numeric < 100000000000
+            ? numeric * 1000
+            : numeric;
+    }
+
+    const parsed =
+        Date.parse(String(value));
+
+    return Number.isFinite(parsed)
+        ? parsed
+        : null;
+}
+
+
+function iso(ms) {
+
+    return Number.isFinite(ms)
+        ? new Date(ms).toISOString()
+        : null;
+}
+
 
 /*
-------------------------------------------------------------
- Price-path outcome evaluation
-------------------------------------------------------------
-
- Conservative rule:
-
- BUY:
-   target reached when price >= target
-   stop reached when price <= stop
-
- SELL:
-   target reached when price <= target
-   stop reached when price >= stop
-
- If both are touched by the same observation and we do not
- have intrabar ordering information, classify as UNRESOLVED.
-
- This avoids inventing which level was hit first.
-------------------------------------------------------------
+============================================================
+ IST
+============================================================
 */
 
-function validTradeStructure(episode) {
-  return (
-    episode.entry !== null &&
-    episode.stop !== null &&
-    episode.target !== null &&
-    episode.entry > 0 &&
-    episode.stop > 0 &&
-    episode.target > 0
-  );
+function istParts(ms) {
+
+    const date =
+        new Date(
+            ms +
+            5.5 *
+            60 *
+            60 *
+            1000
+        );
+
+    const hour =
+        date.getUTCHours();
+
+    const minute =
+        date.getUTCMinutes();
+
+    return {
+
+        date:
+            date
+                .toISOString()
+                .slice(0, 10),
+
+        hour,
+
+        minute,
+
+        minutes:
+            hour * 60 + minute
+
+    };
 }
 
-function riskPoints(episode) {
-  if (!validTradeStructure(episode)) return null;
-
-  return Math.abs(
-    episode.entry - episode.stop
-  );
-}
-
-function evaluateEpisode(episode, observations) {
-
-  if (!validTradeStructure(episode)) {
-    episode.outcome = "INSUFFICIENT";
-    episode.reason =
-      "Missing valid entry/stop/target structure.";
-
-    return episode;
-  }
-
-  const risk = riskPoints(episode);
-
-  if (!risk || risk <= 0) {
-    episode.outcome = "INSUFFICIENT";
-    episode.reason =
-      "Invalid or zero risk distance.";
-
-    return episode;
-  }
-
-  const startTime = timestampMs(
-    episode.startTimestamp
-  );
-
-  const forward = observations.filter(
-    observation =>
-      observation.timestampMs > startTime
-  );
-
-  if (!forward.length) {
-    episode.outcome = "UNRESOLVED";
-    episode.reason =
-      "No subsequent captured observations.";
-
-    return episode;
-  }
-
-  let maxFavourable = 0;
-  let maxAdverse = 0;
-
-  for (const observation of forward) {
-
-    const move =
-      (observation.price - episode.entry) *
-      episode.direction;
-
-    if (move > maxFavourable) {
-      maxFavourable = move;
-    }
-
-    if (move < maxAdverse) {
-      maxAdverse = move;
-    }
-
-    const targetHit =
-      episode.signal === "BUY"
-        ? observation.price >= episode.target
-        : observation.price <= episode.target;
-
-    const stopHit =
-      episode.signal === "BUY"
-        ? observation.price <= episode.stop
-        : observation.price >= episode.stop;
-
-    if (targetHit && stopHit) {
-
-      episode.outcome = "UNRESOLVED";
-
-      episode.reason =
-        "Target and stop are both touched by the same captured observation; intrabar order unavailable.";
-
-      break;
-    }
-
-    if (targetHit) {
-
-      episode.outcome = "TARGET";
-
-      episode.outcomeTimestamp =
-        observation.timestamp;
-
-      episode.outcomePrice =
-        observation.price;
-
-      episode.rMultiple = 2;
-
-      episode.reason =
-        "Target reached before stop in captured observations.";
-
-      break;
-    }
-
-    if (stopHit) {
-
-      episode.outcome = "STOP";
-
-      episode.outcomeTimestamp =
-        observation.timestamp;
-
-      episode.outcomePrice =
-        observation.price;
-
-      episode.rMultiple = -1;
-
-      episode.reason =
-        "Stop reached before target in captured observations.";
-
-      break;
-    }
-  }
-
-  episode.mfePoints = maxFavourable;
-  episode.maePoints = Math.abs(maxAdverse);
-
-  episode.mfeR =
-    maxFavourable / risk;
-
-  episode.maeR =
-    Math.abs(maxAdverse) / risk;
-
-  if (episode.outcome === "OPEN") {
-    episode.outcome = "UNRESOLVED";
-
-    episode.reason =
-      "Neither target nor stop was demonstrably reached.";
-  }
-
-  return episode;
-}
 
 /*
-------------------------------------------------------------
- Session analysis
-------------------------------------------------------------
+============================================================
+ CANDLE NORMALIZATION
+============================================================
 */
 
-function analyzeEvidence(document) {
+function normalizeCandle(raw, index) {
 
-  const observations =
-    extractObservations(document);
+    let timestamp;
+    let open;
+    let high;
+    let low;
+    let close;
+    let volume;
 
-  const episodes =
-    buildEpisodes(observations);
+    if (
+        Array.isArray(raw)
+    ) {
 
-  const evaluated =
-    episodes.map(
-      episode =>
-        evaluateEpisode(
-          episode,
-          observations
+        if (raw.length < 6) {
+            return null;
+        }
+
+        timestamp =
+            timestampMs(raw[0]);
+
+        open =
+            finiteNumber(raw[1]);
+
+        high =
+            finiteNumber(raw[2]);
+
+        low =
+            finiteNumber(raw[3]);
+
+        close =
+            finiteNumber(raw[4]);
+
+        volume =
+            finiteNumber(raw[5]);
+
+    } else if (
+        raw &&
+        typeof raw === "object"
+    ) {
+
+        timestamp =
+            timestampMs(
+                raw.timestamp ??
+                raw.ts ??
+                raw.time
+            );
+
+        open =
+            finiteNumber(
+                raw.open ??
+                raw.o
+            );
+
+        high =
+            finiteNumber(
+                raw.high ??
+                raw.h
+            );
+
+        low =
+            finiteNumber(
+                raw.low ??
+                raw.l
+            );
+
+        close =
+            finiteNumber(
+                raw.close ??
+                raw.c
+            );
+
+        volume =
+            finiteNumber(
+                raw.volume ??
+                raw.v
+            );
+
+    } else {
+
+        return null;
+    }
+
+    if (
+        ![
+            timestamp,
+            open,
+            high,
+            low,
+            close
+        ].every(Number.isFinite)
+    ) {
+        return null;
+    }
+
+    if (
+        high < low ||
+        high < open ||
+        high < close ||
+        low > open ||
+        low > close
+    ) {
+        return null;
+    }
+
+    const ist =
+        istParts(timestamp);
+
+    return {
+
+        index,
+
+        timestamp,
+
+        iso:
+            iso(timestamp),
+
+        date:
+            ist.date,
+
+        minutes:
+            ist.minutes,
+
+        open,
+        high,
+        low,
+        close,
+
+        volume:
+            volume === null
+                ? 0
+                : volume
+
+    };
+}
+
+
+function extractCandleArray(data) {
+
+    if (
+        Array.isArray(data)
+    ) {
+        return data;
+    }
+
+    const candidates = [
+
+        data?.candles,
+
+        data?.data?.candles,
+
+        data?.data?.NIDX_40000001?.candles,
+
+        data?.NIDX_40000001?.candles,
+
+        data?.data?.NIDX_40000001,
+
+        data?.NIDX_40000001,
+
+        data?.data
+
+    ];
+
+    for (
+        const candidate
+        of candidates
+    ) {
+
+        if (
+            Array.isArray(candidate) &&
+            candidate.length > 0
+        ) {
+
+            return candidate;
+        }
+    }
+
+    return [];
+}
+
+
+function loadCandles(file) {
+
+    const raw =
+        JSON.parse(
+            fs.readFileSync(
+                file,
+                "utf8"
+            )
+        );
+
+    const array =
+        extractCandleArray(raw);
+
+    const candles =
+        array
+            .map(
+                normalizeCandle
+            )
+            .filter(Boolean)
+            .sort(
+                (a, b) =>
+                    a.timestamp -
+                    b.timestamp
+            );
+
+    if (!candles.length) {
+
+        throw new Error(
+            "No usable historical candles found."
+        );
+    }
+
+    return candles;
+}
+
+
+/*
+============================================================
+ EVIDENCE NORMALIZATION
+============================================================
+*/
+
+function loadEvidence(file) {
+
+    const data =
+        JSON.parse(
+            fs.readFileSync(
+                file,
+                "utf8"
+            )
+        );
+
+    if (
+        !Array.isArray(
+            data.observations
         )
-    );
+    ) {
 
-  const counts = {
-    TARGET: 0,
-    STOP: 0,
-    UNRESOLVED: 0,
-    INSUFFICIENT: 0
-  };
-
-  for (const episode of evaluated) {
-    if (counts[episode.outcome] !== undefined) {
-      counts[episode.outcome] += 1;
+        throw new Error(
+            "Evidence file has no observations array."
+        );
     }
-  }
 
-  const resolved =
-    counts.TARGET +
-    counts.STOP;
+    const observations =
+        data.observations
+            .map(
+                (observation, index) => {
 
-  const wins =
-    counts.TARGET;
+                    const timestamp =
+                        timestampMs(
+                            observation.timestamp ??
+                            observation.ts ??
+                            observation.time
+                        );
 
-  const losses =
-    counts.STOP;
+                    const signal =
+                        String(
+                            observation.signal ??
+                            observation.action ??
+                            "WAIT"
+                        )
+                            .trim()
+                            .toUpperCase();
 
-  const winRate =
-    resolved > 0
-      ? wins / resolved
-      : null;
+                    return {
 
-  const averageR =
-    resolved > 0
-      ? evaluated
-          .filter(
-            e =>
-              e.outcome === "TARGET" ||
-              e.outcome === "STOP"
-          )
-          .reduce(
-            (sum, e) =>
-              sum + (e.rMultiple || 0),
-            0
-          ) / resolved
-      : null;
+                        ...observation,
 
-  return {
-    analyzerVersion: ANALYZER_VERSION,
+                        index,
 
-    evidence: {
-      schema: document.schema ?? null,
-      engine: document.engine ?? null,
-      mode: document.mode ?? null,
+                        timestamp,
 
-      exportedAt:
-        document.exportedAt ?? null,
+                        signal
 
-      sessionStart:
-        document.sessionStart ?? null,
+                    };
 
-      rawObservationCount:
-        Array.isArray(document.observations)
-          ? document.observations.length
-          : 0,
+                }
+            )
+            .filter(
+                observation =>
+                    Number.isFinite(
+                        observation.timestamp
+                    )
+            )
+            .sort(
+                (a, b) =>
+                    a.timestamp -
+                    b.timestamp
+            );
 
-      validObservationCount:
-        observations.length
-    },
+    return {
 
-    episodeSummary: {
-      totalEpisodes: evaluated.length,
+        metadata:
+            data,
 
-      target: counts.TARGET,
-      stop: counts.STOP,
-      unresolved: counts.UNRESOLVED,
-      insufficient: counts.INSUFFICIENT,
+        observations
 
-      resolvedEpisodes: resolved,
-
-      winRate,
-
-      averageR
-    },
-
-    episodes: evaluated
-  };
+    };
 }
+
 
 /*
-------------------------------------------------------------
- CLI
-------------------------------------------------------------
+============================================================
+ CANDLE LOOKUP
+============================================================
 */
 
-function loadJson(filePath) {
-
-  const absolutePath =
-    path.resolve(filePath);
-
-  if (!fs.existsSync(absolutePath)) {
-    throw new Error(
-      `File not found: ${absolutePath}`
-    );
-  }
-
-  const raw =
-    fs.readFileSync(
-      absolutePath,
-      "utf8"
-    );
-
-  return JSON.parse(raw);
-}
-
-function writeOutput(
-  inputPath,
-  outputPath
+function lastCandleAtOrBefore(
+    candles,
+    timestamp
 ) {
 
-  const document =
-    loadJson(inputPath);
+    let low = 0;
 
-  const result =
-    analyzeEvidence(document);
+    let high =
+        candles.length - 1;
 
-  fs.writeFileSync(
-    outputPath,
-    JSON.stringify(
-      result,
-      null,
-      2
-    ),
-    "utf8"
-  );
+    let answer = -1;
 
-  return result;
+    while (
+        low <= high
+    ) {
+
+        const mid =
+            Math.floor(
+                (low + high) / 2
+            );
+
+        if (
+            candles[mid].timestamp <=
+            timestamp
+        ) {
+
+            answer = mid;
+
+            low =
+                mid + 1;
+
+        } else {
+
+            high =
+                mid - 1;
+        }
+    }
+
+    return answer;
 }
 
-function printSummary(result) {
 
-  console.log("");
-  console.log(
-    "===================================================="
-  );
-  console.log(
-    " TradeMind Pro — Phase 11 Episode Analyzer V1"
-  );
-  console.log(
-    "===================================================="
-  );
+function firstCandleAfter(
+    candles,
+    timestamp
+) {
 
-  console.log(
-    `Engine: ${result.evidence.engine}`
-  );
+    let low = 0;
 
-  console.log(
-    `Mode: ${result.evidence.mode}`
-  );
+    let high =
+        candles.length - 1;
 
-  console.log(
-    `Raw observations: ${result.evidence.rawObservationCount}`
-  );
+    let answer =
+        candles.length;
 
-  console.log(
-    `Valid observations: ${result.evidence.validObservationCount}`
-  );
+    while (
+        low <= high
+    ) {
 
-  console.log(
-    `Independent episodes: ${result.episodeSummary.totalEpisodes}`
-  );
+        const mid =
+            Math.floor(
+                (low + high) / 2
+            );
 
-  console.log(
-    `TARGET: ${result.episodeSummary.target}`
-  );
+        if (
+            candles[mid].timestamp >
+            timestamp
+        ) {
 
-  console.log(
-    `STOP: ${result.episodeSummary.stop}`
-  );
+            answer = mid;
 
-  console.log(
-    `UNRESOLVED: ${result.episodeSummary.unresolved}`
-  );
+            high =
+                mid - 1;
 
-  console.log(
-    `INSUFFICIENT: ${result.episodeSummary.insufficient}`
-  );
+        } else {
 
-  console.log(
-    `Resolved: ${result.episodeSummary.resolvedEpisodes}`
-  );
+            low =
+                mid + 1;
+        }
+    }
 
-  console.log(
-    `Win rate: ${
-      result.episodeSummary.winRate === null
-        ? "N/A"
-        : (
-            result.episodeSummary.winRate * 100
-          ).toFixed(2) + "%"
-    }`
-  );
-
-  console.log(
-    `Average R: ${
-      result.episodeSummary.averageR === null
-        ? "N/A"
-        : result.episodeSummary.averageR.toFixed(4)
-    }`
-  );
-
-  console.log(
-    "===================================================="
-  );
-  console.log("");
+    return answer;
 }
 
-if (require.main === module) {
 
-  const input =
-    process.argv[2];
+/*
+============================================================
+ ATR
+============================================================
+*/
 
-  const output =
-    process.argv[3] ||
-    "phase11-analysis-output.json";
+function trueRange(
+    current,
+    previous
+) {
 
-  if (!input) {
+    const high =
+        current.high;
 
-    console.error(
-      "Usage: node analyzer.js <input.json> [output.json]"
+    const low =
+        current.low;
+
+    if (
+        !Number.isFinite(high) ||
+        !Number.isFinite(low)
+    ) {
+        return null;
+    }
+
+    if (
+        !previous ||
+        !Number.isFinite(
+            previous.close
+        )
+    ) {
+
+        return high - low;
+    }
+
+    return Math.max(
+
+        high - low,
+
+        Math.abs(
+            high -
+            previous.close
+        ),
+
+        Math.abs(
+            low -
+            previous.close
+        )
+
     );
+}
 
-    process.exit(1);
-  }
 
-  try {
+function calculateAtr14(
+    candles,
+    index
+) {
+
+    /*
+    We need ATR_PERIOD completed
+    true ranges ending at the signal
+    candle, with one preceding candle
+    for the first true range.
+    */
+
+    const end =
+        index;
+
+    const start =
+        end -
+        CONFIG.ATR_PERIOD;
+
+    if (
+        start < 0
+    ) {
+        return null;
+    }
+
+    const ranges = [];
+
+    for (
+        let i = start + 1;
+        i <= end;
+        i++
+    ) {
+
+        const range =
+            trueRange(
+                candles[i],
+                candles[i - 1]
+            );
+
+        if (
+            !Number.isFinite(range)
+        ) {
+            return null;
+        }
+
+        ranges.push(range);
+    }
+
+    if (
+        ranges.length !==
+        CONFIG.ATR_PERIOD
+    ) {
+        return null;
+    }
+
+    /*
+    Match V10.25's Wilder-style
+    recursive ATR calculation.
+    */
+
+    let value =
+        ranges
+            .reduce(
+                (sum, item) =>
+                    sum + item,
+                0
+            ) /
+        CONFIG.ATR_PERIOD;
+
+    return value;
+}
+
+
+/*
+============================================================
+ SIGNAL EPISODES
+============================================================
+*/
+
+function buildEpisodes(
+    observations
+) {
+
+    const episodes = [];
+
+    let current = null;
+
+    let episodeNumber = 0;
+
+    for (
+        const observation
+        of observations
+    ) {
+
+        const signal =
+            observation.signal;
+
+        if (
+            signal !== "BUY" &&
+            signal !== "SELL"
+        ) {
+
+            if (current) {
+
+                current.endTimestamp =
+                    observation.timestamp;
+
+                current.endReason =
+                    "NON_DIRECTIONAL_SIGNAL";
+
+                episodes.push(current);
+
+                current = null;
+            }
+
+            continue;
+        }
+
+        if (
+            !current ||
+            current.signal !== signal
+        ) {
+
+            if (current) {
+
+                current.endTimestamp =
+                    observation.timestamp;
+
+                current.endReason =
+                    "SIGNAL_CHANGED";
+
+                episodes.push(current);
+            }
+
+            current = {
+
+                episode:
+                    ++episodeNumber,
+
+                signal,
+
+                startTimestamp:
+                    observation.timestamp,
+
+                endTimestamp:
+                    null,
+
+                observations: 1,
+
+                sourceObservationIndex:
+                    observation.index
+
+            };
+
+        } else {
+
+            current.observations++;
+        }
+    }
+
+    if (current) {
+
+        current.endReason =
+            "SESSION_END";
+
+        episodes.push(current);
+    }
+
+    return episodes;
+}
+
+
+/*
+============================================================
+ POSITION REPLAY
+============================================================
+*/
+
+function replayPosition(
+    position,
+    candles,
+    startIndex,
+    sessionDate
+) {
+
+    let mfePoints = 0;
+
+    let maePoints = 0;
+
+    for (
+        let i = startIndex;
+        i < candles.length;
+        i++
+    ) {
+
+        const candle =
+            candles[i];
+
+        if (
+            candle.date !==
+            sessionDate
+        ) {
+            break;
+        }
+
+        const favourable =
+            position.side === "BUY"
+                ? candle.high -
+                    position.entry
+                : position.entry -
+                    candle.low;
+
+        const adverse =
+            position.side === "BUY"
+                ? position.entry -
+                    candle.low
+                : candle.high -
+                    position.entry;
+
+        mfePoints =
+            Math.max(
+                mfePoints,
+                favourable
+            );
+
+        maePoints =
+            Math.max(
+                maePoints,
+                adverse
+            );
+
+        const targetHit =
+            position.side === "BUY"
+                ? candle.high >=
+                    position.target
+                : candle.low <=
+                    position.target;
+
+        const stopHit =
+            position.side === "BUY"
+                ? candle.low <=
+                    position.stop
+                : candle.high >=
+                    position.stop;
+
+        /*
+        Conservative OHLC ambiguity rule:
+        if target and stop are both inside
+        the same candle, classify STOP first.
+        We do not assume favourable intrabar
+        ordering that OHLC data cannot prove.
+        */
+
+        if (
+            targetHit &&
+            stopHit
+        ) {
+
+            return {
+
+                classification:
+                    "RESOLVED_STOP",
+
+                outcome:
+                    "STOP",
+
+                outcomeTimestamp:
+                    candle.timestamp,
+
+                outcomePrice:
+                    position.stop,
+
+                mfePoints,
+
+                maePoints,
+
+                reason:
+                    "TARGET_AND_STOP_SAME_CANDLE_CONSERVATIVE_STOP"
+
+            };
+        }
+
+        if (stopHit) {
+
+            return {
+
+                classification:
+                    "RESOLVED_STOP",
+
+                outcome:
+                    "STOP",
+
+                outcomeTimestamp:
+                    candle.timestamp,
+
+                outcomePrice:
+                    position.stop,
+
+                mfePoints,
+
+                maePoints,
+
+                reason:
+                    "STOP LOSS"
+
+            };
+        }
+
+        if (targetHit) {
+
+            return {
+
+                classification:
+                    "RESOLVED_TARGET",
+
+                outcome:
+                    "TARGET",
+
+                outcomeTimestamp:
+                    candle.timestamp,
+
+                outcomePrice:
+                    position.target,
+
+                mfePoints,
+
+                maePoints,
+
+                reason:
+                    "TARGET"
+
+            };
+        }
+
+        if (
+            candle.minutes >=
+            CONFIG.SESSION_CLOSE_MINUTES
+        ) {
+
+            return {
+
+                classification:
+                    "RESOLVED_SESSION_CLOSE",
+
+                outcome:
+                    "SESSION CLOSE",
+
+                outcomeTimestamp:
+                    candle.timestamp,
+
+                outcomePrice:
+                    candle.close,
+
+                mfePoints,
+
+                maePoints,
+
+                reason:
+                    "SESSION CLOSE"
+
+            };
+        }
+    }
+
+    return {
+
+        classification:
+            "UNRESOLVED",
+
+        outcome:
+            null,
+
+        outcomeTimestamp:
+            null,
+
+        outcomePrice:
+            null,
+
+        mfePoints,
+
+        maePoints,
+
+        reason:
+            "No subsequent candle resolved the position."
+
+    };
+}
+
+
+/*
+============================================================
+ EPISODE ANALYSIS
+============================================================
+*/
+
+function analyzeEpisode(
+    episode,
+    candles,
+    lifecycle
+) {
+
+    const result = {
+
+        episode:
+            episode.episode,
+
+        signal:
+            episode.signal,
+
+        signalTimestamp:
+            iso(
+                episode.startTimestamp
+            ),
+
+        signalEndTimestamp:
+            iso(
+                episode.endTimestamp
+            ),
+
+        observed:
+            {
+
+                observations:
+                    episode.observations,
+
+                endReason:
+                    episode.endReason
+
+            },
+
+        classification:
+            null,
+
+        entryTimestamp:
+            null,
+
+        entry:
+            null,
+
+        atr14:
+            null,
+
+        risk:
+            null,
+
+        stop:
+            null,
+
+        target:
+            null,
+
+        outcome:
+            null,
+
+        outcomeTimestamp:
+            null,
+
+        outcomePrice:
+            null,
+
+        rMultiple:
+            null,
+
+        mfeR:
+            null,
+
+        maeR:
+            null,
+
+        reason:
+            null
+
+    };
+
+
+    /*
+    --------------------------------------------------------
+    Signal candle
+    --------------------------------------------------------
+    */
+
+    const signalIndex =
+        lastCandleAtOrBefore(
+            candles,
+            episode.startTimestamp
+        );
+
+    if (
+        signalIndex < 0
+    ) {
+
+        result.classification =
+            "INSUFFICIENT_CONTEXT";
+
+        result.reason =
+            "No historical candle at or before signal.";
+
+        return result;
+    }
+
+    const signalCandle =
+        candles[signalIndex];
+
+    const sessionDate =
+        signalCandle.date;
+
+
+    /*
+    --------------------------------------------------------
+    Entry window
+    --------------------------------------------------------
+    */
+
+    if (
+        signalCandle.minutes <
+            CONFIG.ENTRY_START_MINUTES ||
+        signalCandle.minutes >
+            CONFIG.ENTRY_END_MINUTES
+    ) {
+
+        result.classification =
+            "BLOCKED_ENTRY_WINDOW";
+
+        result.reason =
+            "Signal candle outside V10.25 entry window.";
+
+        return result;
+    }
+
+
+    /*
+    --------------------------------------------------------
+    Lifecycle
+    --------------------------------------------------------
+    */
+
+    if (
+        signalIndex <=
+        lifecycle.blockedUntilCandleIndex
+    ) {
+
+        result.classification =
+            "BLOCKED_LIFECYCLE";
+
+        result.reason =
+            "Blocked by one-position/cooldown lifecycle.";
+
+        return result;
+    }
+
+
+    /*
+    --------------------------------------------------------
+    ATR
+    --------------------------------------------------------
+    */
+
+    const atr14 =
+        calculateAtr14(
+            candles,
+            signalIndex
+        );
+
+    if (
+        !Number.isFinite(atr14) ||
+        atr14 <= 0
+    ) {
+
+        result.classification =
+            "INSUFFICIENT_CONTEXT";
+
+        result.reason =
+            "Insufficient historical candles for ATR(14).";
+
+        return result;
+    }
+
+    result.atr14 =
+        atr14;
+
+
+    /*
+    --------------------------------------------------------
+    Next candle
+    --------------------------------------------------------
+    */
+
+    const entryIndex =
+        signalIndex + 1;
+
+    if (
+        entryIndex >=
+        candles.length
+    ) {
+
+        result.classification =
+            "UNRESOLVED";
+
+        result.reason =
+            "No next candle available for entry.";
+
+        return result;
+    }
+
+    const entryCandle =
+        candles[entryIndex];
+
+    if (
+        entryCandle.date !==
+        sessionDate
+    ) {
+
+        result.classification =
+            "UNRESOLVED";
+
+        result.reason =
+            "No same-session next candle available.";
+
+        return result;
+    }
+
+
+    /*
+    --------------------------------------------------------
+    Entry gap
+    --------------------------------------------------------
+    */
+
+    const entry =
+        entryCandle.open;
+
+    const signalClose =
+        signalCandle.close;
+
+    const entryGapAtr =
+        (
+            entry -
+            signalClose
+        ) /
+        atr14;
+
+    if (
+        Math.abs(entryGapAtr) >
+        CONFIG.MAX_ENTRY_GAP_ATR
+    ) {
+
+        result.classification =
+            "BLOCKED_ENTRY_WINDOW";
+
+        result.reason =
+            "Next-candle entry gap exceeds V10.25 limit.";
+
+        return result;
+    }
+
+
+    /*
+    --------------------------------------------------------
+    Position
+    --------------------------------------------------------
+    */
+
+    const risk =
+        atr14 *
+        CONFIG.ATR_STOP_MULTIPLIER;
+
+    const reward =
+        risk *
+        CONFIG.RISK_REWARD;
+
+    const side =
+        episode.signal;
+
+    const stop =
+        side === "BUY"
+            ? entry - risk
+            : entry + risk;
+
+    const target =
+        side === "BUY"
+            ? entry + reward
+            : entry - reward;
+
+    result.entryTimestamp =
+        iso(
+            entryCandle.timestamp
+        );
+
+    result.entry =
+        entry;
+
+    result.risk =
+        risk;
+
+    result.stop =
+        stop;
+
+    result.target =
+        target;
+
+
+    /*
+    --------------------------------------------------------
+    Replay
+    --------------------------------------------------------
+    */
+
+    const replay =
+        replayPosition(
+
+            {
+
+                side,
+
+                entry,
+
+                stop,
+
+                target,
+
+                risk
+
+            },
+
+            candles,
+
+            entryIndex,
+
+            sessionDate
+
+        );
+
+
+    result.classification =
+        replay.classification;
+
+    result.outcome =
+        replay.outcome;
+
+    result.outcomeTimestamp =
+        iso(
+            replay.outcomeTimestamp
+        );
+
+    result.outcomePrice =
+        replay.outcomePrice;
+
+    result.reason =
+        replay.reason;
+
+    result.mfeR =
+        replay.mfePoints /
+        risk;
+
+    result.maeR =
+        replay.maePoints /
+        risk;
+
+    if (
+        replay.outcome ===
+        "TARGET"
+    ) {
+
+        result.rMultiple =
+            CONFIG.RISK_REWARD;
+
+    } else if (
+        replay.outcome ===
+        "STOP"
+    ) {
+
+        result.rMultiple =
+            -1;
+
+    } else if (
+        replay.outcome ===
+        "SESSION CLOSE"
+    ) {
+
+        const points =
+            side === "BUY"
+                ? replay.outcomePrice -
+                    entry
+                : entry -
+                    replay.outcomePrice;
+
+        result.rMultiple =
+            points /
+            risk;
+    }
+
+
+    /*
+    --------------------------------------------------------
+    Lifecycle update
+    --------------------------------------------------------
+    */
+
+    if (
+        replay.classification ===
+            "RESOLVED_TARGET" ||
+        replay.classification ===
+            "RESOLVED_STOP" ||
+        replay.classification ===
+            "RESOLVED_SESSION_CLOSE"
+    ) {
+
+        let outcomeIndex =
+            lastCandleAtOrBefore(
+                candles,
+                replay.outcomeTimestamp
+            );
+
+        if (
+            outcomeIndex < 0
+        ) {
+            outcomeIndex =
+                entryIndex;
+        }
+
+        lifecycle.blockedUntilCandleIndex =
+            outcomeIndex +
+            CONFIG.COOLDOWN_CANDLES;
+    }
+
+    return result;
+}
+
+
+/*
+============================================================
+ SESSION ANALYSIS
+============================================================
+*/
+
+function analyzeSession(
+    evidence,
+    candles
+) {
+
+    const episodes =
+        buildEpisodes(
+            evidence.observations
+        );
+
+    const lifecycle = {
+
+        blockedUntilCandleIndex:
+            -1
+
+    };
+
+    const results = [];
+
+    for (
+        const episode
+        of episodes
+    ) {
+
+        results.push(
+            analyzeEpisode(
+                episode,
+                candles,
+                lifecycle
+            )
+        );
+    }
+
+    const summary = {
+
+        observedEpisodes:
+            results.length,
+
+        resolvedTarget:
+            results.filter(
+                r =>
+                    r.classification ===
+                    "RESOLVED_TARGET"
+            ).length,
+
+        resolvedStop:
+            results.filter(
+                r =>
+                    r.classification ===
+                    "RESOLVED_STOP"
+            ).length,
+
+        resolvedSessionClose:
+            results.filter(
+                r =>
+                    r.classification ===
+                    "RESOLVED_SESSION_CLOSE"
+            ).length,
+
+        unresolved:
+            results.filter(
+                r =>
+                    r.classification ===
+                    "UNRESOLVED"
+            ).length,
+
+        blockedEntryWindow:
+            results.filter(
+                r =>
+                    r.classification ===
+                    "BLOCKED_ENTRY_WINDOW"
+            ).length,
+
+        blockedLifecycle:
+            results.filter(
+                r =>
+                    r.classification ===
+                    "BLOCKED_LIFECYCLE"
+            ).length,
+
+        insufficientContext:
+            results.filter(
+                r =>
+                    r.classification ===
+                    "INSUFFICIENT_CONTEXT"
+            ).length
+
+    };
+
+
+    const rValues =
+        results
+            .map(
+                r => r.rMultiple
+            )
+            .filter(
+                Number.isFinite
+            );
+
+    summary.netR =
+        rValues.reduce(
+            (sum, value) =>
+                sum + value,
+            0
+        );
+
+    const decisive =
+        results.filter(
+            r =>
+                r.outcome ===
+                    "TARGET" ||
+                r.outcome ===
+                    "STOP"
+        );
+
+    summary.resolvedTrades =
+        decisive.length;
+
+    summary.winRatePct =
+        decisive.length
+            ? (
+                decisive.filter(
+                    r =>
+                        r.outcome ===
+                        "TARGET"
+                ).length /
+                decisive.length
+            ) * 100
+            : null;
+
+    return {
+
+        analyzerVersion:
+            VERSION,
+
+        engine:
+            ENGINE,
+
+        timeframe:
+            TIMEFRAME,
+
+        config:
+            CONFIG,
+
+        session:
+            {
+
+                start:
+                    iso(
+                        evidence.observations[0]
+                            ?.timestamp
+                    ),
+
+                end:
+                    iso(
+                        evidence.observations[
+                            evidence.observations.length - 1
+                        ]
+                            ?.timestamp
+                    )
+
+            },
+
+        candleRange:
+            {
+
+                first:
+                    candles[0]?.iso,
+
+                last:
+                    candles[
+                        candles.length - 1
+                    ]?.iso,
+
+                count:
+                    candles.length
+
+            },
+
+        summary,
+
+        episodes:
+            results
+
+    };
+}
+
+
+/*
+============================================================
+ CLI
+============================================================
+*/
+
+function main() {
+
+    const [
+        ,
+        ,
+        evidenceFile,
+        candleFile,
+        outputFile
+    ] =
+        process.argv;
+
+    if (
+        !evidenceFile ||
+        !candleFile ||
+        !outputFile
+    ) {
+
+        console.error(
+            "Usage: node analyzer.js <evidence.json> <candles.json> <output.json>"
+        );
+
+        process.exit(1);
+    }
+
+    const evidence =
+        loadEvidence(
+            evidenceFile
+        );
+
+    const candles =
+        loadCandles(
+            candleFile
+        );
 
     const result =
-      writeOutput(
-        input,
-        output
-      );
+        analyzeSession(
+            evidence,
+            candles
+        );
 
-    printSummary(result);
-
-  } catch (error) {
-
-    console.error(
-      "Analyzer failed:",
-      error.message
+    fs.mkdirSync(
+        require("path").dirname(
+            outputFile
+        ),
+        {
+            recursive: true
+        }
     );
 
-    process.exit(1);
-  }
+    fs.writeFileSync(
+
+        outputFile,
+
+        JSON.stringify(
+            result,
+            null,
+            2
+        ) +
+
+        "\n"
+
+    );
+
+    console.log(
+        "===================================================="
+    );
+
+    console.log(
+        "TradeMind Pro — Phase 11 Analyzer V3"
+    );
+
+    console.log(
+        "===================================================="
+    );
+
+    console.log(
+        "Episodes:",
+        result.summary.observedEpisodes
+    );
+
+    console.log(
+        "Resolved TARGET:",
+        result.summary.resolvedTarget
+    );
+
+    console.log(
+        "Resolved STOP:",
+        result.summary.resolvedStop
+    );
+
+    console.log(
+        "Session close:",
+        result.summary.resolvedSessionClose
+    );
+
+    console.log(
+        "Blocked lifecycle:",
+        result.summary.blockedLifecycle
+    );
+
+    console.log(
+        "Blocked entry window:",
+        result.summary.blockedEntryWindow
+    );
+
+    console.log(
+        "Insufficient context:",
+        result.summary.insufficientContext
+    );
+
+    console.log(
+        "Unresolved:",
+        result.summary.unresolved
+    );
+
+    console.log(
+        "Net R:",
+        Number(
+            result.summary.netR
+        ).toFixed(4)
+    );
+
+    console.log(
+        "Output:",
+        outputFile
+    );
+
 }
 
-module.exports = {
-  ANALYZER_VERSION,
-  extractObservations,
-  buildEpisodes,
-  evaluateEpisode,
-  analyzeEvidence
-};
+main();

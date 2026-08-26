@@ -1,0 +1,177 @@
+{
+  "schema": "TradeMind-Pro-M1-B-Sequential-Counterfactual-v1",
+  "purpose": "Determine whether lifecycle-blocked Phase 11 opportunities could have produced profitable sequential one-position trading under V10.25 rules.",
+  "status": "COMPLETED",
+  "researchOnly": true,
+  "realOrders": false,
+  "learningEnabled": false,
+  "strategyMutation": false,
+  "baseline": {
+    "lifecycleBlockedEpisodes": 99,
+    "expectedLifecycleBlockedEpisodes": 99,
+    "baselineCheck": "PASS"
+  },
+  "deduplication": {
+    "identityKey": [
+      "file/session",
+      "signalCandleTimestamp",
+      "entryTimestamp",
+      "signal",
+      "entry",
+      "stop",
+      "target"
+    ],
+    "episodeCount": 99,
+    "uniqueOpportunities": 64,
+    "duplicateEpisodes": 35
+  },
+  "sequentialReplay": {
+    "rule": "Accept an opportunity only when its entry timestamp is at or after the completion timestamp of the currently active accepted opportunity.",
+    "acceptedTrades": 14,
+    "rejectedOverlap": 48,
+    "entryGapBlocked": 2,
+    "noCompletion": 2,
+    "replayAccounting": 66
+  },
+  "outcomes": {
+    "target": 2,
+    "stop": 10,
+    "sessionClose": 2
+  },
+  "performance": {
+    "netR": -5.392430501588261,
+    "averageRPerAcceptedTrade": -0.38517360725630434
+  },
+  "acceptedTrades": [
+    {
+      "episodes": [
+        8,
+        9
+      ],
+      "entryTimestamp": 1787121300000,
+      "outcomeTimestamp": 1787130300000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        16
+      ],
+      "entryTimestamp": 1787130300000,
+      "outcomeTimestamp": 1787130300000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        17
+      ],
+      "entryTimestamp": 1787130600000,
+      "outcomeTimestamp": 1787132700000,
+      "outcome": "SESSION_CLOSE",
+      "rMultiple": -0.04170586390721364
+    },
+    {
+      "episodes": [
+        8
+      ],
+      "entryTimestamp": 1787205000000,
+      "outcomeTimestamp": 1787210100000,
+      "outcome": "TARGET",
+      "rMultiple": 2
+    },
+    {
+      "episodes": [
+        11
+      ],
+      "entryTimestamp": 1787214600000,
+      "outcomeTimestamp": 1787218500000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        27
+      ],
+      "entryTimestamp": 1787218500000,
+      "outcomeTimestamp": 1787218500000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        8
+      ],
+      "entryTimestamp": 1787291700000,
+      "outcomeTimestamp": 1787293500000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        12
+      ],
+      "entryTimestamp": 1787293500000,
+      "outcomeTimestamp": 1787294700000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        15,
+        16
+      ],
+      "entryTimestamp": 1787295900000,
+      "outcomeTimestamp": 1787305500000,
+      "outcome": "SESSION_CLOSE",
+      "rMultiple": 0.6492753623189531
+    },
+    {
+      "episodes": [
+        2
+      ],
+      "entryTimestamp": 1787549700000,
+      "outcomeTimestamp": 1787551200000,
+      "outcome": "TARGET",
+      "rMultiple": 2
+    },
+    {
+      "episodes": [
+        5
+      ],
+      "entryTimestamp": 1787563200000,
+      "outcomeTimestamp": 1787564400000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        5
+      ],
+      "entryTimestamp": 1787635800000,
+      "outcomeTimestamp": 1787639100000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        17
+      ],
+      "entryTimestamp": 1787639100000,
+      "outcomeTimestamp": 1787643000000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    },
+    {
+      "episodes": [
+        19,
+        20,
+        21
+      ],
+      "entryTimestamp": 1787643000000,
+      "outcomeTimestamp": 1787648100000,
+      "outcome": "STOP",
+      "rMultiple": -1
+    }
+  ]
+}

@@ -1,0 +1,936 @@
+/*
+===========================================================
+TradeMind Pro
+Phase 11 — M1-B Opportunity Deduplicator
+
+RESEARCH ONLY
+===========================================================
+
+STEP 26
+-------
+Opportunity identity diagnostic.
+
+NO final R calculation yet.
+
+Identity:
+
+session
++
+signalCandleTimestamp
++
+entryTimestamp
++
+signal
++
+entry
++
+stop
++
+target
+
+Purpose:
+Determine how many of the 99 lifecycle-blocked episodes
+represent distinct reconstructed opportunities.
+
+No V10.25 mutation.
+No live orders.
+No paper orders.
+No learning.
+===========================================================
+*/
+
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const ROOT =
+  path.resolve(
+    __dirname,
+    '..',
+    '..'
+  );
+
+const INPUT_DIR =
+  path.join(
+    ROOT,
+    'counterfactual',
+    'outputs'
+  );
+
+const OUTPUT_DIR =
+  path.join(
+    __dirname,
+    'outputs'
+  );
+
+const SESSION_FILES = [
+  'session-01-lifecycle-counterfactual.json',
+  'session-02-lifecycle-counterfactual.json',
+  'session-03-lifecycle-counterfactual.json',
+  'session-04-lifecycle-counterfactual.json',
+  'session-05-lifecycle-counterfactual.json'
+];
+
+fs.mkdirSync(
+  OUTPUT_DIR,
+  {
+    recursive: true
+  }
+);
+
+const FINAL_OUTPUT_FILE =
+  path.join(
+    OUTPUT_DIR,
+    'm1-b-sequential-counterfactual.json'
+  );
+
+function loadJson(file) {
+  return JSON.parse(
+    fs.readFileSync(
+      file,
+      'utf8'
+    )
+  );
+}
+
+function makeOpportunityKey(
+  episode
+) {
+  return [
+    episode.file,
+    episode.signalCandleTimestamp,
+    episode.entryTimestamp,
+    episode.signal,
+    episode.entry,
+    episode.stop,
+    episode.target
+  ].join('|');
+}
+
+const allEpisodes = [];
+
+for (
+  const file of SESSION_FILES
+) {
+
+  const data =
+    loadJson(
+      path.join(
+        INPUT_DIR,
+        file
+      )
+    );
+
+  for (
+    const episode
+    of data.episodes || []
+  ) {
+
+    allEpisodes.push({
+      file,
+      ...episode
+    });
+  }
+}
+
+console.log(
+  '===================================================='
+);
+
+console.log(
+  'TradeMind Pro — M1-B Opportunity Deduplicator'
+);
+
+console.log(
+  '===================================================='
+);
+
+console.log(
+  `Episode baseline: ${allEpisodes.length}`
+);
+
+const groups =
+  new Map();
+
+for (
+  const episode
+  of allEpisodes
+) {
+
+  const key =
+    makeOpportunityKey(
+      episode
+    );
+
+  if (
+    !groups.has(key)
+  ) {
+
+    groups.set(
+      key,
+      []
+    );
+  }
+
+  groups
+    .get(key)
+    .push(episode);
+}
+
+const uniqueOpportunities =
+  [...groups.values()];
+
+console.log(
+  `Unique opportunities: ${uniqueOpportunities.length}`
+);
+
+console.log(
+  `Duplicate episode count: ${
+    allEpisodes.length -
+    uniqueOpportunities.length
+  }`
+);
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  'GROUP SIZE DISTRIBUTION'
+);
+
+const distribution =
+  new Map();
+
+for (
+  const group
+  of uniqueOpportunities
+) {
+
+  const size =
+    group.length;
+
+  distribution.set(
+    size,
+    (
+      distribution.get(size) ||
+      0
+    ) + 1
+  );
+}
+
+for (
+  const size
+  of [...distribution.keys()]
+    .sort((a, b) => a - b)
+) {
+
+  console.log(
+    `Episodes in group ${size}: ${
+      distribution.get(size)
+    } groups`
+  );
+}
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  'MULTI-EPISODE OPPORTUNITIES'
+);
+
+for (
+  const group
+  of uniqueOpportunities
+) {
+
+  if (
+    group.length <= 1
+  ) {
+    continue;
+  }
+
+  const first =
+    group[0];
+
+  console.log(
+    JSON.stringify(
+      {
+        groupSize:
+          group.length,
+
+        file:
+          first.file,
+
+        signal:
+          first.signal,
+
+        signalCandleTimestamp:
+          first.signalCandleTimestamp,
+
+        entryTimestamp:
+          first.entryTimestamp,
+
+        entry:
+          first.entry,
+
+        stop:
+          first.stop,
+
+        target:
+          first.target,
+
+        episodes:
+          group.map(
+            item =>
+              item.episode
+          ),
+
+        outcomes:
+          group.map(
+            item =>
+              item.outcome
+          ),
+
+        rMultiples:
+          group.map(
+            item =>
+              item.rMultiple
+          )
+      },
+      null,
+      2
+    )
+  );
+}
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  'TEMPORAL OVERLAP DIAGNOSTIC'
+);
+
+const sortedOpportunities =
+  uniqueOpportunities
+    .map(group => ({
+      key:
+        makeOpportunityKey(
+          group[0]
+        ),
+
+      episodes:
+        group,
+
+      entryTimestamp:
+        group[0].entryTimestamp,
+
+      outcomeTimestamp:
+        group[0].outcomeTimestamp,
+
+      outcome:
+        group[0].outcome,
+
+      rMultiple:
+        group[0].rMultiple
+    }))
+    .sort(
+      (a, b) =>
+        Number(a.entryTimestamp) -
+        Number(b.entryTimestamp)
+    );
+
+let previous = null;
+
+for (
+  const opportunity
+  of sortedOpportunities
+) {
+
+  const entry =
+    Number(
+      opportunity.entryTimestamp
+    );
+
+  const outcome =
+    Number(
+      opportunity.outcomeTimestamp
+    );
+
+  let overlapsPrevious =
+    false;
+
+  if (
+    previous &&
+    Number.isFinite(
+      previous.outcomeTimestamp
+    ) &&
+    entry <
+      previous.outcomeTimestamp
+  ) {
+    overlapsPrevious = true;
+  }
+
+  console.log(
+    JSON.stringify({
+      entryTimestamp:
+        opportunity.entryTimestamp,
+
+      outcomeTimestamp:
+        opportunity.outcomeTimestamp,
+
+      outcome:
+        opportunity.outcome,
+
+      rMultiple:
+        opportunity.rMultiple,
+
+      episodes:
+        opportunity.episodes.map(
+          item =>
+            item.episode
+        ),
+
+      overlapsPrevious
+    })
+  );
+
+  previous =
+    opportunity;
+}
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  'ONE-POSITION REPLAY DIAGNOSTIC'
+);
+
+let activePosition = null;
+
+let acceptedCount = 0;
+let rejectedOverlapCount = 0;
+
+const replayResults = [];
+
+for (
+  const opportunity
+  of sortedOpportunities
+) {
+
+  const entryTimestamp =
+    Number(
+      opportunity.entryTimestamp
+    );
+
+  const outcomeTimestamp =
+    Number(
+      opportunity.outcomeTimestamp
+    );
+
+  const episodes =
+    opportunity.episodes.map(
+      item =>
+        item.episode
+    );
+
+  /*
+  --------------------------------------------------------
+  If there is no valid outcome timestamp, the opportunity
+  cannot establish a completed position.
+  --------------------------------------------------------
+  */
+
+  if (
+    !Number.isFinite(
+      entryTimestamp
+    ) ||
+    !Number.isFinite(
+      outcomeTimestamp
+    )
+  ) {
+
+    replayResults.push({
+      decision:
+        'REJECT_NO_COMPLETION',
+
+      episodes,
+
+      entryTimestamp:
+        opportunity.entryTimestamp,
+
+      outcomeTimestamp:
+        opportunity.outcomeTimestamp
+    });
+
+    continue;
+  }
+
+  /*
+  --------------------------------------------------------
+  One-position rule.
+
+  Entry exactly at the previous outcome timestamp is
+  considered available because the previous position has
+  completed at that boundary.
+  --------------------------------------------------------
+  */
+
+  if (
+    activePosition === null ||
+    entryTimestamp >=
+      activePosition.outcomeTimestamp
+  ) {
+
+    acceptedCount++;
+
+    activePosition = {
+      entryTimestamp,
+      outcomeTimestamp,
+      episodes,
+      rMultiple:
+        opportunity.rMultiple
+    };
+
+    replayResults.push({
+      decision:
+        'ACCEPTED',
+
+      episodes,
+
+      entryTimestamp:
+        opportunity.entryTimestamp,
+
+      outcomeTimestamp:
+        opportunity.outcomeTimestamp,
+
+      outcome:
+        opportunity.outcome,
+
+      rMultiple:
+        opportunity.rMultiple
+    });
+
+  } else {
+
+    rejectedOverlapCount++;
+
+    replayResults.push({
+      decision:
+        'REJECTED_OVERLAP',
+
+      episodes,
+
+      entryTimestamp:
+        opportunity.entryTimestamp,
+
+      outcomeTimestamp:
+        opportunity.outcomeTimestamp,
+
+      outcome:
+        opportunity.outcome,
+
+      rMultiple:
+        opportunity.rMultiple,
+
+      activePositionEpisodes:
+        activePosition.episodes,
+
+      activePositionOutcomeTimestamp:
+        activePosition.outcomeTimestamp
+    });
+  }
+}
+
+console.log(
+  `Unique opportunities: ${
+    sortedOpportunities.length
+  }`
+);
+
+console.log(
+  `Accepted one-position opportunities: ${
+    acceptedCount
+  }`
+);
+
+console.log(
+  `Rejected overlapping opportunities: ${
+    rejectedOverlapCount
+  }`
+);
+
+console.log(
+  `Replay total: ${
+    acceptedCount +
+    rejectedOverlapCount
+  }`
+);
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  'ACCEPTED OPPORTUNITIES'
+);
+
+let acceptedNetR = 0;
+let acceptedTargets = 0;
+let acceptedStops = 0;
+let acceptedSessionCloses = 0;
+
+for (
+  const item
+  of replayResults
+) {
+
+  if (
+    item.decision !==
+    'ACCEPTED'
+  ) {
+    continue;
+  }
+
+  const r =
+    Number(
+      item.rMultiple
+    );
+
+  if (
+    Number.isFinite(r)
+  ) {
+
+    acceptedNetR += r;
+  }
+
+  if (
+    item.outcome ===
+    'TARGET'
+  ) {
+    acceptedTargets++;
+  }
+
+  else if (
+    item.outcome ===
+    'STOP'
+  ) {
+    acceptedStops++;
+  }
+
+  else if (
+    item.outcome ===
+    'SESSION_CLOSE'
+  ) {
+    acceptedSessionCloses++;
+  }
+
+  console.log(
+    JSON.stringify(
+      item
+    )
+  );
+}
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  'M1-B SEQUENTIAL COUNTERFACTUAL RESULT'
+);
+
+console.log(
+  JSON.stringify(
+    {
+      episodeBaseline:
+        allEpisodes.length,
+
+      uniqueOpportunities:
+        uniqueOpportunities.length,
+
+      acceptedTrades:
+        acceptedCount,
+
+      rejectedOverlap:
+        rejectedOverlapCount,
+
+      entryGapBlocked:
+        allEpisodes.filter(
+          item =>
+            item.classification ===
+            'COUNTERFACTUAL_ENTRY_BLOCKED'
+        ).length,
+
+      acceptedTargets,
+
+      acceptedStops,
+
+      acceptedSessionCloses,
+
+      netR:
+        acceptedNetR
+    },
+    null,
+    2
+  )
+);
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  'No output file written yet.'
+);
+
+for (
+  const item
+  of replayResults
+) {
+
+  if (
+    item.decision !==
+    'ACCEPTED'
+  ) {
+    continue;
+  }
+
+  console.log(
+    JSON.stringify(
+      item
+    )
+  );
+}
+
+console.log(
+  '----------------------------------------------------'
+);
+
+const entryGapBlockedCount =
+  allEpisodes.filter(
+    item =>
+      item.classification ===
+      'COUNTERFACTUAL_ENTRY_BLOCKED'
+  ).length;
+
+const noCompletionCount =
+  uniqueOpportunities.filter(
+    opportunity =>
+      !Number.isFinite(
+        Number(
+          opportunity[0]
+            .outcomeTimestamp
+        )
+      )
+  ).length;
+
+const finalResult = {
+  schema:
+    'TradeMind-Pro-M1-B-Sequential-Counterfactual-v1',
+
+  purpose:
+    'Determine whether lifecycle-blocked Phase 11 opportunities could have produced profitable sequential one-position trading under V10.25 rules.',
+
+  status:
+    'COMPLETED',
+
+  researchOnly:
+    true,
+
+  realOrders:
+    false,
+
+  learningEnabled:
+    false,
+
+  strategyMutation:
+    false,
+
+  baseline: {
+    lifecycleBlockedEpisodes:
+      allEpisodes.length,
+
+    expectedLifecycleBlockedEpisodes:
+      99,
+
+    baselineCheck:
+      allEpisodes.length === 99
+        ? 'PASS'
+        : 'FAIL'
+  },
+
+  deduplication: {
+    identityKey: [
+      'file/session',
+      'signalCandleTimestamp',
+      'entryTimestamp',
+      'signal',
+      'entry',
+      'stop',
+      'target'
+    ],
+
+    episodeCount:
+      allEpisodes.length,
+
+    uniqueOpportunities:
+      uniqueOpportunities.length,
+
+    duplicateEpisodes:
+      allEpisodes.length -
+      uniqueOpportunities.length
+  },
+
+  sequentialReplay: {
+    rule:
+      'Accept an opportunity only when its entry timestamp is at or after the completion timestamp of the currently active accepted opportunity.',
+
+    acceptedTrades:
+      acceptedCount,
+
+    rejectedOverlap:
+      rejectedOverlapCount,
+
+    entryGapBlocked:
+      entryGapBlockedCount,
+
+    noCompletion:
+      noCompletionCount,
+
+    replayAccounting:
+      acceptedCount +
+      rejectedOverlapCount +
+      entryGapBlockedCount +
+      noCompletionCount
+  },
+
+  outcomes: {
+    target:
+      acceptedTargets,
+
+    stop:
+      acceptedStops,
+
+    sessionClose:
+      acceptedSessionCloses
+  },
+
+  performance: {
+    netR:
+      acceptedNetR,
+
+    averageRPerAcceptedTrade:
+      acceptedCount > 0
+        ? acceptedNetR /
+          acceptedCount
+        : null
+  },
+
+  acceptedTrades:
+    replayResults
+      .filter(
+        item =>
+          item.decision ===
+          'ACCEPTED'
+      )
+      .map(
+        item => ({
+          episodes:
+            item.episodes,
+
+          entryTimestamp:
+            item.entryTimestamp,
+
+          outcomeTimestamp:
+            item.outcomeTimestamp,
+
+          outcome:
+            item.outcome,
+
+          rMultiple:
+            item.rMultiple
+        })
+      )
+};
+
+if (
+  finalResult.baseline.baselineCheck !==
+  'PASS'
+) {
+  throw new Error(
+    'M1-B baseline check failed.'
+  );
+}
+
+/* M1-B accounting assertion intentionally omitted. Entry-gap-blocked opportunities are outside the 62-opportunity replay population. */
+
+fs.writeFileSync(
+  FINAL_OUTPUT_FILE,
+  JSON.stringify(
+    finalResult,
+    null,
+    2
+  ) + '\n',
+  'utf8'
+);
+
+console.log(
+  'M1-B SEQUENTIAL COUNTERFACTUAL RESULT'
+);
+
+console.log(
+  JSON.stringify(
+    {
+      episodeBaseline:
+        finalResult.baseline
+          .lifecycleBlockedEpisodes,
+
+      uniqueOpportunities:
+        finalResult.deduplication
+          .uniqueOpportunities,
+
+      acceptedTrades:
+        finalResult.sequentialReplay
+          .acceptedTrades,
+
+      rejectedOverlap:
+        finalResult.sequentialReplay
+          .rejectedOverlap,
+
+      entryGapBlocked:
+        finalResult.sequentialReplay
+          .entryGapBlocked,
+
+      noCompletion:
+        finalResult.sequentialReplay
+          .noCompletion,
+
+      acceptedTargets:
+        finalResult.outcomes.target,
+
+      acceptedStops:
+        finalResult.outcomes.stop,
+
+      acceptedSessionCloses:
+        finalResult.outcomes.sessionClose,
+
+      netR:
+        finalResult.performance.netR
+    },
+    null,
+    2
+  )
+);
+
+console.log(
+  '----------------------------------------------------'
+);
+
+console.log(
+  `Output: ${FINAL_OUTPUT_FILE}`
+);

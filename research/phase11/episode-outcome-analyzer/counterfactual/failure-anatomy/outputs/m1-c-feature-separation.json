@@ -1,0 +1,376 @@
+{
+  "schema": "TradeMind-Pro-M1-C-Feature-Separation-v1",
+  "status": "COMPLETED",
+  "researchOnly": true,
+  "learningEnabled": false,
+  "strategyMutation": false,
+  "promotionEnabled": false,
+  "thresholdOptimization": false,
+  "validityFilterCreated": false,
+  "source": "m1-c-reconstructed-trades.json",
+  "frozenBaseline": {
+    "lifecycleBlockedEpisodes": 99,
+    "uniqueOpportunities": 64,
+    "acceptedTrades": 14,
+    "target": 2,
+    "stop": 10,
+    "sessionClose": 2,
+    "netR": -5.392430501588261
+  },
+  "featureSeparation": {
+    "atr14": {
+      "target": {
+        "count": 2,
+        "average": 11.324999999999818,
+        "median": 11.324999999999818,
+        "range": {
+          "minimum": 10.860714285713714,
+          "maximum": 11.789285714285922
+        }
+      },
+      "stop": {
+        "count": 10,
+        "average": 12.713214285714459,
+        "median": 12.932142857142935,
+        "range": {
+          "minimum": 9.942857142857195,
+          "maximum": 15.367857142857767
+        }
+      },
+      "observedRangeOverlap": true,
+      "sampleWarning": "SMALL_SAMPLE"
+    },
+    "entryGapAtr": {
+      "target": {
+        "count": 2,
+        "average": 0.021930914680028214,
+        "median": 0.021930914680028214,
+        "range": {
+          "minimum": 0.018414995067479997,
+          "maximum": 0.02544683429257643
+        }
+      },
+      "stop": {
+        "count": 10,
+        "average": 0.06060335412074871,
+        "median": 0.06562245249051922,
+        "range": {
+          "minimum": -0.11044493531081802,
+          "maximum": 0.19384006781554008
+        }
+      },
+      "observedRangeOverlap": true,
+      "sampleWarning": "SMALL_SAMPLE"
+    },
+    "absoluteEntryGapAtr": {
+      "target": {
+        "count": 2,
+        "average": 0.021930914680028214,
+        "median": 0.021930914680028214,
+        "range": {
+          "minimum": 0.018414995067479997,
+          "maximum": 0.02544683429257643
+        }
+      },
+      "stop": {
+        "count": 10,
+        "average": 0.08457153581375751,
+        "median": 0.09951104969359974,
+        "range": {
+          "minimum": 0.009395973154225917,
+          "maximum": 0.19384006781554008
+        }
+      },
+      "observedRangeOverlap": true,
+      "sampleWarning": "SMALL_SAMPLE"
+    }
+  },
+  "direction": {
+    "TARGET": {
+      "BUY": 1,
+      "SELL": 1
+    },
+    "STOP": {
+      "BUY": 5,
+      "SELL": 5
+    },
+    "SESSION_CLOSE": {
+      "BUY": 1,
+      "SELL": 1
+    },
+    "ALL": {
+      "BUY": 7,
+      "SELL": 7
+    }
+  },
+  "timeOfDay": {
+    "TARGET": {
+      "11:00-12:00": 2
+    },
+    "STOP": {
+      "12:00-13:00": 2,
+      "14:00-15:00": 2,
+      "13:00-14:00": 1,
+      "15:00+": 1,
+      "11:00-12:00": 3,
+      "10:00-11:00": 1
+    },
+    "SESSION_CLOSE": {
+      "14:00-15:00": 1,
+      "12:00-13:00": 1
+    }
+  },
+  "entryGapBuckets": {
+    "TARGET": {
+      "-0.25 to -0.1": 0,
+      "-0.1 to 0": 0,
+      "0 to 0.025": 1,
+      "0.025 to 0.05": 1,
+      "0.05 to 0.1": 0,
+      "0.1 to 0.2": 0,
+      "0.2 to 0.3": 0
+    },
+    "STOP": {
+      "-0.25 to -0.1": 1,
+      "-0.1 to 0": 1,
+      "0 to 0.025": 1,
+      "0.025 to 0.05": 2,
+      "0.05 to 0.1": 1,
+      "0.1 to 0.2": 4,
+      "0.2 to 0.3": 0
+    }
+  },
+  "atrBuckets": {
+    "TARGET": {
+      "0 to 10": 0,
+      "10 to 11": 1,
+      "11 to 12": 1,
+      "12 to 13": 0,
+      "13 to 14": 0,
+      "14 to 16": 0,
+      "16 to 20": 0
+    },
+    "STOP": {
+      "0 to 10": 1,
+      "10 to 11": 2,
+      "11 to 12": 1,
+      "12 to 13": 1,
+      "13 to 14": 2,
+      "14 to 16": 3,
+      "16 to 20": 0
+    }
+  },
+  "tradeFeatureTable": [
+    {
+      "file": "session-01-lifecycle-counterfactual.json",
+      "episodes": [
+        8,
+        9
+      ],
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-19T06:32:02.652Z",
+      "entryGapAtr": 0.08943305829124469,
+      "absoluteEntryGapAtr": 0.08943305829124469,
+      "atr14": 13.41785714285704,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "12:00-13:00"
+    },
+    {
+      "file": "session-01-lifecycle-counterfactual.json",
+      "episodes": [
+        16
+      ],
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-19T09:02:09.049Z",
+      "entryGapAtr": 0.19384006781554008,
+      "absoluteEntryGapAtr": 0.19384006781554008,
+      "atr14": 12.639285714285506,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "14:00-15:00"
+    },
+    {
+      "file": "session-01-lifecycle-counterfactual.json",
+      "episodes": [
+        17
+      ],
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-19T09:05:54.089Z",
+      "entryGapAtr": 0.17450611476962022,
+      "absoluteEntryGapAtr": 0.17450611476962022,
+      "atr14": 15.185714285713923,
+      "outcome": "SESSION_CLOSE",
+      "rMultiple": -0.04170586390721364,
+      "timeBucket": "14:00-15:00"
+    },
+    {
+      "file": "session-02-lifecycle-counterfactual.json",
+      "episodes": [
+        8
+      ],
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-20T05:45:59.360Z",
+      "entryGapAtr": 0.018414995067479997,
+      "absoluteEntryGapAtr": 0.018414995067479997,
+      "atr14": 10.860714285713714,
+      "outcome": "TARGET",
+      "rMultiple": 2,
+      "timeBucket": "11:00-12:00"
+    },
+    {
+      "file": "session-02-lifecycle-counterfactual.json",
+      "episodes": [
+        11
+      ],
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-20T08:29:47.468Z",
+      "entryGapAtr": -0.11044493531081802,
+      "absoluteEntryGapAtr": 0.11044493531081802,
+      "atr14": 11.317857142857715,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "13:00-14:00"
+    },
+    {
+      "file": "session-02-lifecycle-counterfactual.json",
+      "episodes": [
+        27
+      ],
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-20T09:30:03.363Z",
+      "entryGapAtr": 0.10958904109595478,
+      "absoluteEntryGapAtr": 0.10958904109595478,
+      "atr14": 10.950000000000207,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "15:00+"
+    },
+    {
+      "file": "session-03-lifecycle-counterfactual.json",
+      "episodes": [
+        8
+      ],
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-21T05:54:25.640Z",
+      "entryGapAtr": -0.009395973154225917,
+      "absoluteEntryGapAtr": 0.009395973154225917,
+      "atr14": 10.642857142856883,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "11:00-12:00"
+    },
+    {
+      "file": "session-03-lifecycle-counterfactual.json",
+      "episodes": [
+        12
+      ],
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-21T06:20:03.799Z",
+      "entryGapAtr": 0.010057471264221409,
+      "absoluteEntryGapAtr": 0.010057471264221409,
+      "atr14": 9.942857142857195,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "11:00-12:00"
+    },
+    {
+      "file": "session-03-lifecycle-counterfactual.json",
+      "episodes": [
+        15,
+        16
+      ],
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-21T07:00:49.074Z",
+      "entryGapAtr": 0.005797101449612798,
+      "absoluteEntryGapAtr": 0.005797101449612798,
+      "atr14": 8.625,
+      "outcome": "SESSION_CLOSE",
+      "rMultiple": 0.6492753623189531,
+      "timeBucket": "12:00-13:00"
+    },
+    {
+      "file": "session-04-lifecycle-counterfactual.json",
+      "episodes": [
+        2
+      ],
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T05:30:16.742Z",
+      "entryGapAtr": 0.02544683429257643,
+      "absoluteEntryGapAtr": 0.02544683429257643,
+      "atr14": 11.789285714285922,
+      "outcome": "TARGET",
+      "rMultiple": 2,
+      "timeBucket": "11:00-12:00"
+    },
+    {
+      "file": "session-04-lifecycle-counterfactual.json",
+      "episodes": [
+        5
+      ],
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T09:15:29.002Z",
+      "entryGapAtr": 0.12476370510407636,
+      "absoluteEntryGapAtr": 0.12476370510407636,
+      "atr14": 13.225000000000364,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "14:00-15:00"
+    },
+    {
+      "file": "session-05-lifecycle-counterfactual.json",
+      "episodes": [
+        5
+      ],
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-25T05:28:33.095Z",
+      "entryGapAtr": 0.12038112944447397,
+      "absoluteEntryGapAtr": 0.12038112944447397,
+      "atr14": 15.367857142857767,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "10:00-11:00"
+    },
+    {
+      "file": "session-05-lifecycle-counterfactual.json",
+      "episodes": [
+        17
+      ],
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-25T06:23:48.095Z",
+      "entryGapAtr": 0.04181184668979376,
+      "absoluteEntryGapAtr": 0.04181184668979376,
+      "atr14": 14.350000000000104,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "11:00-12:00"
+    },
+    {
+      "file": "session-05-lifecycle-counterfactual.json",
+      "episodes": [
+        19,
+        20,
+        21
+      ],
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-25T07:25:18.099Z",
+      "entryGapAtr": 0.03599812996722595,
+      "absoluteEntryGapAtr": 0.03599812996722595,
+      "atr14": 15.278571428571793,
+      "outcome": "STOP",
+      "rMultiple": -1,
+      "timeBucket": "12:00-13:00"
+    }
+  ],
+  "conclusion": {
+    "targetCount": 2,
+    "stopCount": 10,
+    "direction": "NO_DIRECTIONAL_SEPARATION_OBSERVED",
+    "entryGap": "OVERLAP_PRESENT",
+    "absoluteEntryGap": "OVERLAP_PRESENT",
+    "atr14": "OVERLAP_PRESENT",
+    "thresholdStatus": "NOT_TESTED",
+    "filterStatus": "NOT_CREATED",
+    "interpretation": "Descriptive separation only. Small TARGET sample prevents reliable threshold inference."
+  }
+}

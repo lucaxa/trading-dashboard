@@ -1,0 +1,107 @@
+{
+  "schema": "TradeMind-Pro-Phase11-M1A-Lifecycle-Counterfactual-v1",
+  "analyzer": "M1-A Lifecycle Counterfactual",
+  "researchOnly": true,
+  "strategyMutation": false,
+  "realOrders": false,
+  "session": {
+    "id": 1,
+    "date": "2026-08-24"
+  },
+  "methodology": {
+    "atrPeriod": 14,
+    "atrStopMultiplier": 1.5,
+    "riskReward": 2,
+    "maxEntryGapAtr": 0.25,
+    "lifecycleRestrictionRemoved": true,
+    "entryRule": "Next same-session candle open",
+    "signalMapping": "Containing 5-minute candle",
+    "sameCandleTargetStop": "Conservative STOP",
+    "sessionCloseMinutes": 915
+  },
+  "sourceFiles": {
+    "v3": "research/phase11/episode-outcome-analyzer/outputs/session-04-24-aug-v3.json",
+    "candles": "research/phase11/episode-outcome-analyzer/inputs/candles/session-04-24-aug-candles.json"
+  },
+  "summary": {
+    "lifecycleBlocked": 4,
+    "counterfactualTarget": 1,
+    "counterfactualStop": 1,
+    "counterfactualSessionClose": 1,
+    "counterfactualEntryBlocked": 1,
+    "insufficientContext": 0,
+    "unresolved": 0,
+    "netR": 0.40189873417729505
+  },
+  "episodes": [
+    {
+      "episode": 2,
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T05:30:16.742Z",
+      "signalCandleTimestamp": 1787549400000,
+      "entryTimestamp": 1787549700000,
+      "entry": 24231.25,
+      "atr14": 11.789285714285922,
+      "risk": 17.683928571428883,
+      "stop": 24248.93392857143,
+      "target": 24195.882142857143,
+      "entryGapAtr": 0.02544683429257643,
+      "classification": "COUNTERFACTUAL_TARGET",
+      "outcome": "TARGET",
+      "outcomeTimestamp": 1787551200000,
+      "outcomePrice": 24195.882142857143,
+      "rMultiple": 2,
+      "reason": "TARGET"
+    },
+    {
+      "episode": 4,
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T09:10:28.406Z",
+      "signalCandleTimestamp": 1787562600000,
+      "entryTimestamp": 1787562900000,
+      "entry": 24169.9,
+      "atr14": 13.15714285714317,
+      "entryGapAtr": 0.35342019543984166,
+      "classification": "COUNTERFACTUAL_ENTRY_BLOCKED",
+      "reason": "Next-candle entry gap exceeds V10.25 limit."
+    },
+    {
+      "episode": 5,
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T09:15:29.002Z",
+      "signalCandleTimestamp": 1787562900000,
+      "entryTimestamp": 1787563200000,
+      "entry": 24165.4,
+      "atr14": 13.225000000000364,
+      "risk": 19.837500000000546,
+      "stop": 24185.237500000003,
+      "target": 24125.725,
+      "entryGapAtr": 0.12476370510407636,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787564400000,
+      "outcomePrice": 24185.237500000003,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episode": 6,
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T09:22:44.867Z",
+      "signalCandleTimestamp": 1787563200000,
+      "entryTimestamp": 1787563500000,
+      "entry": 24170.65,
+      "atr14": 13.542857142857299,
+      "risk": 20.314285714285948,
+      "stop": 24190.964285714286,
+      "target": 24130.02142857143,
+      "entryGapAtr": 0.003691983122577728,
+      "classification": "COUNTERFACTUAL_SESSION_CLOSE",
+      "outcome": "SESSION_CLOSE",
+      "outcomeTimestamp": 1787564700000,
+      "outcomePrice": 24182.8,
+      "rMultiple": -0.598101265822705,
+      "reason": "SESSION CLOSE"
+    }
+  ]
+}

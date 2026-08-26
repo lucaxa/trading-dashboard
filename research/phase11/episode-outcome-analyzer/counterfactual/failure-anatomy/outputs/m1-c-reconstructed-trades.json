@@ -1,0 +1,329 @@
+{
+  "schema": "TradeMind-Pro-M1-C-Reconstructed-Trades-v1",
+  "status": "COMPLETED",
+  "researchOnly": true,
+  "realOrders": false,
+  "paperOrders": false,
+  "learningEnabled": false,
+  "strategyMutation": false,
+  "promotionEnabled": false,
+  "source": {
+    "m1b": "m1-b-sequential-counterfactual.json",
+    "m1aFiles": [
+      "session-01-lifecycle-counterfactual.json",
+      "session-02-lifecycle-counterfactual.json",
+      "session-03-lifecycle-counterfactual.json",
+      "session-04-lifecycle-counterfactual.json",
+      "session-05-lifecycle-counterfactual.json"
+    ]
+  },
+  "frozenBaseline": {
+    "lifecycleBlockedEpisodes": 99,
+    "uniqueOpportunities": 64,
+    "acceptedTrades": 14,
+    "target": 2,
+    "stop": 10,
+    "sessionClose": 2,
+    "netR": -5.392430501588261
+  },
+  "reconstructedTrades": [
+    {
+      "episodes": [
+        8,
+        9
+      ],
+      "file": "session-01-lifecycle-counterfactual.json",
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-19T06:32:02.652Z",
+      "signalCandleTimestamp": 1787121000000,
+      "entryTimestamp": 1787121300000,
+      "entry": 24061,
+      "atr14": 13.41785714285704,
+      "risk": 20.12678571428556,
+      "stop": 24081.126785714285,
+      "target": 24020.74642857143,
+      "entryGapAtr": 0.08943305829124469,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787130300000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        16
+      ],
+      "file": "session-01-lifecycle-counterfactual.json",
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-19T09:02:09.049Z",
+      "signalCandleTimestamp": 1787130000000,
+      "entryTimestamp": 1787130300000,
+      "entry": 24053.35,
+      "atr14": 12.639285714285506,
+      "risk": 18.95892857142826,
+      "stop": 24072.308928571427,
+      "target": 24015.432142857142,
+      "entryGapAtr": 0.19384006781554008,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787130300000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        17
+      ],
+      "file": "session-01-lifecycle-counterfactual.json",
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-19T09:05:54.089Z",
+      "signalCandleTimestamp": 1787130300000,
+      "entryTimestamp": 1787130600000,
+      "entry": 24049.5,
+      "atr14": 15.185714285713923,
+      "risk": 22.778571428570885,
+      "stop": 24026.72142857143,
+      "target": 24095.057142857142,
+      "entryGapAtr": 0.17450611476962022,
+      "classification": "COUNTERFACTUAL_SESSION_CLOSE",
+      "outcome": "SESSION_CLOSE",
+      "outcomeTimestamp": 1787132700000,
+      "rMultiple": -0.04170586390721364,
+      "reason": "SESSION CLOSE"
+    },
+    {
+      "episodes": [
+        8
+      ],
+      "file": "session-02-lifecycle-counterfactual.json",
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-20T05:45:59.360Z",
+      "signalCandleTimestamp": 1787204700000,
+      "entryTimestamp": 1787205000000,
+      "entry": 24198.95,
+      "atr14": 10.860714285713714,
+      "risk": 16.29107142857057,
+      "stop": 24182.65892857143,
+      "target": 24231.53214285714,
+      "entryGapAtr": 0.018414995067479997,
+      "classification": "COUNTERFACTUAL_TARGET",
+      "outcome": "TARGET",
+      "outcomeTimestamp": 1787210100000,
+      "rMultiple": 2,
+      "reason": "TARGET"
+    },
+    {
+      "episodes": [
+        11
+      ],
+      "file": "session-02-lifecycle-counterfactual.json",
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-20T08:29:47.468Z",
+      "signalCandleTimestamp": 1787214300000,
+      "entryTimestamp": 1787214600000,
+      "entry": 24231.7,
+      "atr14": 11.317857142857715,
+      "risk": 16.97678571428657,
+      "stop": 24214.723214285714,
+      "target": 24265.653571428575,
+      "entryGapAtr": -0.11044493531081802,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787218500000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        27
+      ],
+      "file": "session-02-lifecycle-counterfactual.json",
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-20T09:30:03.363Z",
+      "signalCandleTimestamp": 1787218200000,
+      "entryTimestamp": 1787218500000,
+      "entry": 24232.55,
+      "atr14": 10.950000000000207,
+      "risk": 16.42500000000031,
+      "stop": 24216.125,
+      "target": 24265.4,
+      "entryGapAtr": 0.10958904109595478,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787218500000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        8
+      ],
+      "file": "session-03-lifecycle-counterfactual.json",
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-21T05:54:25.640Z",
+      "signalCandleTimestamp": 1787291400000,
+      "entryTimestamp": 1787291700000,
+      "entry": 24254.9,
+      "atr14": 10.642857142856883,
+      "risk": 15.964285714285325,
+      "stop": 24238.935714285715,
+      "target": 24286.828571428574,
+      "entryGapAtr": -0.009395973154225917,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787293500000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        12
+      ],
+      "file": "session-03-lifecycle-counterfactual.json",
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-21T06:20:03.799Z",
+      "signalCandleTimestamp": 1787293200000,
+      "entryTimestamp": 1787293500000,
+      "entry": 24245.35,
+      "atr14": 9.942857142857195,
+      "risk": 14.914285714285793,
+      "stop": 24230.43571428571,
+      "target": 24275.17857142857,
+      "entryGapAtr": 0.010057471264221409,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787294700000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        15,
+        16
+      ],
+      "file": "session-03-lifecycle-counterfactual.json",
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-21T07:00:49.074Z",
+      "signalCandleTimestamp": 1787295600000,
+      "entryTimestamp": 1787295900000,
+      "entry": 24243.15,
+      "atr14": 8.625,
+      "risk": 12.9375,
+      "stop": 24256.0875,
+      "target": 24217.275,
+      "entryGapAtr": 0.005797101449612798,
+      "classification": "COUNTERFACTUAL_SESSION_CLOSE",
+      "outcome": "SESSION_CLOSE",
+      "outcomeTimestamp": 1787305500000,
+      "rMultiple": 0.6492753623189531,
+      "reason": "SESSION CLOSE"
+    },
+    {
+      "episodes": [
+        2
+      ],
+      "file": "session-04-lifecycle-counterfactual.json",
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T05:30:16.742Z",
+      "signalCandleTimestamp": 1787549400000,
+      "entryTimestamp": 1787549700000,
+      "entry": 24231.25,
+      "atr14": 11.789285714285922,
+      "risk": 17.683928571428883,
+      "stop": 24248.93392857143,
+      "target": 24195.882142857143,
+      "entryGapAtr": 0.02544683429257643,
+      "classification": "COUNTERFACTUAL_TARGET",
+      "outcome": "TARGET",
+      "outcomeTimestamp": 1787551200000,
+      "rMultiple": 2,
+      "reason": "TARGET"
+    },
+    {
+      "episodes": [
+        5
+      ],
+      "file": "session-04-lifecycle-counterfactual.json",
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-24T09:15:29.002Z",
+      "signalCandleTimestamp": 1787562900000,
+      "entryTimestamp": 1787563200000,
+      "entry": 24165.4,
+      "atr14": 13.225000000000364,
+      "risk": 19.837500000000546,
+      "stop": 24185.237500000003,
+      "target": 24125.725,
+      "entryGapAtr": 0.12476370510407636,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787564400000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        5
+      ],
+      "file": "session-05-lifecycle-counterfactual.json",
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-25T05:28:33.095Z",
+      "signalCandleTimestamp": 1787635500000,
+      "entryTimestamp": 1787635800000,
+      "entry": 24144.55,
+      "atr14": 15.367857142857767,
+      "risk": 23.051785714286652,
+      "stop": 24167.601785714287,
+      "target": 24098.446428571428,
+      "entryGapAtr": 0.12038112944447397,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787639100000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        17
+      ],
+      "file": "session-05-lifecycle-counterfactual.json",
+      "signal": "BUY",
+      "signalTimestamp": "2026-08-25T06:23:48.095Z",
+      "signalCandleTimestamp": 1787638800000,
+      "entryTimestamp": 1787639100000,
+      "entry": 24163.75,
+      "atr14": 14.350000000000104,
+      "risk": 21.525000000000155,
+      "stop": 24142.225,
+      "target": 24206.8,
+      "entryGapAtr": 0.04181184668979376,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787643000000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    },
+    {
+      "episodes": [
+        19,
+        20,
+        21
+      ],
+      "file": "session-05-lifecycle-counterfactual.json",
+      "signal": "SELL",
+      "signalTimestamp": "2026-08-25T07:25:18.099Z",
+      "signalCandleTimestamp": 1787642700000,
+      "entryTimestamp": 1787643000000,
+      "entry": 24157.6,
+      "atr14": 15.278571428571793,
+      "risk": 22.917857142857688,
+      "stop": 24180.517857142855,
+      "target": 24111.764285714282,
+      "entryGapAtr": 0.03599812996722595,
+      "classification": "COUNTERFACTUAL_STOP",
+      "outcome": "STOP",
+      "outcomeTimestamp": 1787648100000,
+      "rMultiple": -1,
+      "reason": "STOP LOSS"
+    }
+  ]
+}
