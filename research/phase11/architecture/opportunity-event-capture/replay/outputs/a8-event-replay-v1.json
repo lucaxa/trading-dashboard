@@ -1,0 +1,75 @@
+{
+  "schema": "TradeMind-Pro-A8-Opportunity-Event-Replay-V1",
+  "status": "PASS",
+  "researchOnly": true,
+  "summary": {
+    "evidenceFiles": 4,
+    "rawObservations": 5544,
+    "executableObservations": 4060,
+    "waitObservations": 1484,
+    "reconstructedOpportunityEvents": 118,
+    "determinismFailures": 0,
+    "identityFailures": 0,
+    "sequenceFailures": 0
+  },
+  "heartbeatAudit": {
+    "executableObservations": 4060,
+    "reconstructedEvents": 118,
+    "heartbeatObservationsAttached": 3942,
+    "observationsRepresentedByEvents": 4060,
+    "reductionRatio": 0.970935960591133,
+    "status": "PASS"
+  },
+  "outcomeIndependence": {
+    "outcomeUsed": false,
+    "profitabilityUsed": false,
+    "futureOutcomeUsed": false,
+    "targetUsedForIdentity": false,
+    "stopUsedForIdentity": false,
+    "status": "PASS"
+  },
+  "safety": {
+    "researchOnly": true,
+    "learningEnabled": false,
+    "strategyMutation": false,
+    "promotionEnabled": false,
+    "realOrders": false,
+    "productionPathModified": false,
+    "v1025Modified": false
+  },
+  "failures": [],
+  "sessionSummary": [
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-20T10-00-32-756Z.json",
+      "rawObservations": 1328,
+      "executableObservations": 1068,
+      "waitIgnored": 260,
+      "opportunityEvents": 30,
+      "heartbeatObservationsAttached": 1038
+    },
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-21T10-01-00-977Z.json",
+      "rawObservations": 1437,
+      "executableObservations": 966,
+      "waitIgnored": 471,
+      "opportunityEvents": 45,
+      "heartbeatObservationsAttached": 921
+    },
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-24T10-19-27-035Z.json",
+      "rawObservations": 1380,
+      "executableObservations": 970,
+      "waitIgnored": 410,
+      "opportunityEvents": 8,
+      "heartbeatObservationsAttached": 962
+    },
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-25T10-00-58-672Z.json",
+      "rawObservations": 1399,
+      "executableObservations": 1056,
+      "waitIgnored": 343,
+      "opportunityEvents": 35,
+      "heartbeatObservationsAttached": 1021
+    }
+  ]
+}
