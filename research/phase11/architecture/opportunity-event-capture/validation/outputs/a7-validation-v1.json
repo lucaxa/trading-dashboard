@@ -1,0 +1,59 @@
+{
+  "schema": "TradeMind-Pro-A7-Validation-V1",
+  "status": "PASS",
+  "researchOnly": true,
+  "summary": {
+    "evidenceFiles": 4,
+    "rawObservations": 5544,
+    "executableObservations": 4060,
+    "waitObservations": 1484,
+    "reconstructedOpportunityEvents": 118,
+    "identityFailures": 0,
+    "streamFailures": 0
+  },
+  "heartbeatAudit": {
+    "repeatedExecutableObservations": 3942,
+    "repeatedWithChangedExecution": 3830,
+    "repeatedWithChangedContext": 3616,
+    "reconstructedEventCount": 118,
+    "reconstructedObservationCount": 4060,
+    "duplicationReduction": 0.970935960591133
+  },
+  "outcomeIndependence": {
+    "outcomeFieldsUsedForIdentity": false,
+    "profitabilityUsedForIdentity": false,
+    "futureDataUsedForIdentity": false,
+    "status": "PASS"
+  },
+  "safety": {
+    "researchOnly": true,
+    "learningEnabled": false,
+    "strategyMutation": false,
+    "promotionEnabled": false,
+    "realOrders": false,
+    "productionPathModified": false
+  },
+  "failures": [],
+  "sessionSummary": [
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-20T10-00-32-756Z.json",
+      "opportunityEvents": 30,
+      "observationCount": 1068
+    },
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-21T10-01-00-977Z.json",
+      "opportunityEvents": 45,
+      "observationCount": 966
+    },
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-24T10-19-27-035Z.json",
+      "opportunityEvents": 8,
+      "observationCount": 970
+    },
+    {
+      "file": "TradeMind_Phase11_Evidence_2026-08-25T10-00-58-672Z.json",
+      "opportunityEvents": 35,
+      "observationCount": 1056
+    }
+  ]
+}
