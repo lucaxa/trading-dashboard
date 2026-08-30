@@ -87,22 +87,25 @@ export function createRegimeOutcomeRecord({
 
         previousSessionDate,
 
-        regime: {
+  regime: {
 
-            state:
-                regime.state ?? null,
+    marketDate:
+        marketDate,
 
-            score:
-                regime.score ?? null,
+    state:
+        regime.state ?? null,
 
-            confidence:
-                regime.confidence ?? null,
+    score:
+        regime.score ?? null,
 
-            reasons: [
-                ...(regime.reasons || [])
-            ]
+    confidence:
+        regime.confidence ?? null,
 
-        },
+    reasons: [
+        ...(regime.reasons || [])
+    ]
+
+},
 
         observations: {
 

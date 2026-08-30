@@ -331,31 +331,30 @@ export function measureForwardOutcome({
     }
 
 
-    return createForwardOutcome({
+   return createForwardOutcome({
 
-        marketDate,
+    marketDate,
 
-        decisionCutoff,
+    decisionCutoff,
 
-        sessionOpen,
+    sessionOpen,
 
-        sessionClose,
+    sessionClose,
 
-        sessionHigh,
+    sessionHigh,
 
-        sessionLow,
+    sessionLow,
 
-        sessionReturnPct,
+    sessionReturnPct,
 
-        maxFavourableMovePct,
+    maxFavourableMovePct,
 
-        maxAdverseMovePct,
+    maxAdverseMovePct,
 
-        state,
+    state,
 
-        candleCount:
-            normalized.length
+   candleCount:
+    normalized.length
 
-    });
-
+});
 }
