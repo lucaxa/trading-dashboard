@@ -45,6 +45,20 @@ function validateSymbol(symbol) {
 
 }
 
+function validateExchange(exchange) {
+
+    if (
+        typeof exchange !== "string" ||
+        exchange.trim().length === 0
+    ) {
+
+        throw new Error(
+            "exchange is required"
+        );
+
+    }
+
+}
 
 function validateScripCode(scripCode) {
 
@@ -160,6 +174,18 @@ function normalizeCandle(candle) {
 
 }
 
+function buildEquityScripCode({
+
+    exchange,
+
+    scripCode
+
+}) {
+
+    return `${exchange}_${scripCode}`;
+
+}
+
 
 function buildHistoricalUrl({
 
@@ -188,6 +214,8 @@ export async function fetchEquityHistorical({
     symbol,
 
     scripCode,
+    
+    exchange,
 
     accessToken,
 
@@ -207,6 +235,9 @@ export async function fetchEquityHistorical({
         scripCode
     );
 
+    validateExchange(
+    exchange
+);
 
     validateAccessToken(
         accessToken
@@ -229,20 +260,38 @@ export async function fetchEquityHistorical({
     }
 
 
-    const url =
-        buildHistoricalUrl({
+const equityScripCode =
+    buildEquityScripCode({
 
-            scripCode,
+        exchange,
 
-            startTime:
-                window.startTime,
+        scripCode
 
-            endTime:
-                window.endTime
+    });
 
-        });
+    console.log(
+    "PMSE HISTORICAL REQUEST",
+    {
+        exchange,
+        scripCode,
+        equityScripCode
+    }
+);
 
+const url =
+    buildHistoricalUrl({
 
+        scripCode:
+            equityScripCode,
+
+        startTime:
+            window.startTime,
+
+        endTime:
+            window.endTime
+
+    });
+    
     const response =
         await fetcher(
 
