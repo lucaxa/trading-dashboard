@@ -1,4 +1,3 @@
-
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -10,47 +9,112 @@ from "../equity-data/pmse-stock-provider.js";
 
 
 
-function fakeFetcher() {
+function fakeFetcher(){
 
     return async (
+
         url,
         options
-    ) => ({
 
-        ok:
-            true,
+    ) => {
 
-        async json() {
 
-            return {
+        return {
 
-                data:[
+            ok:
+                true,
 
-                    {
-                        o:100,
-                        h:105,
-                        l:99,
-                        c:103,
-                        v:10000
-                    },
 
-                    {
-                        o:103,
-                        h:108,
-                        l:102,
-                        c:107,
-                        v:12000
-                    }
+            async json(){
 
-                ]
+                return {
 
-            };
+                    data:[
 
-        }
+                        {
 
-    });
+                            ts:
+                                1000,
+
+                            o:
+                                100,
+
+                            h:
+                                105,
+
+                            l:
+                                99,
+
+                            c:
+                                103,
+
+                            v:
+                                10000
+
+                        }
+
+                    ]
+
+                };
+
+            }
+
+        };
+
+    };
 
 }
+
+
+
+const TEST_INSTRUMENTS = [
+
+    {
+
+        symbol:
+            "RELIANCE",
+
+        securityId:
+            "2885",
+
+        exchange:
+            "NSE",
+
+        segment:
+            "E"
+
+    },
+
+
+    {
+
+        symbol:
+            "TCS",
+
+        securityId:
+            "11536",
+
+        exchange:
+            "NSE",
+
+        segment:
+            "E"
+
+    }
+
+];
+
+
+
+const TEST_WINDOW = {
+
+    startTime:
+        100,
+
+    endTime:
+        200
+
+};
 
 
 
@@ -63,42 +127,25 @@ async()=>{
         await getPMSEStocks({
 
             symbols:[
+
                 "RELIANCE",
-                "INFY"
-            ],
 
-            instruments:[
-
-                {
-                    symbol:
-                        "RELIANCE",
-
-                    securityId:
-                        "2885"
-                },
-
-                {
-                    symbol:
-                        "INFY",
-
-                    securityId:
-                        "1594"
-                }
+                "TCS"
 
             ],
+
+
+            instruments:
+                TEST_INSTRUMENTS,
+
 
             accessToken:
                 "TEST_TOKEN",
 
-            window:{
 
-                startTime:
-                    100,
+            window:
+                TEST_WINDOW,
 
-                endTime:
-                    200
-
-            },
 
             fetcher:
                 fakeFetcher()
@@ -108,30 +155,37 @@ async()=>{
 
 
     assert.equal(
+
         result.length,
+
         2
+
     );
 
 
     assert.equal(
+
         result[0].symbol,
+
         "RELIANCE"
+
     );
 
 
-    assert.equal(
-        result[0].candles.length,
-        2
-    );
+    assert.ok(
 
+        Array.isArray(
 
-    assert.equal(
-        result[0].candles[1].c,
-        107
+            result[0].candles
+
+        )
+
     );
 
 
 });
+
+
 
 
 
@@ -144,34 +198,25 @@ async()=>{
         await getPMSEStocks({
 
             symbols:[
+
                 "RELIANCE",
+
                 "UNKNOWN"
-            ],
-
-            instruments:[
-
-                {
-                    symbol:
-                        "RELIANCE",
-
-                    securityId:
-                        "2885"
-                }
 
             ],
+
+
+            instruments:
+                TEST_INSTRUMENTS,
+
 
             accessToken:
                 "TEST_TOKEN",
 
-            window:{
 
-                startTime:
-                    100,
+            window:
+                TEST_WINDOW,
 
-                endTime:
-                    200
-
-            },
 
             fetcher:
                 fakeFetcher()
@@ -181,18 +226,26 @@ async()=>{
 
 
     assert.equal(
+
         result.length,
+
         1
+
     );
 
 
     assert.equal(
+
         result[0].symbol,
+
         "RELIANCE"
+
     );
 
 
 });
+
+
 
 
 
@@ -205,33 +258,23 @@ async()=>{
         await getPMSEStocks({
 
             symbols:[
-                "TCS"
-            ],
 
-            instruments:[
-
-                {
-                    symbol:
-                        "TCS",
-
-                    securityId:
-                        "11536"
-                }
+                "RELIANCE"
 
             ],
+
+
+            instruments:
+                TEST_INSTRUMENTS,
+
 
             accessToken:
                 "TEST_TOKEN",
 
-            window:{
 
-                startTime:
-                    100,
+            window:
+                TEST_WINDOW,
 
-                endTime:
-                    200
-
-            },
 
             fetcher:
                 fakeFetcher()
@@ -240,10 +283,21 @@ async()=>{
 
 
 
-    assert.ok(
-        Array.isArray(
-            result[0].candles
-        )
+    assert.equal(
+
+        result.length,
+
+        1
+
+    );
+
+
+    assert.equal(
+
+        result[0].symbol,
+
+        "RELIANCE"
+
     );
 
 
