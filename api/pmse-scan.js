@@ -38,8 +38,117 @@ import {
 from "../premarket/equity-data/pmse-stock-provider.js";
 
 
+import {
+    resolveEquityInstruments
+}
+from "../premarket/equity-data/indstocks-equity-instrument-provider.js";
 
-export default function handler(
+
+
+const INSTRUMENTS_URL =
+    "https://api.indstocks.com/market/instruments?source=equity";
+
+
+
+function createResearchWindow() {
+
+    const endTime =
+        Date.now();
+
+
+    const startTime =
+        endTime -
+        (
+            2 *
+            24 *
+            60 *
+            60 *
+            1000
+        );
+
+
+    return {
+
+        startTime,
+
+        endTime
+
+    };
+
+}
+
+
+
+async function fetchInstrumentCsv({
+
+    accessToken,
+
+    fetcher = fetch
+
+} = {}) {
+
+
+    const response =
+        await fetcher(
+
+            INSTRUMENTS_URL,
+
+            {
+
+                method:
+                    "GET",
+
+                headers: {
+
+                    Authorization:
+                        accessToken,
+
+                    Accept:
+                        "text/csv"
+
+                }
+
+            }
+
+        );
+
+
+    if (
+        !response ||
+        typeof response !== "object"
+    ) {
+
+        throw new Error(
+            "INDstocks instrument response is invalid"
+        );
+
+    }
+
+
+    if (
+        response.ok === false
+    ) {
+
+        const error =
+            new Error(
+                `INDstocks instrument API failed: HTTP ${response.status}`
+            );
+
+        error.httpStatus =
+            response.status;
+
+        throw error;
+
+    }
+
+
+    return response.text();
+
+}
+
+
+
+export default async function handler(
     request,
     response
 ) {
@@ -60,38 +169,133 @@ export default function handler(
 
 
 
-    const universe =
-        getPMSEUniverse();
+    try {
+
+
+        const accessToken =
+            process.env.INDSTOCKS_TOKEN;
+
+
+        if (
+            !accessToken
+        ) {
+
+            return response.status(500).json({
+
+                status:
+                    "ERROR",
+
+                error:
+                    "INDSTOCKS_TOKEN is not configured"
+
+            });
+
+        }
 
 
 
-    const stocks =
-        getPMSEStocks({
+        const universe =
+            getPMSEUniverse();
 
-            symbols:
-                universe.universe.symbols
+
+
+        const symbols =
+            universe.universe.symbols;
+
+
+
+        const csv =
+            await fetchInstrumentCsv({
+
+                accessToken
+
+            });
+
+
+
+        const instruments =
+            resolveEquityInstruments({
+
+                symbols,
+
+                csv
+
+            });
+
+
+
+        const stocks =
+            await getPMSEStocks({
+
+                symbols,
+
+                instruments,
+
+                accessToken,
+
+                window:
+                    createResearchWindow()
+
+            });
+
+
+
+        const result =
+            await runPMSE({
+
+                stocks
+
+            });
+
+
+
+        return response.status(200).json({
+
+            status:
+                "READY",
+
+            universe: {
+
+                totalSymbols:
+                    symbols.length,
+
+                resolvedSymbols:
+                    instruments.length,
+
+                stockRecords:
+                    stocks.length
+
+            },
+
+            ...result
 
         });
 
 
+    } catch (
+        error
+    ) {
 
-    const result =
-        runPMSE({
 
-            stocks
+        console.error(
+            "PMSE scan error:",
+            error
+        );
+
+
+        return response.status(
+            error.httpStatus || 500
+        ).json({
+
+            status:
+                "ERROR",
+
+            error:
+                error.message ||
+                "PMSE scan failed"
 
         });
 
-
-
-    return response.status(200).json({
-
-        status:
-            "READY",
-
-        ...result
-
-    });
-
+    }
 
 }

@@ -39,11 +39,11 @@ function createCandles(){
 
 test(
     "PMSE runner completes full selection pipeline",
-    () => {
+    async () => {
 
 
         const result =
-            runPMSE({
+            await runPMSE({
 
                 stocks:[
 
@@ -91,11 +91,11 @@ test(
 
 test(
     "PMSE runner limits final output candidates",
-    () => {
+    async () => {
 
 
         const result =
-            runPMSE({
+            await runPMSE({
 
                 stocks:[
 
@@ -137,11 +137,11 @@ test(
 
 test(
     "PMSE runner remains paper-only",
-    () => {
+    async () => {
 
 
         const result =
-            runPMSE({
+            await runPMSE({
 
                 stocks:[]
 

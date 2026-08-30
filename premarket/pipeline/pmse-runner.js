@@ -56,7 +56,7 @@ export const PMSE_RUNNER_VERSION =
 
 
 
-export function runPMSE({
+export async function runPMSE({
 
     stocks = []
 

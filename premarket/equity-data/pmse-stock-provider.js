@@ -7,59 +7,183 @@ PMSE Stock Provider
 
 Purpose:
 
-Convert PMSE universe symbols into
-scanner-ready stock records.
+Convert resolved PMSE equity instruments into
+scanner-ready stock records using real historical data.
 
-Temporary data layer.
-Future replacement:
-INDstocks / Dhan API.
-
-Does NOT:
+This module does NOT:
 - trade
 - create signals
 - place orders
+
+Data provider layer only.
 ============================================================
 */
 
 
+import {
+    fetchEquityHistorical
+}
+from "./indstocks-equity-fetcher.js";
+
+
+
 export const PMSE_STOCK_PROVIDER_VERSION =
-    "PMSE-STOCK-PROVIDER-V1";
+    "PMSE-STOCK-PROVIDER-V2";
 
 
 
-export function getPMSEStocks({
+function normalizeSymbol(symbol) {
 
-    symbols = []
+    if (
+        typeof symbol !== "string"
+    ) {
+
+        return null;
+
+    }
+
+
+    const clean =
+        symbol
+            .trim()
+            .toUpperCase();
+
+
+    return clean.length > 0
+        ? clean
+        : null;
+
+}
+
+
+
+export async function getPMSEStocks({
+
+    symbols = [],
+
+    instruments = [],
+
+    accessToken,
+
+    window,
+
+    fetcher
 
 } = {}) {
 
 
-    return symbols.map(
-        symbol => ({
+    if (
+        !Array.isArray(symbols)
+    ) {
 
-            symbol,
+        throw new Error(
+            "symbols must be an array"
+        );
 
-            candles:[
+    }
 
-                {
-                    o:100,
-                    h:102,
-                    l:99,
-                    c:101,
-                    v:100000
-                },
 
-                {
-                    o:101,
-                    h:103,
-                    l:100,
-                    c:102,
-                    v:120000
-                }
+    if (
+        !Array.isArray(instruments)
+    ) {
 
-            ]
+        throw new Error(
+            "instruments must be an array"
+        );
 
-        })
-    );
+    }
+
+
+
+    const instrumentMap =
+        new Map(
+            instruments.map(
+                instrument => [
+
+                    normalizeSymbol(
+                        instrument.symbol
+                    ),
+
+                    instrument.securityId
+
+                ]
+            )
+        );
+
+
+
+    const stocks = [];
+
+
+
+    for (
+        const rawSymbol of symbols
+    ) {
+
+
+        const symbol =
+            normalizeSymbol(
+                rawSymbol
+            );
+
+
+        if (
+            !symbol
+        ) {
+
+            continue;
+
+        }
+
+
+        const securityId =
+            instrumentMap.get(
+                symbol
+            );
+
+
+        if (
+            !securityId
+        ) {
+
+            continue;
+
+        }
+
+
+
+        const result =
+            await fetchEquityHistorical({
+
+                symbol,
+
+                scripCode:
+                    securityId,
+
+                accessToken,
+
+                window,
+
+                fetcher
+
+            });
+
+
+
+        stocks.push({
+
+            symbol:
+                result.symbol,
+
+            candles:
+                result.candles
+
+        });
+
+    }
+
+
+
+    return stocks;
 
 }

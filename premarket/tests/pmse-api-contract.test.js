@@ -12,11 +12,11 @@ from "../pipeline/pmse-runner.js";
 
 test(
     "PMSE API pipeline returns TradeMind compatible output",
-    () => {
+    async () => {
 
 
         const result =
-            runPMSE({
+            await runPMSE({
 
                 stocks:[
 
@@ -77,11 +77,11 @@ test(
 
 test(
     "PMSE API remains paper only",
-    () => {
+    async () => {
 
 
         const result =
-            runPMSE({
+            await runPMSE({
 
                 stocks:[]
 
