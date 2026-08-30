@@ -1,4 +1,3 @@
-
 /*
 ============================================================
 TradeMind Pro
@@ -7,43 +6,31 @@ PMSE INDstocks Equity Instrument Provider
 
 Purpose:
 
-Resolve PMSE equity symbols to their INDstocks
-security IDs using the INDstocks equity instrument master.
+Resolve PMSE equity symbols to INDstocks
+security IDs.
 
-This module does NOT:
-- trade
-- create signals
-- place orders
-- fetch historical candles
-
-Instrument resolution layer only.
+Research only.
+No trading.
+No orders.
 ============================================================
 */
 
 
 export const PMSE_EQUITY_INSTRUMENT_VERSION =
-    "PMSE-INDSTOCKS-EQUITY-INSTRUMENT-V1";
+    "PMSE-INDSTOCKS-EQUITY-INSTRUMENT-V2";
 
 
 
-function normalizeSymbol(symbol) {
+function normalize(value){
 
-    if (
-        typeof symbol !== "string"
-    ) {
-
+    if(typeof value !== "string"){
         return null;
-
     }
 
-
     const clean =
-        symbol
-            .trim()
-            .toUpperCase();
+        value.trim().toUpperCase();
 
-
-    return clean.length > 0
+    return clean.length
         ? clean
         : null;
 
@@ -51,15 +38,15 @@ function normalizeSymbol(symbol) {
 
 
 
-function parseCsvLine(line) {
+function parseCsvLine(line){
 
     return line
         .split(",")
         .map(
-            value =>
-                value
-                    .trim()
-                    .replace(/^"|"$/g, "")
+            x =>
+                x
+                .trim()
+                .replace(/^"|"$/g,"")
         );
 
 }
@@ -72,26 +59,22 @@ export function resolveEquityInstruments({
 
     csv = ""
 
-} = {}) {
+} = {}){
 
 
-    if (
-        !Array.isArray(symbols)
-    ) {
+    if(!Array.isArray(symbols)){
 
         throw new Error(
-            "symbols must be an array"
+            "symbols must be array"
         );
 
     }
 
 
-    if (
-        typeof csv !== "string"
-    ) {
+    if(typeof csv !== "string"){
 
         throw new Error(
-            "csv must be a string"
+            "csv must be string"
         );
 
     }
@@ -100,19 +83,15 @@ export function resolveEquityInstruments({
 
     const lines =
         csv
-            .split(/\r?\n/)
-            .map(
-                line =>
-                    line.trim()
-            )
-            .filter(
-                Boolean
-            );
+        .split(/\r?\n/)
+        .map(
+            x=>x.trim()
+        )
+        .filter(Boolean);
 
 
-    if (
-        lines.length < 2
-    ) {
+
+    if(lines.length < 2){
 
         return [];
 
@@ -123,33 +102,44 @@ export function resolveEquityInstruments({
     const headers =
         parseCsvLine(
             lines[0]
+        )
+        .map(
+            x=>x.toUpperCase()
+        );
+
+
+
+    const exchangeIndex =
+        headers.indexOf(
+            "EXCH"
+        );
+
+
+    const segmentIndex =
+        headers.indexOf(
+            "SEGMENT"
         );
 
 
     const symbolIndex =
-        headers.findIndex(
-            header =>
-                header.toUpperCase() ===
-                "TRADING_SYMBOL"
+        headers.indexOf(
+            "TRADING_SYMBOL"
         );
 
 
-    const securityIdIndex =
-        headers.findIndex(
-            header =>
-                [
-                    "SECURITY_ID",
-                    "SECURITYID"
-                ].includes(
-                    header.toUpperCase()
-                )
+    const securityIndex =
+        headers.indexOf(
+            "SECURITY_ID"
         );
 
 
-    if (
+
+    if(
+        exchangeIndex === -1 ||
+        segmentIndex === -1 ||
         symbolIndex === -1 ||
-        securityIdIndex === -1
-    ) {
+        securityIndex === -1
+    ){
 
         throw new Error(
             "Required equity instrument columns not found"
@@ -159,27 +149,24 @@ export function resolveEquityInstruments({
 
 
 
-    const requestedSymbols =
+    const wanted =
         new Set(
+
             symbols
-                .map(
-                    normalizeSymbol
-                )
-                .filter(
-                    Boolean
-                )
+            .map(normalize)
+            .filter(Boolean)
+
         );
 
 
 
-    const resolved = [];
+    const result = [];
 
 
 
-    for (
+    for(
         const line of lines.slice(1)
-    ) {
-
+    ){
 
         const parts =
             parseCsvLine(
@@ -188,31 +175,55 @@ export function resolveEquityInstruments({
 
 
         const symbol =
-            normalizeSymbol(
+            normalize(
                 parts[symbolIndex]
             );
 
 
+        if(
+            !symbol ||
+            !wanted.has(symbol)
+        ){
+
+            continue;
+
+        }
+
+
+
         const securityId =
-            parts[
-                securityIdIndex
-            ]?.trim();
+            parts[securityIndex]
+            ?.trim();
+
+
+        const exchange =
+            parts[exchangeIndex]
+            ?.trim()
+            .toUpperCase();
+
+
+        const segment =
+            parts[segmentIndex]
+            ?.trim()
+            .toUpperCase();
 
 
 
-        if (
-            symbol &&
+        if(
             securityId &&
-            requestedSymbols.has(
-                symbol
-            )
-        ) {
+            exchange &&
+            segment
+        ){
 
-            resolved.push({
+            result.push({
 
                 symbol,
 
-                securityId
+                securityId,
+
+                exchange,
+
+                segment
 
             });
 
@@ -222,6 +233,6 @@ export function resolveEquityInstruments({
 
 
 
-    return resolved;
+    return result;
 
 }
