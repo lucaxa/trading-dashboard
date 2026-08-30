@@ -26,6 +26,18 @@ import {
 from "../premarket/pipeline/pmse-runner.js";
 
 
+import {
+    getPMSEUniverse
+}
+from "../premarket/scanner/pmse-universe-provider.js";
+
+
+import {
+    getPMSEStocks
+}
+from "../premarket/equity-data/pmse-stock-provider.js";
+
+
 
 export default function handler(
     request,
@@ -48,89 +60,18 @@ export default function handler(
 
 
 
-    const stocks = [
-
-        {
-            symbol:
-                "RELIANCE",
-
-            candles:[
-
-                {
-                    c:2500,
-                    v:120000,
-                    h:2510,
-                    l:2490,
-                    o:2500
-                },
-
-                {
-                    c:2525,
-                    v:150000,
-                    h:2530,
-                    l:2515,
-                    o:2520
-                }
-
-            ]
-
-        },
+    const universe =
+        getPMSEUniverse();
 
 
-        {
-            symbol:
-                "INFY",
 
-            candles:[
+    const stocks =
+        getPMSEStocks({
 
-                {
-                    c:1400,
-                    v:90000,
-                    h:1410,
-                    l:1395,
-                    o:1400
-                },
+            symbols:
+                universe.universe.symbols
 
-                {
-                    c:1420,
-                    v:110000,
-                    h:1425,
-                    l:1410,
-                    o:1415
-                }
-
-            ]
-
-        },
-
-
-        {
-            symbol:
-                "HDFCBANK",
-
-            candles:[
-
-                {
-                    c:1600,
-                    v:100000,
-                    h:1610,
-                    l:1595,
-                    o:1600
-                },
-
-                {
-                    c:1615,
-                    v:130000,
-                    h:1620,
-                    l:1605,
-                    o:1610
-                }
-
-            ]
-
-        }
-
-    ];
+        });
 
 
 
