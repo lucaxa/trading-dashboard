@@ -526,13 +526,47 @@ function auditIndex({
     }
 
 
+    const failures = [];
+
+    if (candles.length === 0) {
+        failures.push(
+            "NO_CANDLES"
+        );
+    }
+
+    if (invalidTimestamps > 0) {
+        failures.push(
+            "INVALID_TIMESTAMPS"
+        );
+    }
+
+    if (outOfWindow > 0) {
+        failures.push(
+            "OUT_OF_WINDOW"
+        );
+    }
+
+    if (invalidOHLC > 0) {
+        failures.push(
+            "INVALID_OHLC"
+        );
+    }
+
+    if (duplicateTimestamps > 0) {
+        failures.push(
+            "DUPLICATE_TIMESTAMPS"
+        );
+    }
+
+    if (!chronological) {
+        failures.push(
+            "NON_CHRONOLOGICAL"
+        );
+    }
+
+
     const valid =
-        candles.length > 0 &&
-        invalidTimestamps === 0 &&
-        outOfWindow === 0 &&
-        invalidOHLC === 0 &&
-        duplicateTimestamps === 0 &&
-        chronological;
+        failures.length === 0;
 
 
     return {
@@ -551,6 +585,8 @@ function auditIndex({
         invalidOHLC,
 
         duplicateTimestamps,
+
+        failures,
 
         valid
 
