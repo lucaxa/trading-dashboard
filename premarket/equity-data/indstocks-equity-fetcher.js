@@ -284,9 +284,12 @@ export async function fetchEquityHistorical({
         response.ok === false
     ) {
 
+        const errorText =
+            await response.text();
+
         const error =
             new Error(
-                `INDstocks equity historical API failed: HTTP ${response.status}`
+                `INDstocks equity historical API failed: HTTP ${response.status} ${errorText}`
             );
 
         error.httpStatus =
