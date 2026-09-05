@@ -1,4 +1,3 @@
-
 /*
 ============================================================
 TradeMind Pro
@@ -19,17 +18,13 @@ Data provider layer only.
 ============================================================
 */
 
-
 import {
     fetchEquityHistorical
-}
-from "./indstocks-equity-fetcher.js";
-
+} from "./indstocks-equity-fetcher.js";
 
 
 export const PMSE_STOCK_PROVIDER_VERSION =
     "PMSE-STOCK-PROVIDER-V2";
-
 
 
 function normalizeSymbol(symbol) {
@@ -54,7 +49,6 @@ function normalizeSymbol(symbol) {
         : null;
 
 }
-
 
 
 export async function getPMSEStocks({
@@ -94,26 +88,23 @@ export async function getPMSEStocks({
     }
 
 
-
     const instrumentMap =
-    new Map(
-        instruments.map(
-            instrument => [
+        new Map(
+            instruments.map(
+                instrument => [
 
-                normalizeSymbol(
-                    instrument.symbol
-                ),
+                    normalizeSymbol(
+                        instrument.symbol
+                    ),
 
-                instrument
+                    instrument
 
-            ]
-        )
-    );
-
+                ]
+            )
+        );
 
 
     const stocks = [];
-
 
 
     for (
@@ -136,66 +127,40 @@ export async function getPMSEStocks({
         }
 
 
-const instrument =
-    instrumentMap.get(
-        symbol
-    );
+        const instrument =
+            instrumentMap.get(
+                symbol
+            );
 
 
-if (
-    !instrument
-) {
+        if (
+            !instrument
+        ) {
 
-    continue;
+            continue;
 
-}
-
-if (
-    !instrument
-) {
-
-    continue;
-
-}
+        }
 
 
+        const result =
+            await fetchEquityHistorical({
 
-const result =
-    await fetchEquityHistorical({
+                symbol,
 
-        symbol,
+                scripCode:
+                    instrument.securityId,
 
-        scripCode:
-            instrument.securityId,
+                exchange:
+                    instrument.exchange,
 
-        exchange:
-            instrument.exchange,
+                accessToken,
 
-        accessToken,
+                window,
 
-        window,
+                fetcher
 
-        fetcher
+            });
 
-    });
-
-    fetchEquityHistorical({
-
-    symbol,
-
-    exchange:
-        instrument.exchange,
-
-    scripCode:
-        instrument.securityId,
-
-    accessToken,
-
-    window,
-
-    fetcher
-
-});
 
         stocks.push({
 
@@ -208,7 +173,6 @@ const result =
         });
 
     }
-
 
 
     return stocks;
