@@ -96,19 +96,19 @@ export async function getPMSEStocks({
 
 
     const instrumentMap =
-        new Map(
-            instruments.map(
-                instrument => [
+    new Map(
+        instruments.map(
+            instrument => [
 
-                    normalizeSymbol(
-                        instrument.symbol
-                    ),
+                normalizeSymbol(
+                    instrument.symbol
+                ),
 
-                    instrument.securityId
+                instrument
 
-                ]
-            )
-        );
+            ]
+        )
+    );
 
 
 
@@ -136,39 +136,66 @@ export async function getPMSEStocks({
         }
 
 
-        const securityId =
-            instrumentMap.get(
-                symbol
-            );
+const instrument =
+    instrumentMap.get(
+        symbol
+    );
 
 
-        if (
-            !securityId
-        ) {
+if (
+    !instrument
+) {
 
-            continue;
+    continue;
 
-        }
+}
 
+if (
+    !instrument
+) {
 
+    continue;
 
-        const result =
-            await fetchEquityHistorical({
-
-                symbol,
-
-                scripCode:
-                    securityId,
-
-                accessToken,
-
-                window,
-
-                fetcher
-
-            });
+}
 
 
+
+const result =
+    await fetchEquityHistorical({
+
+        symbol,
+
+        scripCode:
+            instrument.securityId,
+
+        exchange:
+            instrument.exchange,
+
+        accessToken,
+
+        window,
+
+        fetcher
+
+    });
+
+    fetchEquityHistorical({
+
+    symbol,
+
+    exchange:
+        instrument.exchange,
+
+    scripCode:
+        instrument.securityId,
+
+    accessToken,
+
+    window,
+
+    fetcher
+
+});
 
         stocks.push({
 

@@ -12,7 +12,7 @@ to frontend applications.
 This API does NOT:
 - trade
 - create orders
-- call broker
+- call broker orders
 - generate signals
 
 Paper-only integration layer.
@@ -50,7 +50,8 @@ const INSTRUMENTS_URL =
 
 
 
-function createResearchWindow() {
+function createResearchWindow(){
+
 
     const endTime =
         Date.now();
@@ -81,15 +82,13 @@ function createResearchWindow() {
 
 async function fetchInstrumentCsv({
 
-    accessToken,
+    accessToken
 
-    fetcher = fetch
-
-} = {}) {
+}){
 
 
     const response =
-        await fetcher(
+        await fetch(
 
             INSTRUMENTS_URL,
 
@@ -113,82 +112,112 @@ async function fetchInstrumentCsv({
         );
 
 
-    if (
-        !response ||
-        typeof response !== "object"
-    ) {
+
+    if(
+        !response.ok
+    ){
 
         throw new Error(
-            "INDstocks instrument response is invalid"
+            `INDstocks instrument API failed: HTTP ${response.status}`
         );
 
     }
 
 
-    if (
-        response.ok === false
-    ) {
 
-        const error =
-            new Error(
-                `INDstocks instrument API failed: HTTP ${response.status}`
-            );
+    return await response.text();
 
-        error.httpStatus =
-            response.status;
+}
 
-        throw error;
+
+
+function validateResolvedInstruments(
+
+    instruments
+
+){
+
+
+    if(
+        !Array.isArray(instruments)
+    ){
+
+        throw new Error(
+            "Instrument resolver returned invalid result"
+        );
 
     }
 
 
-    return response.text();
+
+    return instruments.filter(
+
+        item =>
+
+            item &&
+            item.symbol &&
+            item.securityId &&
+            item.exchange &&
+            item.segment
+
+    );
 
 }
 
 
 
 export default async function handler(
+
     request,
+
     response
-) {
+
+){
 
 
-    if (
+    if(
         request.method !== "GET"
-    ) {
+    ){
 
-        return response.status(405).json({
+        return response
+            .status(405)
+            .json({
 
-            error:
-                "Method not allowed"
+                status:
+                    "ERROR",
 
-        });
+                error:
+                    "Method not allowed"
+
+            });
 
     }
 
 
 
-    try {
+    try{
 
 
         const accessToken =
             process.env.INDSTOCKS_TOKEN;
 
 
-        if (
+
+        if(
             !accessToken
-        ) {
+        ){
 
-            return response.status(500).json({
+            return response
+                .status(500)
+                .json({
 
-                status:
-                    "ERROR",
+                    status:
+                        "ERROR",
 
-                error:
-                    "INDSTOCKS_TOKEN is not configured"
+                    error:
+                        "INDSTOCKS_TOKEN is not configured"
 
-            });
+                });
 
         }
 
@@ -200,7 +229,9 @@ export default async function handler(
 
 
         const symbols =
-            universe.universe.symbols;
+            universe
+            .universe
+            .symbols;
 
 
 
@@ -213,7 +244,7 @@ export default async function handler(
 
 
 
-        const instruments =
+        const resolved =
             resolveEquityInstruments({
 
                 symbols,
@@ -221,6 +252,15 @@ export default async function handler(
                 csv
 
             });
+
+
+
+        const instruments =
+            validateResolvedInstruments(
+
+                resolved
+
+            );
 
 
 
@@ -249,52 +289,61 @@ export default async function handler(
 
 
 
-        return response.status(200).json({
+        return response
+            .status(200)
+            .json({
 
-            status:
-                "READY",
-
-            universe: {
-
-                totalSymbols:
-                    symbols.length,
-
-                resolvedSymbols:
-                    instruments.length,
-
-                stockRecords:
-                    stocks.length
-
-            },
-
-            ...result
-
-        });
+                status:
+                    "READY",
 
 
-    } catch (
-        error
-    ) {
+                universe: {
+
+                    totalSymbols:
+                        symbols.length,
+
+                    resolvedSymbols:
+                        instruments.length,
+
+                    stockRecords:
+                        stocks.length
+
+                },
+
+
+                ...result
+
+            });
+
+
+
+    }
+    catch(error){
 
 
         console.error(
+
             "PMSE scan error:",
+
             error
+
         );
 
 
-        return response.status(
-            error.httpStatus || 500
-        ).json({
+        return response
+            .status(
+                error.httpStatus || 500
+            )
+            .json({
 
-            status:
-                "ERROR",
+                status:
+                    "ERROR",
 
-            error:
-                error.message ||
-                "PMSE scan failed"
+                error:
+                    error.message ||
+                    "PMSE scan failed"
 
-        });
+            });
 
     }
 

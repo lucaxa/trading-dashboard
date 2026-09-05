@@ -48,7 +48,13 @@ NSE,E,1333,EQUITY,,HDFCBANK,1,HDFC BANK,,,,"1",NA,ES,EQ,HDFC Bank Ltd`;
                 "RELIANCE",
 
             securityId:
-                "2885"
+                "2885",
+
+            exchange:
+                "NSE",
+
+            segment:
+                "E"
         }
     );
 
@@ -60,7 +66,13 @@ NSE,E,1333,EQUITY,,HDFCBANK,1,HDFC BANK,,,,"1",NA,ES,EQ,HDFC Bank Ltd`;
                 "TCS",
 
             securityId:
-                "11536"
+                "11536",
+
+            exchange:
+                "NSE",
+
+            segment:
+                "E"
         }
     );
 

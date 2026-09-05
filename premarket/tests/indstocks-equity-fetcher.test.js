@@ -72,6 +72,9 @@ async()=>{
             scripCode:
                 "TEST123",
 
+            exchange:
+                "NSE",
+
             accessToken:
                 "TEST_TOKEN",
 
@@ -132,6 +135,8 @@ async()=>{
 
             scripCode:
                 "TEST123",
+            exchange:
+                "NSE",
 
             accessToken:
                 "TEST_TOKEN",
