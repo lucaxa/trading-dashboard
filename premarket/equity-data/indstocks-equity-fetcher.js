@@ -1,4 +1,3 @@
-
 /*
 ============================================================
 TradeMind Pro
@@ -21,9 +20,8 @@ Data acquisition layer only.
 ============================================================
 */
 
-
 export const PMSE_EQUITY_FETCHER_VERSION =
-    "PMSE-INDSTOCKS-EQUITY-FETCHER-V1";
+    "PMSE-INDSTOCKS-EQUITY-FETCHER-V2";
 
 
 const API_BASE =
@@ -45,6 +43,7 @@ function validateSymbol(symbol) {
 
 }
 
+
 function validateExchange(exchange) {
 
     if (
@@ -59,6 +58,7 @@ function validateExchange(exchange) {
     }
 
 }
+
 
 function validateScripCode(scripCode) {
 
@@ -107,12 +107,8 @@ function validateWindow(window) {
 
 
     if (
-        !Number.isFinite(
-            window.startTime
-        ) ||
-        !Number.isFinite(
-            window.endTime
-        )
+        !Number.isFinite(window.startTime) ||
+        !Number.isFinite(window.endTime)
     ) {
 
         throw new Error(
@@ -174,6 +170,7 @@ function normalizeCandle(candle) {
 
 }
 
+
 function buildEquityScripCode({
 
     exchange,
@@ -209,12 +206,108 @@ function buildHistoricalUrl({
 }
 
 
+/*
+============================================================
+Extract candles from INDstocks response.
+
+Supported response shapes:
+
+1. Direct array
+   {
+       data: [...]
+   }
+
+2. Direct candles array
+   {
+       candles: [...]
+   }
+
+3. Keyed INDstocks response
+   {
+       data: {
+           NSE_2885: {
+               candles: [...]
+           }
+       }
+   }
+
+4. Keyed response where the instrument object
+   itself is the candle container.
+============================================================
+*/
+
+function extractRawCandles({
+
+    payload,
+
+    equityScripCode
+
+}) {
+
+    if (
+        Array.isArray(payload)
+    ) {
+
+        return payload;
+
+    }
+
+
+    if (
+        Array.isArray(payload?.candles)
+    ) {
+
+        return payload.candles;
+
+    }
+
+
+    if (
+        Array.isArray(payload?.data)
+    ) {
+
+        return payload.data;
+
+    }
+
+
+    const instrumentData =
+        payload?.data?.[equityScripCode];
+
+
+    if (
+        Array.isArray(
+            instrumentData?.candles
+        )
+    ) {
+
+        return instrumentData.candles;
+
+    }
+
+
+    if (
+        Array.isArray(
+            instrumentData
+        )
+    ) {
+
+        return instrumentData;
+
+    }
+
+
+    return [];
+
+}
+
+
 export async function fetchEquityHistorical({
 
     symbol,
 
     scripCode,
-    
+
     exchange,
 
     accessToken,
@@ -225,7 +318,6 @@ export async function fetchEquityHistorical({
 
 } = {}) {
 
-
     validateSymbol(
         symbol
     );
@@ -235,9 +327,11 @@ export async function fetchEquityHistorical({
         scripCode
     );
 
+
     validateExchange(
-    exchange
-);
+        exchange
+    );
+
 
     validateAccessToken(
         accessToken
@@ -260,60 +354,55 @@ export async function fetchEquityHistorical({
     }
 
 
-const equityScripCode =
-    buildEquityScripCode({
+    const equityScripCode =
+        buildEquityScripCode({
 
-        exchange,
+            exchange,
+            scripCode
 
-        scripCode
+        });
 
-    });
+
+    const url =
+        buildHistoricalUrl({
+
+            scripCode:
+                equityScripCode,
+
+            startTime:
+                window.startTime,
+
+            endTime:
+                window.endTime
+
+        });
+
 
     console.log(
-    "PMSE HISTORICAL REQUEST",
-    {
-        exchange,
-        scripCode,
-        equityScripCode
-    }
-);
+        "PMSE HISTORICAL REQUEST",
+        {
+            exchange,
+            scripCode,
+            equityScripCode
+        }
+    );
 
-const url =
-    buildHistoricalUrl({
 
-        scripCode:
-            equityScripCode,
-
-        startTime:
-            window.startTime,
-
-        endTime:
-            window.endTime
-
-    });
-    
     const response =
         await fetcher(
-
             url,
-
             {
-
                 method:
                     "GET",
 
                 headers: {
-
                     Authorization:
                         accessToken,
 
                     Accept:
                         "application/json"
-
                 }
-
             }
-
         );
 
 
@@ -336,13 +425,16 @@ const url =
         const errorText =
             await response.text();
 
+
         const error =
             new Error(
                 `INDstocks equity historical API failed: HTTP ${response.status} ${errorText}`
             );
 
+
         error.httpStatus =
             response.status;
+
 
         throw error;
 
@@ -354,22 +446,13 @@ const url =
 
 
     const rawCandles =
-        Array.isArray(
-            payload
-        )
-            ? payload
-            :
-            Array.isArray(
-                payload?.data
-            )
-                ? payload.data
-                :
-                Array.isArray(
-                    payload?.candles
-                )
-                    ? payload.candles
-                    :
-                    [];
+        extractRawCandles({
+
+            payload,
+
+            equityScripCode
+
+        });
 
 
     const candles =
@@ -378,17 +461,36 @@ const url =
         );
 
 
+    console.log(
+        "PMSE HISTORICAL RESULT",
+        {
+            symbol:
+                symbol
+                    .trim()
+                    .toUpperCase(),
+
+            equityScripCode,
+
+            candles:
+                candles.length
+        }
+    );
+
+
     return {
 
         version:
             PMSE_EQUITY_FETCHER_VERSION,
+
 
         symbol:
             symbol
                 .trim()
                 .toUpperCase(),
 
+
         candles,
+
 
         metadata: {
 
