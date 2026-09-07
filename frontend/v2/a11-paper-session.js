@@ -185,44 +185,78 @@
     return [...unique.values()].sort((a, b) => a.ts - b.ts);
   }
 
-  function extractSignal(result) {
-    const root =
-      result?.data &&
-      typeof result.data === "object" &&
-      !Array.isArray(result.data)
-        ? result.data
-        : result;
+function extractSignal(result) {
+  const root =
+    result &&
+    typeof result === "object" &&
+    !Array.isArray(result)
+      ? result
+      : {};
 
-    const signal = String(root?.signal ?? "WAIT").toUpperCase();
-    const signalCandle = normalizeCandle(
-      root?.signalCandle || root?.candle
-    );
+  const signal = String(
+    root?.signal ?? "WAIT"
+  ).toUpperCase();
 
-    const signalTimestamp = timestampMs(
-      root?.data?.signalTimestamp ??
-      root?.signalTimestamp ??
-      root?.signalTime ??
-      signalCandle?.ts
-    );
+  const signalCandle = normalizeCandle(
+    root?.signalCandle || root?.candle
+  );
 
-    const referenceRisk = root?.referenceRisk || {};
+  const signalTimestamp = timestampMs(
+    root?.data?.signalTimestamp ??
+    root?.signalTimestamp ??
+    root?.signalTime ??
+    signalCandle?.ts
+  );
 
-    return {
-      value: signal,
-      signalTimestamp,
-      signalCandle,
-      strategy: root?.strategy ?? null,
-      version: root?.version ?? null,
-      mode: root?.mode ?? null,
-      status: root?.status ?? null,
-      risk: numberOrNull(referenceRisk.risk),
-      referenceEntry: numberOrNull(referenceRisk.entry),
-      referenceStop: numberOrNull(referenceRisk.stop),
-      referenceTarget: numberOrNull(referenceRisk.target),
-      rewardRisk: numberOrNull(referenceRisk.rewardRisk),
-      indicators: root?.indicators || null
-    };
-  }
+  const referenceRisk =
+    root?.referenceRisk || {};
+
+  return {
+    value: signal,
+    signalTimestamp,
+    signalCandle,
+
+    strategy:
+      root?.strategy ?? null,
+
+    version:
+      root?.version ?? null,
+
+    mode:
+      root?.mode ?? null,
+
+    status:
+      root?.status ?? null,
+
+    risk:
+      numberOrNull(
+        referenceRisk.risk
+      ),
+
+    referenceEntry:
+      numberOrNull(
+        referenceRisk.entry
+      ),
+
+    referenceStop:
+      numberOrNull(
+        referenceRisk.stop
+      ),
+
+    referenceTarget:
+      numberOrNull(
+        referenceRisk.target
+      ),
+
+    rewardRisk:
+      numberOrNull(
+        referenceRisk.rewardRisk
+      ),
+
+    indicators:
+      root?.indicators || null
+  };
+}
 
   async function getJSON(url) {
     const response = await fetch(url, {
