@@ -484,7 +484,7 @@ function extractSignal(result) {
     return null;
   }
 
-  function findNextSameSessionCandle(
+  function findNextSameSessionEntryCandle(
     candles,
     signalCandle
   ) {
@@ -494,8 +494,7 @@ function extractSignal(result) {
       candles.find(
         c =>
           c.ts > signalCandle.ts &&
-          sameSession(c.ts, signalCandle.ts) &&
-          isCompletedCandle(c)
+          sameSession(c.ts, signalCandle.ts)
       ) || null
     );
   }
@@ -974,7 +973,7 @@ function extractSignal(result) {
     }
 
     const next =
-      findNextSameSessionCandle(
+      findNextSameSessionEntryCandle(
         candles,
         observation.signalCandle
       );
@@ -984,7 +983,7 @@ function extractSignal(result) {
         "NOT_REACHED";
 
       observation.notes.push(
-        "Next same-session completed candle is not available yet."
+        "Next same-session entry candle is not available yet."
       );
 
       return;
@@ -1156,14 +1155,30 @@ function extractSignal(result) {
       recordObservation(signal);
 
     if (
-      result.isNew &&
-      (
-        signal.value === "BUY" ||
-        signal.value === "SELL"
-      )
+      signal.value !== "BUY" &&
+      signal.value !== "SELL"
+    ) {
+      return;
+    }
+
+    const observation =
+      result.observation;
+
+    /*
+     * A directional observation may initially be
+     * NOT_REACHED because the next entry candle
+     * is not available yet.
+     *
+     * Revisit that same observation on subsequent
+     * polls until the next same-session candle
+     * becomes available.
+     */
+    if (
+      observation.lifecycle === "NOT_REACHED" &&
+      !runtime.activePosition
     ) {
       createPaperEntry(
-        result.observation,
+        observation,
         signal,
         candles
       );
