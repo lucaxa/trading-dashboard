@@ -1365,6 +1365,45 @@ function extractSignal(result) {
     );
   }
 
+  function getFunnelSummary(session) {
+    const observations =
+      Array.isArray(session?.observations)
+        ? session.observations
+        : [];
+
+    const executable =
+      observations.filter(
+        observation =>
+          observation.signal === "BUY" ||
+          observation.signal === "SELL"
+      );
+
+    return {
+      wait: observations.filter(
+        observation =>
+          observation.signal === "WAIT"
+      ).length,
+
+      executable: executable.length,
+
+      notReached: executable.filter(
+        observation =>
+          observation.lifecycle === "NOT_REACHED"
+      ).length,
+
+      blocked: executable.filter(
+        observation =>
+          typeof observation.lifecycle === "string" &&
+          observation.lifecycle.startsWith("BLOCKED_")
+      ).length,
+
+      accepted: executable.filter(
+        observation =>
+          observation.lifecycle === "ACCEPTED"
+      ).length
+    };
+  }
+
   function render() {
     const root =
       document.getElementById(
@@ -1378,6 +1417,9 @@ function extractSignal(result) {
 
     const counters =
       session?.counters || {};
+
+    const funnel =
+      getFunnelSummary(session);
 
     const position =
       runtime.activePosition;
@@ -1400,6 +1442,31 @@ function extractSignal(result) {
     const signals =
       root.querySelector(
         "[data-a11-signals]"
+      );
+
+    const funnelWait =
+      root.querySelector(
+        "[data-a11-funnel-wait]"
+      );
+
+    const funnelExecutable =
+      root.querySelector(
+        "[data-a11-funnel-executable]"
+      );
+
+    const funnelNotReached =
+      root.querySelector(
+        "[data-a11-funnel-not-reached]"
+      );
+
+    const funnelBlocked =
+      root.querySelector(
+        "[data-a11-funnel-blocked]"
+      );
+
+    const funnelAccepted =
+      root.querySelector(
+        "[data-a11-funnel-accepted]"
       );
 
     const last =
@@ -1444,6 +1511,31 @@ function extractSignal(result) {
         String(
           counters.signalEvents || 0
         );
+    }
+
+    if (funnelWait) {
+      funnelWait.textContent =
+        String(funnel.wait);
+    }
+
+    if (funnelExecutable) {
+      funnelExecutable.textContent =
+        String(funnel.executable);
+    }
+
+    if (funnelNotReached) {
+      funnelNotReached.textContent =
+        String(funnel.notReached);
+    }
+
+    if (funnelBlocked) {
+      funnelBlocked.textContent =
+        String(funnel.blocked);
+    }
+
+    if (funnelAccepted) {
+      funnelAccepted.textContent =
+        String(funnel.accepted);
     }
 
     if (last) {
@@ -1655,6 +1747,43 @@ function extractSignal(result) {
         <span>
           Last Poll
           <b data-a11-last>--</b>
+        </span>
+      </div>
+
+      <div class="a11-note">
+        Signals
+      </div>
+
+      <div class="a11-grid">
+        <span>
+          WAIT
+          <b data-a11-funnel-wait>0</b>
+        </span>
+
+        <span>
+          Executable
+          <b data-a11-funnel-executable>0</b>
+        </span>
+      </div>
+
+      <div class="a11-note">
+        Funnel
+      </div>
+
+      <div class="a11-grid">
+        <span>
+          Not Reached
+          <b data-a11-funnel-not-reached>0</b>
+        </span>
+
+        <span>
+          Blocked
+          <b data-a11-funnel-blocked>0</b>
+        </span>
+
+        <span>
+          Accepted
+          <b data-a11-funnel-accepted>0</b>
         </span>
       </div>
 
