@@ -63,7 +63,7 @@ disabled. No frontend action can create an order.
         "/api/live-signal";
 
     const REFRESH_MS =
-        60 * 1000;
+    5 * 60 * 1000;
 
 
     // ========================================================
