@@ -937,6 +937,41 @@ export function runMultiStockPaperRunner(
                     break;
                 }
 
+                const trade =
+                    managePaperPosition(
+                        positionAfterEntry,
+                        candle
+                    );
+
+                if (
+                    trade
+                ) {
+
+                    outcomeResult =
+                        trade;
+
+                    recordStockOutcome(
+                        state,
+                        symbol,
+                        {
+                            reason:
+                                trade.reason,
+                            exit:
+                                trade.exit,
+                            exitTimestamp:
+                                trade.exitTimestamp
+                        }
+                    );
+
+                    setStockCooldown(
+                        state,
+                        symbol,
+                        CONFIG.COOLDOWN_CANDLES
+                    );
+
+                    break;
+                }
+
                 const minutes =
                     getISTMinutes(
                         candle.ts
@@ -964,41 +999,6 @@ export function runMultiStockPaperRunner(
                                 outcomeResult.exit,
                             exitTimestamp:
                                 outcomeResult.exitTimestamp
-                        }
-                    );
-
-                    setStockCooldown(
-                        state,
-                        symbol,
-                        CONFIG.COOLDOWN_CANDLES
-                    );
-
-                    break;
-                }
-
-                const trade =
-                    managePaperPosition(
-                        positionAfterEntry,
-                        candle
-                    );
-
-                if (
-                    trade
-                ) {
-
-                    outcomeResult =
-                        trade;
-
-                    recordStockOutcome(
-                        state,
-                        symbol,
-                        {
-                            reason:
-                                trade.reason,
-                            exit:
-                                trade.exit,
-                            exitTimestamp:
-                                trade.exitTimestamp
                         }
                     );
 

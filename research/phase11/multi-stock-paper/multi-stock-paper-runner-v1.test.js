@@ -305,7 +305,91 @@ test(
         );
     }
 );
+test("15:25 candle manages stop/target before session close", () => {
+const state = createMultiStockState([
+  {
+    symbol: "NIFTY 50",
+    securityId: "40000001",
+    exchange: "NIDX",
+    segment: "INDEX"
+  }
+]);
 
+  const signalTimestamp = Date.UTC(2026, 0, 5, 9, 30);
+
+  const evaluations = [
+  {
+    symbol: "NIFTY 50",
+    instrument: {
+        symbol: "NIFTY 50",
+        securityId: "40000001",
+        exchange: "NIDX",
+        segment: "INDEX"
+      },
+      signal: "BUY",
+      signalTimestamp,
+      candle: {
+        ts: signalTimestamp,
+        o: 100,
+        h: 101,
+        l: 99,
+        c: 100,
+        v: 1000
+      },
+      indicators: {
+        atr14: 2
+      },
+      riskReference: {
+        atr14: 2
+      }
+    }
+  ];
+
+  const candlesBySymbol = {
+    "NIFTY 50": [
+      {
+        ts: signalTimestamp,
+        o: 100,
+        h: 101,
+        l: 99,
+        c: 100,
+        v: 1000
+      },
+      {
+        ts: Date.UTC(2026, 0, 5, 9, 35),
+        o: 100,
+        h: 101,
+        l: 99,
+        c: 100,
+        v: 1000
+      },
+     {
+  ts: Date.UTC(2026, 0, 5, 15, 25),
+  o: 100,
+  h: 106,
+  l: 99,
+  c: 104,
+  v: 1000
+}
+    ]
+  };
+
+  const result = runMultiStockPaperRunner({
+    state,
+    evaluations,
+    candlesBySymbol,
+    nowMs: Date.UTC(2026, 0, 5, 15, 30)
+  });
+
+
+  const stock = result.results.find(
+    item => item.symbol === "NIFTY 50"
+  );
+
+  assert.ok(stock);
+  assert.equal(stock.outcome?.reason, "TARGET");
+  assert.equal(stock.outcome?.exit, 106);
+});
 
 test(
     "Component 5 preserves frozen SELL stop-before-target priority",
