@@ -168,42 +168,83 @@ function getNewCompletedCandles(candles, cursor, nowMs) {
     });
 }
 
-function buildExecutionWindow(allCandles, newCandles, stockState) {
-    const normalized = normalizeCandles(allCandles);
+function buildExecutionWindow(
+    allCandles,
+    newCandles,
+    stockState,
+    signalTimestamp = null
+) {
+    const normalized =
+        normalizeCandles(allCandles);
 
-    if (normalized.length === 0) {
+    if (
+        normalized.length === 0
+    ) {
         return [];
     }
 
     if (
         stockState?.position?.active &&
-        Number.isFinite(stockState.position.entryTimestamp)
+        Number.isFinite(
+            stockState.position.entryTimestamp
+        )
     ) {
         const entryTimestamp =
             stockState.position.entryTimestamp;
 
         const entryCandle =
             normalized.find(
-                candle => candle.ts === entryTimestamp
+                candle =>
+                    candle.ts ===
+                    entryTimestamp
             );
 
         const forwardCandles =
             newCandles.filter(
-                candle => candle.ts >= entryTimestamp
+                candle =>
+                    candle.ts >=
+                    entryTimestamp
             );
 
         return [
-            ...(entryCandle ? [entryCandle] : []),
+            ...(entryCandle
+                ? [entryCandle]
+                : []),
             ...forwardCandles
         ].filter(
             (candle, index, array) =>
                 array.findIndex(
-                    item => item.ts === candle.ts
+                    item =>
+                        item.ts ===
+                        candle.ts
                 ) === index
         );
     }
 
-    return newCandles;
+    const signalCandle =
+        Number.isFinite(
+            Number(signalTimestamp)
+        )
+            ? normalized.find(
+                candle =>
+                    candle.ts ===
+                    Number(signalTimestamp)
+            )
+            : null;
+
+    return [
+        ...(signalCandle
+            ? [signalCandle]
+            : []),
+        ...newCandles
+    ].filter(
+        (candle, index, array) =>
+            array.findIndex(
+                item =>
+                    item.ts ===
+                    candle.ts
+            ) === index
+    );
 }
 
 function validateSafety(state) {
@@ -331,7 +372,10 @@ export function advanceMultiStockForward({
             buildExecutionWindow(
                 allCandles,
                 newCandles,
-                stockState
+                stockState,
+                evaluation?.signalTimestamp ??
+                    evaluation?.candle?.ts ??
+                    null
             );
 
         const runnerResult =

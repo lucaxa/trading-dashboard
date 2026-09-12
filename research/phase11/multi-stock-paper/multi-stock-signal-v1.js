@@ -120,6 +120,69 @@ function validateInstrument(instrument) {
     };
 }
 
+// ======================================================
+// MARKET CANDLE ADAPTER
+// ======================================================
+
+function adaptMarketCandles(candles) {
+
+    if (!Array.isArray(candles)) {
+        return [];
+    }
+
+    return candles.map(candle => {
+
+        if (
+            !candle ||
+            typeof candle !== "object"
+        ) {
+            return candle;
+        }
+
+        return {
+
+            ts:
+                Number(
+                    candle.ts ??
+                    candle.timestamp
+                ),
+
+            o:
+                Number(
+                    candle.o ??
+                    candle.open
+                ),
+
+            h:
+                Number(
+                    candle.h ??
+                    candle.high
+                ),
+
+            l:
+                Number(
+                    candle.l ??
+                    candle.low
+                ),
+
+            c:
+                Number(
+                    candle.c ??
+                    candle.close
+                ),
+
+            v:
+                Number(
+                    candle.v ??
+                    candle.volume ??
+                    0
+                )
+
+        };
+
+    });
+
+}
 
 // ======================================================
 // COMPLETED CANDLE FILTER
@@ -206,11 +269,9 @@ export function evaluateMultiStockSignal({
     // --------------------------------------------------
 
     const normalizedCandles =
-        normalizeCandles(
-            Array.isArray(candles)
-                ? candles
-                : []
-        );
+    normalizeCandles(
+        adaptMarketCandles(candles)
+    );
 
 
     if (
