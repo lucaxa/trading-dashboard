@@ -52,27 +52,105 @@ const INSTRUMENTS_URL =
 
 function createResearchWindow(){
 
+    const now =
+        new Date();
 
-    const endTime =
-        Date.now();
+
+    const IST_OFFSET_MS =
+        5.5 *
+        60 *
+        60 *
+        1000;
 
 
-    const startTime =
-        endTime -
-        (
-            2 *
-            24 *
-            60 *
-            60 *
-            1000
+    const nowIST =
+        new Date(
+            now.getTime() +
+            IST_OFFSET_MS
+        );
+
+
+    const currentDayIST =
+        nowIST.getUTCDay();
+
+
+    let daysBack;
+
+
+    if (
+        currentDayIST === 1
+    ){
+
+        // Monday → previous Friday
+        daysBack = 3;
+
+    }
+    else if (
+        currentDayIST === 0
+    ){
+
+        // Sunday → previous Friday
+        daysBack = 2;
+
+    }
+    else if (
+        currentDayIST === 6
+    ){
+
+        // Saturday → previous Friday
+        daysBack = 1;
+
+    }
+    else {
+
+        // Tuesday-Friday → previous calendar day
+        daysBack = 1;
+
+    }
+
+
+    const sessionEnd =
+        new Date(
+            nowIST.getTime() -
+            (
+                daysBack *
+                24 *
+                60 *
+                60 *
+                1000
+            )
+        );
+
+
+    sessionEnd.setUTCHours(
+        15,
+        30,
+        0,
+        0
+    );
+
+
+    const sessionStart =
+        new Date(
+            sessionEnd.getTime() -
+            (
+                6.5 *
+                60 *
+                60 *
+                1000
+            )
         );
 
 
     return {
 
-        startTime,
+        startTime:
+            sessionStart.getTime() -
+            IST_OFFSET_MS,
 
-        endTime
+        endTime:
+            sessionEnd.getTime() -
+            IST_OFFSET_MS
 
     };
 
