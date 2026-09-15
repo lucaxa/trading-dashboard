@@ -25,6 +25,11 @@ import {
 }
 from "../premarket/pipeline/pmse-runner.js";
 
+import {
+    previousTradingDay
+}
+from "../premarket/calendar/trading-days.js";
+
 
 import {
     getPMSEUniverse
@@ -55,80 +60,39 @@ function createResearchWindow(){
     const now =
         new Date();
 
-
     const IST_OFFSET_MS =
         5.5 *
         60 *
         60 *
         1000;
 
+    const marketDate =
+        new Intl.DateTimeFormat(
+            "en-CA",
+            {
+                timeZone:
+                    "Asia/Kolkata",
 
-    const nowIST =
-        new Date(
-            now.getTime() +
-            IST_OFFSET_MS
+                year:
+                    "numeric",
+
+                month:
+                    "2-digit",
+
+                day:
+                    "2-digit"
+            }
+        ).format(now);
+
+    const previousSessionDate =
+        previousTradingDay(
+            marketDate
         );
-
-
-    const currentDayIST =
-        nowIST.getUTCDay();
-
-
-    let daysBack;
-
-
-    if (
-        currentDayIST === 1
-    ){
-
-        // Monday → previous Friday
-        daysBack = 3;
-
-    }
-    else if (
-        currentDayIST === 0
-    ){
-
-        // Sunday → previous Friday
-        daysBack = 2;
-
-    }
-    else if (
-        currentDayIST === 6
-    ){
-
-        // Saturday → previous Friday
-        daysBack = 1;
-
-    }
-    else {
-
-        // Tuesday-Friday → previous calendar day
-        daysBack = 1;
-
-    }
-
 
     const sessionEnd =
         new Date(
-            nowIST.getTime() -
-            (
-                daysBack *
-                24 *
-                60 *
-                60 *
-                1000
-            )
+            `${previousSessionDate}T15:30:00+05:30`
         );
-
-
-    sessionEnd.setUTCHours(
-        15,
-        30,
-        0,
-        0
-    );
-
 
     const sessionStart =
         new Date(
@@ -141,21 +105,17 @@ function createResearchWindow(){
             )
         );
 
-
     return {
 
         startTime:
-            sessionStart.getTime() -
-            IST_OFFSET_MS,
+            sessionStart.getTime(),
 
         endTime:
-            sessionEnd.getTime() -
-            IST_OFFSET_MS
+            sessionEnd.getTime()
 
     };
 
 }
-
 
 
 async function fetchInstrumentCsv({
