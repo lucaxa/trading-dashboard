@@ -96,6 +96,41 @@ function saveSessionState({
   );
 }
 
+function buildSessionPinnedPMSEInput(instruments) {
+  const candidates =
+    instruments
+      .filter(
+        (instrument) =>
+          instrument.symbol !== "NIFTY 50",
+      )
+      .map(
+        (instrument) => ({
+          symbol: instrument.symbol,
+        }),
+      );
+
+  if (candidates.length !== 3) {
+    throw new Error(
+      `Expected exactly 3 persisted PMSE candidates, received ${candidates.length}`,
+    );
+  }
+
+  return {
+    version:
+      "PMSE-TRADEMIND-INPUT-CONTRACT-V1",
+    source: "PMSE",
+    mode: "PAPER_ONLY",
+    candidates,
+    metadata: {
+      researchOnly: true,
+      tradeCreated: false,
+      brokerCalled: false,
+      frontendTouched: false,
+      sessionPinned: true,
+    },
+  };
+}
+
 export async function runMultiStockSessionController({
   sessionDate,
   pmseInput,
@@ -120,43 +155,107 @@ export async function runMultiStockSessionController({
     throw new Error("stateFilePath is required");
   }
 
-  const universe = buildMultiStockUniverse({
-    pmseCandidates:
-      pmseInput?.output?.candidates ??
-      pmseInput?.candidates ??
-      [],
-  });
+  const sessionExists =
+    fs.existsSync(stateFilePath);
 
-  const instruments = [
-    ...universe.instruments.filter(
-      (instrument) => instrument.symbol === "NIFTY 50",
-    ),
-    ...resolvedPMSEInstruments,
-  ];
+  let instruments;
+  let sessionPMSEInput;
+  let sessionResolvedPMSEInstruments;
 
-  if (instruments.length !== 4) {
-    throw new Error(
-      `Expected exactly 4 resolved instruments, received ${instruments.length}`,
-    );
+  if (!sessionExists) {
+    const universe =
+      buildMultiStockUniverse({
+        pmseCandidates:
+          pmseInput?.output?.candidates ??
+          pmseInput?.candidates ??
+          [],
+      });
+
+    instruments = [
+      ...universe.instruments.filter(
+        (instrument) =>
+          instrument.symbol === "NIFTY 50",
+      ),
+      ...resolvedPMSEInstruments,
+    ];
+
+    if (instruments.length !== 4) {
+      throw new Error(
+        `Expected exactly 4 resolved instruments, received ${instruments.length}`,
+      );
+    }
+
+    sessionPMSEInput = pmseInput;
+    sessionResolvedPMSEInstruments =
+      resolvedPMSEInstruments;
+  } else {
+    const persisted =
+      JSON.parse(
+        fs.readFileSync(
+          stateFilePath,
+          "utf8",
+        ),
+      );
+
+    if (
+      !persisted ||
+      !Array.isArray(persisted.instruments)
+    ) {
+      throw new Error(
+        "Persisted session instruments are required",
+      );
+    }
+
+    instruments = persisted.instruments;
+
+    if (instruments.length !== 4) {
+      throw new Error(
+        `Expected exactly 4 persisted instruments, received ${instruments.length}`,
+      );
+    }
+
+    const persistedNifty =
+      instruments.find(
+        (instrument) =>
+          instrument.symbol === "NIFTY 50",
+      );
+
+    if (!persistedNifty) {
+      throw new Error(
+        "Persisted session must contain NIFTY 50",
+      );
+    }
+
+    sessionPMSEInput =
+      buildSessionPinnedPMSEInput(instruments);
+
+    sessionResolvedPMSEInstruments =
+      instruments.filter(
+        (instrument) =>
+          instrument.symbol !== "NIFTY 50",
+      );
   }
 
-  const sessionLoad = loadOrCreateSessionState({
-    stateFilePath,
-    sessionDate: normalizedSessionDate,
-    instruments,
-  });
+  const sessionLoad =
+    loadOrCreateSessionState({
+      stateFilePath,
+      sessionDate: normalizedSessionDate,
+      instruments,
+    });
 
   const session = sessionLoad.state;
 
-  const forward = await runMultiStockLiveForwardAdapter({
-    pmseInput,
-    resolvedPMSEInstruments,
-    state: session.state,
-    cursorState: session.cursorState,
-    accessToken,
-    nowMs,
-    fetcher,
-  });
+  const forward =
+    await runMultiStockLiveForwardAdapter({
+      pmseInput: sessionPMSEInput,
+      resolvedPMSEInstruments:
+        sessionResolvedPMSEInstruments,
+      state: session.state,
+      cursorState: session.cursorState,
+      accessToken,
+      nowMs,
+      fetcher,
+    });
 
   const updatedSession = {
     ...session,
@@ -168,6 +267,10 @@ export async function runMultiStockSessionController({
       forward.forward?.cursorState ??
       forward.cursorState ??
       session.cursorState,
+  };
+
+  const universe = {
+    instruments,
   };
 
   saveSessionState({

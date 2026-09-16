@@ -231,6 +231,113 @@ test("persists and reloads an existing session", async () => {
   );
 });
 
+
+test("pins the existing session universe against later PMSE changes", async () => {
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "multi-stock-session-pin-"));
+    const stateFilePath = path.join(tempDir, "session.json");
+
+    const originalPMSE = {
+        source: "PMSE",
+        mode: "PAPER_ONLY",
+        candidates: [
+            { symbol: "LT", score: 69, newsRisk: "LOW" },
+            { symbol: "HDFCBANK", score: 72, newsRisk: "LOW" },
+            { symbol: "BHARTIARTL", score: 60, newsRisk: "LOW" },
+        ],
+    };
+
+    const originalResolved = [
+        {
+            symbol: "LT",
+            securityId: "11483",
+            exchange: "NSE",
+            segment: "E",
+        },
+        {
+            symbol: "HDFCBANK",
+            securityId: "1333",
+            exchange: "NSE",
+            segment: "E",
+        },
+        {
+            symbol: "BHARTIARTL",
+            securityId: "10604",
+            exchange: "NSE",
+            segment: "E",
+        },
+    ];
+
+    const first = await runMultiStockSessionController({
+        pmseInput: originalPMSE,
+        resolvedPMSEInstruments: originalResolved,
+        accessToken: "test-token",
+        sessionDate: "2026-09-15",
+        nowMs: Date.parse("2026-09-15T10:00:00+05:30"),
+        stateFilePath,
+        fetcher: createFetcher(),
+    });
+
+    assert.equal(first.status, "READY");
+    assert.deepEqual(
+        first.universe.instruments.map((item) => item.symbol),
+        ["NIFTY 50", "LT", "HDFCBANK", "BHARTIARTL"],
+    );
+
+    const changedPMSE = {
+        source: "PMSE",
+        mode: "PAPER_ONLY",
+        candidates: [
+            { symbol: "TCS", score: 80, newsRisk: "LOW" },
+            { symbol: "INFY", score: 75, newsRisk: "LOW" },
+            { symbol: "SBIN", score: 70, newsRisk: "LOW" },
+        ],
+    };
+
+    const changedResolved = [
+        {
+            symbol: "TCS",
+            securityId: "11536",
+            exchange: "NSE",
+            segment: "E",
+        },
+        {
+            symbol: "INFY",
+            securityId: "1594",
+            exchange: "NSE",
+            segment: "E",
+        },
+        {
+            symbol: "SBIN",
+            securityId: "3045",
+            exchange: "NSE",
+            segment: "E",
+        },
+    ];
+
+    const second = await runMultiStockSessionController({
+        pmseInput: changedPMSE,
+        resolvedPMSEInstruments: changedResolved,
+        accessToken: "test-token",
+        sessionDate: "2026-09-15",
+        nowMs: Date.parse("2026-09-15T11:00:00+05:30"),
+        stateFilePath,
+        fetcher: createFetcher(),
+    });
+
+    assert.equal(second.status, "READY");
+    assert.deepEqual(
+        second.universe.instruments.map((item) => item.symbol),
+        ["NIFTY 50", "LT", "HDFCBANK", "BHARTIARTL"],
+    );
+
+    assert.equal(
+        second.universe.instruments.some(
+        (item) => ["TCS", "INFY", "SBIN"].includes(item.symbol),
+    ),
+        false,
+    );
+});
+
 test("rejects an unsafe state before live processing", async () => {
   const stateFilePath = createTempStatePath();
 
