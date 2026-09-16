@@ -527,6 +527,9 @@ export default async function handler(
                 cursorState:
                     request.body.cursorState,
 
+                sessionUniverse:
+                    request.body.sessionUniverse,
+
                 accessToken,
 
                 nowMs:
