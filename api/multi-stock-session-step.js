@@ -180,6 +180,90 @@ function validateRequestBody(body) {
             "nowMs must be finite"
         );
     }
+
+    if (
+        body.sessionUniverse !== undefined
+    ) {
+        if (
+            !body.sessionUniverse ||
+            typeof body.sessionUniverse !== "object"
+        ) {
+            throw new Error(
+                "sessionUniverse must be an object"
+            );
+        }
+
+        if (
+            !Array.isArray(
+                body.sessionUniverse.instruments
+            )
+        ) {
+            throw new Error(
+                "sessionUniverse.instruments must be an array"
+            );
+        }
+
+        if (
+            body.sessionUniverse.instruments.length !== 4
+        ) {
+            throw new Error(
+                "sessionUniverse must contain exactly 4 instruments"
+            );
+        }
+    }
+}
+
+
+function buildPinnedPMSEInput(instruments) {
+
+    const candidates =
+        instruments
+            .filter(
+                instrument =>
+                    instrument?.symbol !== "NIFTY 50"
+            )
+            .map(
+                instrument => ({
+                    symbol:
+                        instrument.symbol
+                })
+            );
+
+    if (candidates.length !== 3) {
+        throw new Error(
+            `Expected exactly 3 pinned PMSE candidates, received ${candidates.length}`
+        );
+    }
+
+    return {
+        version:
+            "PMSE-TRADEMIND-INPUT-CONTRACT-V1",
+
+        source:
+            "PMSE",
+
+        mode:
+            "PAPER_ONLY",
+
+        candidates,
+
+        metadata: {
+            researchOnly:
+                true,
+
+            tradeCreated:
+                false,
+
+            brokerCalled:
+                false,
+
+            frontendTouched:
+                false,
+
+            sessionPinned:
+                true
+        }
+    };
 }
 
 
@@ -220,6 +304,7 @@ function selectNSEEquityInstruments({
 export async function runMultiStockSessionStepAPI({
     state,
     cursorState,
+    sessionUniverse,
     accessToken,
     nowMs,
     getUniverse = getPMSEUniverse,
@@ -240,86 +325,126 @@ export async function runMultiStockSessionStepAPI({
     validateRequestBody({
         state,
         cursorState,
+        sessionUniverse,
         nowMs
     });
 
-    const universe =
-        getUniverse();
+    let pmseInput;
+    let resolvedCandidates;
 
-    const symbols =
-        universe
-            .universe
-            .symbols;
+    if (sessionUniverse) {
 
-    const csv =
-        await fetchInstrumentCsvFn({
-            accessToken
-        });
+        const pinnedInstruments =
+            sessionUniverse.instruments;
 
-    const resolved =
-        resolveInstruments({
-            symbols,
-            csv
-        });
+        const nifty =
+            pinnedInstruments.find(
+                instrument =>
+                    instrument?.symbol ===
+                    "NIFTY 50"
+            );
 
-    const stocks =
-        await getStocks({
-            symbols,
-            instruments:
-                resolved,
-            accessToken,
-            window:
-                createWindow()
-        });
+        if (!nifty) {
+            throw new Error(
+                "Pinned session universe must contain NIFTY 50"
+            );
+        }
 
-    const pmseResult =
-        await runPMSEPipeline({
-            stocks
-        });
+        pmseInput =
+            buildPinnedPMSEInput(
+                pinnedInstruments
+            );
 
-    const candidates =
-        pmseResult?.output?.candidates;
+        resolvedCandidates =
+            pinnedInstruments.filter(
+                instrument =>
+                    instrument.symbol !==
+                    "NIFTY 50"
+            );
 
-    if (
-        !Array.isArray(candidates)
-    ) {
-        throw new Error(
-            "PMSE did not return candidates"
-        );
+    } else {
+
+        const universe =
+            getUniverse();
+
+        const symbols =
+            universe
+                .universe
+                .symbols;
+
+        const csv =
+            await fetchInstrumentCsvFn({
+                accessToken
+            });
+
+        const resolved =
+            resolveInstruments({
+                symbols,
+                csv
+            });
+
+        const stocks =
+            await getStocks({
+                symbols,
+                instruments:
+                    resolved,
+                accessToken,
+                window:
+                    createWindow()
+            });
+
+        const pmseResult =
+            await runPMSEPipeline({
+                stocks
+            });
+
+        const candidates =
+            pmseResult?.output?.candidates;
+
+        if (
+            !Array.isArray(candidates)
+        ) {
+            throw new Error(
+                "PMSE did not return candidates"
+            );
+        }
+
+        const candidateSymbols =
+            candidates
+                .map(
+                    candidate =>
+                        candidate?.symbol
+                )
+                .filter(
+                    symbol =>
+                        typeof symbol ===
+                        "string"
+                )
+                .slice(0, 3);
+
+        if (
+            candidateSymbols.length !== 3
+        ) {
+            throw new Error(
+                "PMSE did not return exactly three candidates"
+            );
+        }
+
+        resolvedCandidates =
+            selectNSEEquityInstruments({
+                symbols:
+                    candidateSymbols,
+                resolved
+            });
+
+        pmseInput =
+            pmseResult.output;
     }
-
-    const candidateSymbols =
-        candidates
-            .map(
-                candidate =>
-                    candidate?.symbol
-            )
-            .filter(
-                symbol =>
-                    typeof symbol ===
-                    "string"
-            )
-            .slice(0, 3);
-
-    if (
-        candidateSymbols.length !== 3
-    ) {
-        throw new Error(
-            "PMSE did not return exactly three candidates"
-        );
-    }
-
-    const resolvedCandidates =
-        selectNSEEquityInstruments({
-            symbols:
-                candidateSymbols,
-            resolved
-        });
 
     const sessionResult =
         await runSessionStep({
             pmseInput:
-                pmseResult.output,
+                pmseInput,
 
             resolvedPMSEInstruments:
                 resolvedCandidates,
@@ -341,7 +466,7 @@ export async function runMultiStockSessionStepAPI({
             "READY",
 
         pmse:
-            pmseResult.output,
+            pmseInput,
 
         resolvedPMSEInstruments:
             resolvedCandidates,

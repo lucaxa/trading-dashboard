@@ -355,3 +355,149 @@ test("multi-stock session API core completes a paper-only four-stock step", asyn
     "session:3:TEST_TOKEN:1000",
   ]);
 });
+
+test("multi-stock session API uses a pinned session universe without rerunning PMSE", async () => {
+  const calls = [];
+
+  const state = {
+    mode: "PAPER_ONLY",
+    researchOnly: true,
+    tradingEnabled: false,
+    brokerCalled: false,
+    orderCreationEnabled: false,
+    learningEnabled: false,
+    strategyMutation: false,
+    optimizationEnabled: false,
+    promotionEnabled: false,
+  };
+
+  const cursorState = {
+    version: "A11-MULTI-STOCK-FORWARD-COORDINATOR-V1",
+    cursors: {},
+  };
+
+  const sessionUniverse = {
+    instruments: [
+      {
+        symbol: "NIFTY 50",
+        securityId: "40000001",
+        exchange: "NIDX",
+        segment: "INDEX",
+      },
+      {
+        symbol: "LT",
+        securityId: "11483",
+        exchange: "NSE",
+        segment: "E",
+      },
+      {
+        symbol: "HDFCBANK",
+        securityId: "1333",
+        exchange: "NSE",
+        segment: "E",
+      },
+      {
+        symbol: "SBIN",
+        securityId: "3045",
+        exchange: "NSE",
+        segment: "E",
+      },
+    ],
+  };
+
+  const result = await runMultiStockSessionStepAPI({
+    state,
+    cursorState,
+    sessionUniverse,
+    accessToken: "TEST_TOKEN",
+    nowMs: 1000,
+
+    getUniverse() {
+      calls.push("universe");
+      throw new Error(
+        "getUniverse must not run for a pinned session",
+      );
+    },
+
+    fetchInstrumentCsvFn() {
+      calls.push("csv");
+      throw new Error(
+        "instrument CSV must not be fetched for a pinned session",
+      );
+    },
+
+    resolveInstruments() {
+      calls.push("resolve");
+      throw new Error(
+        "instrument resolution must not run for a pinned session",
+      );
+    },
+
+    getStocks() {
+      calls.push("stocks");
+      throw new Error(
+        "PMSE historical acquisition must not run for a pinned session",
+      );
+    },
+
+    runPMSEPipeline() {
+      calls.push("pmse");
+      throw new Error(
+        "PMSE must not run for a pinned session",
+      );
+    },
+
+    async runSessionStep(args) {
+      calls.push("session");
+
+      assert.deepEqual(
+        args.resolvedPMSEInstruments,
+        sessionUniverse.instruments.filter(
+          (instrument) =>
+            instrument.symbol !== "NIFTY 50",
+        ),
+      );
+
+      assert.equal(
+        args.pmseInput.metadata.sessionPinned,
+        true,
+      );
+
+      assert.equal(args.state, state);
+      assert.equal(args.cursorState, cursorState);
+      assert.equal(args.accessToken, "TEST_TOKEN");
+      assert.equal(args.nowMs, 1000);
+
+      return {
+        version: "A11-MULTI-STOCK-SESSION-STEP-V1",
+        status: "READY",
+        universe: sessionUniverse,
+        safety: {
+          mode: "PAPER_ONLY",
+          researchOnly: true,
+          tradingEnabled: false,
+          brokerCalled: false,
+          orderCreationEnabled: false,
+          learningEnabled: false,
+          strategyMutation: false,
+          optimizationEnabled: false,
+          promotionEnabled: false,
+        },
+      };
+    },
+  });
+
+  assert.equal(result.status, "READY");
+
+  assert.deepEqual(
+    result.resolvedPMSEInstruments,
+    sessionUniverse.instruments.filter(
+      (instrument) =>
+        instrument.symbol !== "NIFTY 50",
+    ),
+  );
+
+  assert.deepEqual(calls, [
+    "session",
+  ]);
+});
