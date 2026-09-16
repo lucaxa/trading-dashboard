@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import handler, {
   runMultiStockSessionStepAPI,
-} from "./multi-stock-session-step.js";
+} from "../../api/multi-stock-session-step.js";
 
 function createResponse() {
   return {
