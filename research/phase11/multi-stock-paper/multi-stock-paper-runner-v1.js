@@ -123,8 +123,19 @@ function getSessionDate(
     timestamp
 ) {
 
+    if (
+        !Number.isFinite(timestamp)
+    ) {
+        return null;
+    }
+
+    const timestampMs =
+        Math.abs(timestamp) < 1e12
+            ? timestamp * 1000
+            : timestamp;
+
     const date =
-        new Date(timestamp);
+        new Date(timestampMs);
 
     if (
         Number.isNaN(
