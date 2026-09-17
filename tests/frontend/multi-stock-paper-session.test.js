@@ -123,3 +123,268 @@ test(
         );
     }
 );
+
+
+test(
+    "multi-stock session pins the universe after bootstrap",
+    async () => {
+
+        globalThis.localStorage =
+            createLocalStorage();
+
+        globalThis.window = {};
+
+        const calls = [];
+
+        const bootstrapUniverse = {
+            instruments: [
+                {
+                    symbol: "NIFTY 50",
+                    instrumentType: "INDEX",
+                    source: "FIXED_NIFTY",
+                    securityId: "40000001",
+                    exchange: "NIDX",
+                    segment: "INDEX"
+                },
+                {
+                    symbol: "INFY",
+                    instrumentType: "EQUITY",
+                    source: "PMSE",
+                    securityId: "1594",
+                    exchange: "NSE",
+                    segment: "E"
+                },
+                {
+                    symbol: "ICICIBANK",
+                    instrumentType: "EQUITY",
+                    source: "PMSE",
+                    securityId: "4963",
+                    exchange: "NSE",
+                    segment: "E"
+                },
+                {
+                    symbol: "TCS",
+                    instrumentType: "EQUITY",
+                    source: "PMSE",
+                    securityId: "11536",
+                    exchange: "NSE",
+                    segment: "E"
+                }
+            ]
+        };
+
+        const makeForward = () => ({
+            results: [
+                "NIFTY 50",
+                "INFY",
+                "ICICIBANK",
+                "TCS"
+            ].map(symbol => ({
+                symbol,
+
+                runner: {
+                    state: {
+                        symbol,
+
+                        session: {
+                            active: true,
+                            sessionDate: "2026-09-17"
+                        }
+                    }
+                }
+            })),
+
+            cursorState: {
+                version:
+                    "A11-MULTI-STOCK-FORWARD-COORDINATOR-V1",
+
+                cursors: {}
+            }
+        });
+
+        globalThis.fetch =
+            async (
+                url,
+                options = {}
+            ) => {
+
+                calls.push({
+                    url,
+                    options
+                });
+
+                if (
+                    String(url).startsWith(
+                        "/api/pmse-scan"
+                    )
+                ) {
+
+                    return {
+                        ok: true,
+
+                        async json() {
+
+                            return {
+                                status: "READY",
+
+                                output: {
+                                    version:
+                                        "PMSE-TRADEMIND-INPUT-CONTRACT-V1",
+
+                                    source:
+                                        "PMSE",
+
+                                    mode:
+                                        "PAPER_ONLY",
+
+                                    candidates: [
+                                        {
+                                            symbol: "INFY",
+                                            score: 60,
+                                            newsRisk: "LOW"
+                                        },
+                                        {
+                                            symbol: "ICICIBANK",
+                                            score: 52,
+                                            newsRisk: "LOW"
+                                        },
+                                        {
+                                            symbol: "TCS",
+                                            score: 46,
+                                            newsRisk: "LOW"
+                                        }
+                                    ]
+                                }
+                            };
+                        }
+                    };
+                }
+
+                if (
+                    String(url).startsWith(
+                        "/api/multi-stock-session-step"
+                    )
+                ) {
+
+                    const body =
+                        JSON.parse(
+                            options.body
+                        );
+
+                    if (
+                        !body.sessionUniverse
+                    ) {
+
+                        return {
+                            ok: true,
+
+                            async json() {
+
+                                return {
+                                    status: "READY",
+
+                                    universe:
+                                        bootstrapUniverse,
+
+                                    forward:
+                                        makeForward()
+                                };
+                            }
+                        };
+                    }
+
+                    return {
+                        ok: true,
+
+                        async json() {
+
+                            return {
+                                status: "READY",
+
+                                universe:
+                                    body.sessionUniverse,
+
+                                forward:
+                                    makeForward()
+                            };
+                        }
+                    };
+                }
+
+                throw new Error(
+                    `Unexpected fetch URL: ${url}`
+                );
+            };
+
+        const module =
+            await import(
+                `../../frontend/v2/multi-stock-paper-session.js?pin=${Date.now()}`
+            );
+
+        const session =
+            await module.startSession();
+
+        assert.deepEqual(
+            session.sessionUniverse,
+            bootstrapUniverse
+        );
+
+        const pmseCallsAfterBootstrap =
+            calls.filter(
+                call =>
+                    String(call.url).startsWith(
+                        "/api/pmse-scan"
+                    )
+            ).length;
+
+        assert.equal(
+            pmseCallsAfterBootstrap,
+            1
+        );
+
+        const second =
+            await module.pollSession();
+
+        assert.deepEqual(
+            second.universe,
+            bootstrapUniverse
+        );
+
+        const stepCalls =
+            calls.filter(
+                call =>
+                    String(call.url).startsWith(
+                        "/api/multi-stock-session-step"
+                    )
+            );
+
+        assert.equal(
+            stepCalls.length,
+            2
+        );
+
+        const secondBody =
+            JSON.parse(
+                stepCalls[1].options.body
+            );
+
+        assert.deepEqual(
+            secondBody.sessionUniverse,
+            bootstrapUniverse
+        );
+
+        assert.deepEqual(
+            secondBody.sessionUniverse.instruments
+                .map(
+                    instrument =>
+                        instrument.symbol
+                ),
+            [
+                "NIFTY 50",
+                "INFY",
+                "ICICIBANK",
+                "TCS"
+            ]
+        );
+    }
+);
