@@ -501,3 +501,184 @@ test("multi-stock session API uses a pinned session universe without rerunning P
     "session",
   ]);
 });
+
+
+test("multi-stock session API bootstrap resolves a fixed four-stock universe without historical acquisition", async () => {
+  const calls = [];
+
+  const state = {
+    mode: "PAPER_ONLY",
+    researchOnly: true,
+    tradingEnabled: false,
+    brokerCalled: false,
+    orderCreationEnabled: false,
+    learningEnabled: false,
+    strategyMutation: false,
+    optimizationEnabled: false,
+    promotionEnabled: false,
+  };
+
+  const cursorState = {
+    version: "A11-MULTI-STOCK-FORWARD-COORDINATOR-V1",
+    cursors: {},
+  };
+
+  const pmseInput = {
+    version: "PMSE-TRADEMIND-INPUT-CONTRACT-V1",
+    source: "PMSE",
+    mode: "PAPER_ONLY",
+
+    candidates: [
+      {
+        symbol: "INFY",
+        score: 60,
+        newsRisk: "LOW",
+      },
+      {
+        symbol: "ICICIBANK",
+        score: 52,
+        newsRisk: "LOW",
+      },
+      {
+        symbol: "TCS",
+        score: 46,
+        newsRisk: "LOW",
+      },
+    ],
+
+    metadata: {
+      researchOnly: true,
+      tradeCreated: false,
+      brokerCalled: false,
+      frontendTouched: false,
+    },
+  };
+
+  const resolved = [
+    {
+      symbol: "INFY",
+      securityId: "1594",
+      exchange: "NSE",
+      segment: "E",
+    },
+    {
+      symbol: "ICICIBANK",
+      securityId: "4963",
+      exchange: "NSE",
+      segment: "E",
+    },
+    {
+      symbol: "TCS",
+      securityId: "11536",
+      exchange: "NSE",
+      segment: "E",
+    },
+  ];
+
+  const result =
+    await runMultiStockSessionStepAPI({
+      mode: "BOOTSTRAP",
+
+      state,
+      cursorState,
+      accessToken: "TEST_TOKEN",
+      nowMs: 1000,
+
+      pmseInput,
+
+      resolvedCandidates: resolved,
+
+      getUniverse() {
+        calls.push("universe");
+
+        throw new Error(
+          "getUniverse must not run during bootstrap",
+        );
+      },
+
+      fetchInstrumentCsvFn() {
+        calls.push("csv");
+
+        throw new Error(
+          "instrument CSV must not be fetched during bootstrap",
+        );
+      },
+
+      resolveInstruments() {
+        calls.push("resolve");
+
+        throw new Error(
+          "instrument resolution must use supplied bootstrap candidates",
+        );
+      },
+
+      getStocks() {
+        calls.push("stocks");
+
+        throw new Error(
+          "historical acquisition must not run during bootstrap",
+        );
+      },
+
+      runPMSEPipeline() {
+        calls.push("pmse");
+
+        throw new Error(
+          "PMSE pipeline must not rerun during bootstrap",
+        );
+      },
+
+      async runSessionStep() {
+        calls.push("session");
+
+        throw new Error(
+          "session step must not execute during universe bootstrap",
+        );
+      },
+    });
+
+  assert.equal(
+    result.status,
+    "READY",
+  );
+
+  assert.deepEqual(
+    result.sessionUniverse.instruments,
+    [
+      {
+        symbol: "NIFTY 50",
+        instrumentType: "INDEX",
+        source: "FIXED_NIFTY",
+        securityId: "40000001",
+        exchange: "NIDX",
+        segment: "INDEX",
+      },
+      ...resolved.map(
+        instrument => ({
+          symbol:
+            instrument.symbol,
+
+          instrumentType:
+            "EQUITY",
+
+          source:
+            "PMSE",
+
+          securityId:
+            instrument.securityId,
+
+          exchange:
+            instrument.exchange,
+
+          segment:
+            instrument.segment,
+        }),
+      ),
+    ],
+  );
+
+  assert.deepEqual(
+    calls,
+    [],
+  );
+});

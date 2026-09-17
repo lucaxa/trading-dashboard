@@ -51,6 +51,11 @@ import {
 }
 from "../research/phase11/multi-stock-paper/multi-stock-session-step-v1.js";
 
+import {
+    buildMultiStockUniverse
+}
+from "../research/phase11/multi-stock-paper/multi-stock-universe-v1.js";
+
 
 const INSTRUMENTS_URL =
     "https://api.indstocks.com/market/instruments?source=equity";
@@ -150,6 +155,42 @@ function validateRequestBody(body) {
         throw new Error(
             "Request body is required"
         );
+    }
+
+    const mode =
+        body.mode || "STEP";
+
+    if (
+        mode !== "BOOTSTRAP" &&
+        mode !== "STEP"
+    ) {
+        throw new Error(
+            "mode must be BOOTSTRAP or STEP"
+        );
+    }
+
+    if (mode === "BOOTSTRAP") {
+
+        if (
+            !body.pmseInput ||
+            typeof body.pmseInput !== "object"
+        ) {
+            throw new Error(
+                "pmseInput is required for BOOTSTRAP"
+            );
+        }
+
+        if (
+            !Array.isArray(
+                body.resolvedCandidates
+            )
+        ) {
+            throw new Error(
+                "resolvedCandidates is required for BOOTSTRAP"
+            );
+        }
+
+        return;
     }
 
     if (
@@ -302,9 +343,12 @@ function selectNSEEquityInstruments({
 
 
 export async function runMultiStockSessionStepAPI({
+    mode = "STEP",
     state,
     cursorState,
     sessionUniverse,
+    pmseInput,
+    resolvedCandidates,
     accessToken,
     nowMs,
     getUniverse = getPMSEUniverse,
@@ -323,14 +367,132 @@ export async function runMultiStockSessionStepAPI({
     }
 
     validateRequestBody({
+        mode,
         state,
         cursorState,
         sessionUniverse,
+        pmseInput,
+        resolvedCandidates,
         nowMs
     });
 
-    let pmseInput;
-    let resolvedCandidates;
+    let activePMSEInput = pmseInput;
+    let activeResolvedCandidates = resolvedCandidates;
+
+    if (mode === "BOOTSTRAP") {
+
+        const candidates =
+            pmseInput.candidates;
+
+        if (
+            !Array.isArray(candidates) ||
+            candidates.length !== 3
+        ) {
+            throw new Error(
+                "BOOTSTRAP requires exactly three PMSE candidates"
+            );
+        }
+
+        if (
+            resolvedCandidates.length !== 3
+        ) {
+            throw new Error(
+                "BOOTSTRAP requires exactly three resolved equity instruments"
+            );
+        }
+
+        const candidateSymbols =
+            candidates.map(
+                candidate =>
+                    typeof candidate?.symbol === "string"
+                        ? candidate.symbol.trim().toUpperCase()
+                        : null
+            );
+
+        if (
+            candidateSymbols.some(
+                symbol =>
+                    !symbol
+            )
+        ) {
+            throw new Error(
+                "BOOTSTRAP PMSE candidates must contain valid symbols"
+            );
+        }
+
+        const resolvedSymbols =
+            resolvedCandidates.map(
+                instrument =>
+                    typeof instrument?.symbol === "string"
+                        ? instrument.symbol.trim().toUpperCase()
+                        : null
+            );
+
+        if (
+            resolvedSymbols.some(
+                symbol =>
+                    !symbol
+            )
+        ) {
+            throw new Error(
+                "BOOTSTRAP resolved instruments must contain valid symbols"
+            );
+        }
+
+        if (
+            !candidateSymbols.every(
+                symbol =>
+                    resolvedSymbols.includes(symbol)
+            )
+        ) {
+            throw new Error(
+                "BOOTSTRAP resolved instruments must match PMSE candidates"
+            );
+        }
+
+        const universe =
+            buildMultiStockUniverse({
+                pmseCandidates:
+                    candidates
+            });
+
+        const sessionUniverse =
+            {
+                ...universe,
+
+                instruments: [
+                    universe.instruments[0],
+
+                    ...resolvedCandidates.map(
+                        instrument => ({
+                            ...instrument,
+
+                            instrumentType:
+                                "EQUITY",
+
+                            source:
+                                "PMSE"
+                        })
+                    )
+                ]
+            };
+
+        return {
+            status:
+                "READY",
+
+            mode:
+                "BOOTSTRAP",
+
+            pmse:
+                pmseInput,
+
+            resolvedPMSEInstruments:
+                resolvedCandidates,
+
+            sessionUniverse
+        };
+    }
 
     if (sessionUniverse) {
 
@@ -521,6 +683,9 @@ export default async function handler(
 
         const result =
             await runMultiStockSessionStepAPI({
+                mode:
+                    request.body.mode,
+
                 state:
                     request.body.state,
 
@@ -529,6 +694,12 @@ export default async function handler(
 
                 sessionUniverse:
                     request.body.sessionUniverse,
+
+                pmseInput:
+                    request.body.pmseInput,
+
+                resolvedCandidates:
+                    request.body.resolvedCandidates,
 
                 accessToken,
 
