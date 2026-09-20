@@ -35,6 +35,11 @@ const PMSE_ENDPOINT =
 const VERSION =
     "A11-MULTI-STOCK-PAPER-SESSION-V1";
 
+import {
+    resolveEquityInstruments
+}
+from "../../premarket/equity-data/indstocks-equity-instrument-provider.js";
+
 
 function createInitialState() {
 
@@ -330,6 +335,95 @@ function validateUniverse(
 }
 
 
+async function getInstrumentCsv() {
+
+    const response =
+        await fetch(
+            "/api/instruments?source=equity",
+            {
+                method: "GET",
+                cache: "no-store"
+            }
+        );
+
+    const payload =
+        await response.json();
+
+    if (!response.ok) {
+        throw new Error(
+            payload?.error ||
+            `HTTP ${response.status}`
+        );
+    }
+
+    if (
+        !payload?.success ||
+        typeof payload.data !== "string"
+    ) {
+        throw new Error(
+            "Invalid equity instrument response"
+        );
+    }
+
+    return payload.data;
+}
+
+
+function resolveBootstrapCandidates(
+    pmseInput,
+    csv
+) {
+
+    const symbols =
+        pmseInput.candidates.map(
+            candidate =>
+                candidate.symbol
+        );
+
+    const resolved =
+        resolveEquityInstruments({
+            symbols,
+            csv
+        });
+
+    const selected =
+        symbols.map(
+            symbol => {
+
+                const matches =
+                    resolved.filter(
+                        instrument =>
+                            instrument.symbol ===
+                            symbol
+                    );
+
+                const instrument =
+                    matches.find(
+                        item =>
+                            item.exchange === "NSE" &&
+                            item.segment === "E"
+                    );
+
+                if (!instrument) {
+                    throw new Error(
+                        `No NSE equity instrument found for ${symbol}`
+                    );
+                }
+
+                return instrument;
+            }
+        );
+
+    if (selected.length !== 3) {
+        throw new Error(
+            "Expected exactly 3 resolved PMSE instruments"
+        );
+    }
+
+    return selected;
+}
+
+
 async function bootstrapSession() {
 
     const pmseResponse =
@@ -342,16 +436,18 @@ async function bootstrapSession() {
             pmseResponse
         );
 
-    /*
-     * The first API call performs the actual bootstrap:
-     * PMSE candidates are resolved into the fixed universe.
-     *
-     * We intentionally do not invent or hard-code equity
-     * instrument IDs in this frontend.
-     */
+    const csv =
+        await getInstrumentCsv();
+
+    const resolvedCandidates =
+        resolveBootstrapCandidates(
+            pmseInput,
+            csv
+        );
 
     return {
-        pmseInput
+        pmseInput,
+        resolvedCandidates
     };
 }
 
@@ -376,7 +472,8 @@ async function startSession() {
     }
 
     const {
-        pmseInput
+        pmseInput,
+        resolvedCandidates
     } =
         await bootstrapSession();
 
@@ -397,7 +494,7 @@ async function startSession() {
             null,
 
         cursorState:
-            null,
+            createInitialCursorState(),
 
         active:
             true,
@@ -406,24 +503,24 @@ async function startSession() {
             null
     };
 
-    /*
-     * Universe resolution happens on the first API step.
-     * The returned universe is then pinned locally.
-     */
-
-    const firstStep =
+    const bootstrap =
         await postJSON(
             API_ENDPOINT,
             {
+                mode:
+                    "BOOTSTRAP",
+
                 pmseInput:
                     session.pmseInput,
+
+                resolvedCandidates,
 
                 state: {
                     instruments: []
                 },
 
                 cursorState:
-                    createInitialCursorState(),
+                    session.cursorState,
 
                 nowMs:
                     Date.now()
@@ -431,52 +528,23 @@ async function startSession() {
         );
 
     if (
-        !firstStep?.universe?.instruments
+        !bootstrap?.sessionUniverse?.instruments
     ) {
 
         throw new Error(
-            "Initial multi-stock step did not return a universe"
+            "Bootstrap did not return a session universe"
         );
     }
 
     validateUniverse(
-        firstStep.universe
+        bootstrap.sessionUniverse
     );
 
     session.sessionUniverse =
-        firstStep.universe;
-
-    session.state =
-        firstStep.forward
-            ?.results
-            ?.reduce(
-                (
-                    state,
-                    result
-                ) => {
-
-                    if (
-                        result?.runner?.state
-                    ) {
-
-                        state[
-                            result.symbol
-                        ] =
-                            result.runner.state;
-                    }
-
-                    return state;
-                },
-                {}
-            ) || {};
-
-    session.cursorState =
-        firstStep.forward
-            ?.cursorState ||
-        createInitialCursorState();
+        bootstrap.sessionUniverse;
 
     session.lastStep =
-        firstStep;
+        bootstrap;
 
     saveSession(
         session
@@ -523,8 +591,11 @@ async function pollSession() {
             }
         );
 
+    const forward =
+        result.session?.forward;
+
     session.state =
-        result.forward
+        forward
             ?.results
             ?.reduce(
                 (
@@ -549,7 +620,7 @@ async function pollSession() {
         session.state;
 
     session.cursorState =
-        result.forward
+        forward
             ?.cursorState ||
         session.cursorState;
 

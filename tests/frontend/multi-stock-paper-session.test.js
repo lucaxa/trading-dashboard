@@ -262,6 +262,31 @@ test(
 
                 if (
                     String(url).startsWith(
+                        "/api/instruments?source=equity"
+                    )
+                ) {
+
+                    return {
+                        ok: true,
+
+                        async json() {
+
+                            return {
+                                success: true,
+                                source: "equity",
+
+                                data:
+                                    "EXCH,SEGMENT,TRADING_SYMBOL,SECURITY_ID\n" +
+                                    "NSE,E,INFY,1594\n" +
+                                    "NSE,E,ICICIBANK,4963\n" +
+                                    "NSE,E,TCS,11536\n"
+                            };
+                        }
+                    };
+                }
+
+                if (
+                    String(url).startsWith(
                         "/api/multi-stock-session-step"
                     )
                 ) {
@@ -272,7 +297,7 @@ test(
                         );
 
                     if (
-                        !body.sessionUniverse
+                        body.mode === "BOOTSTRAP"
                     ) {
 
                         return {
@@ -282,12 +307,16 @@ test(
 
                                 return {
                                     status: "READY",
+                                    mode: "BOOTSTRAP",
 
-                                    universe:
-                                        bootstrapUniverse,
+                                    pmse:
+                                        body.pmseInput,
 
-                                    forward:
-                                        makeForward()
+                                    resolvedPMSEInstruments:
+                                        body.resolvedCandidates,
+
+                                    sessionUniverse:
+                                        bootstrapUniverse
                                 };
                             }
                         };
@@ -301,11 +330,13 @@ test(
                             return {
                                 status: "READY",
 
-                                universe:
-                                    body.sessionUniverse,
+                                session: {
+                                    universe:
+                                        body.sessionUniverse,
 
-                                forward:
-                                    makeForward()
+                                    forward:
+                                        makeForward()
+                                }
                             };
                         }
                     };
@@ -346,7 +377,7 @@ test(
             await module.pollSession();
 
         assert.deepEqual(
-            second.universe,
+            second.session.universe,
             bootstrapUniverse
         );
 

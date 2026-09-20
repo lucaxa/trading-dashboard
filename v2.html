@@ -347,6 +347,53 @@
     </div>
 
     <!-- =====================================================
+         PHASE 11 — FOUR-STOCK PAPER SESSION
+         Separate from the legacy NIFTY-only A11 session.
+    ====================================================== -->
+    <section class="panel" id="four-stock-paper-panel" aria-labelledby="four-stock-paper-title">
+      <div class="panel-title">
+        <div>
+          <h2 id="four-stock-paper-title">Four-Stock Paper Session</h2>
+          <small>Phase 11 · Independent multi-stock session</small>
+        </div>
+        <b id="four-stock-paper-status" aria-live="polite">NOT STARTED</b>
+      </div>
+
+      <p>
+        Paper-only research session. Prepare and pin the universe before manually
+        running individual paper steps. No live orders.
+      </p>
+
+      <div class="metrics" id="four-stock-paper-universe">
+        <article><span>Instrument 1</span><b>NIFTY 50</b></article>
+        <article><span>Instrument 2</span><b>Awaiting PMSE</b></article>
+        <article><span>Instrument 3</span><b>Awaiting PMSE</b></article>
+        <article><span>Instrument 4</span><b>Awaiting PMSE</b></article>
+      </div>
+
+      <div class="panel-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+        <button type="button" id="four-stock-paper-prepare" class="primary">
+          Prepare Universe
+        </button>
+        <button type="button" id="four-stock-paper-resume" disabled>
+          Resume Saved Session
+        </button>
+        <button type="button" id="four-stock-paper-step" disabled>
+          Run One Paper Step
+        </button>
+        <button type="button" id="four-stock-paper-stop" disabled>
+          Stop Session
+        </button>
+      </div>
+
+      <div id="four-stock-paper-message" role="status" aria-live="polite" style="margin-top:12px">
+        No four-stock session prepared.
+      </div>
+
+      <pre id="four-stock-paper-evidence" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:12px" hidden></pre>
+    </section>
+
+    <!-- =====================================================
          EXISTING DIAGNOSTICS / BACKTEST / HEALTH
          Preserved so current V2 data bindings remain usable.
     ====================================================== -->
@@ -466,6 +513,7 @@
   <script src="./frontend/v2/v2-a11-paper.js"></script>
   <script src="./frontend/v2/a11-paper-session.js"></script>
   <script src="./frontend/v2/v2-pmse-display.js"></script>
+  <script type="module" src="./frontend/v2/four-stock-paper-ui.js"></script>
   
 </body>
 </html>
