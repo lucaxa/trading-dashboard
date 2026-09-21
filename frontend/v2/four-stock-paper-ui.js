@@ -106,8 +106,8 @@
       el.status.textContent = !todaySession ? "STALE — PREPARE NEW SESSION" :
         paused ? "PAUSED" :
         validUniverse(snapshot) ? "PREPARED" : "NOT READY";
-      el.evidence.textContent = JSON.stringify(snapshot, null, 2);
-      el.evidence.hidden = false;
+      // Keep the large JSON evidence hidden; Download JSON remains available.
+      el.evidence.hidden = true;
       el.download.disabled = busy;
     }
 
