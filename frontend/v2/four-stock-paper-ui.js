@@ -17,6 +17,7 @@
     resume: "four-stock-paper-resume",
     step: "four-stock-paper-step",
     stop: "four-stock-paper-stop",
+    download: "four-stock-paper-download",
     message: "four-stock-paper-message",
     evidence: "four-stock-paper-evidence"
   };
@@ -100,12 +101,14 @@
     if (!snapshot) {
       el.status.textContent = "NOT STARTED";
       el.evidence.hidden = true;
+      el.download.disabled = true;
     } else {
       el.status.textContent = !todaySession ? "STALE — PREPARE NEW SESSION" :
         paused ? "PAUSED" :
         validUniverse(snapshot) ? "PREPARED" : "NOT READY";
       el.evidence.textContent = JSON.stringify(snapshot, null, 2);
       el.evidence.hidden = false;
+      el.download.disabled = busy;
     }
 
     el.prepare.disabled = busy || todaySession;
@@ -196,6 +199,38 @@
       } finally {
         setBusy(false);
       }
+    });
+
+    el.download.addEventListener("click", () => {
+      if (busy) return;
+
+      const snapshot = controller.getSessionSnapshot();
+      if (!snapshot) {
+        el.download.disabled = true;
+        setMessage("Download unavailable: no saved session exists.");
+        return;
+      }
+
+      const sessionDate = String(snapshot.sessionDate || "unknown")
+        .replace(/[^a-zA-Z0-9_-]/g, "-");
+      const timestamp = new Date().toISOString()
+        .replace(/[:.]/g, "-");
+
+      const blob = new Blob(
+        [JSON.stringify(snapshot, null, 2)],
+        { type: "application/json" }
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = `trademind-four-stock-session-${sessionDate}-${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      setMessage("Saved session JSON export requested. Session data was not changed.");
     });
 
     el.stop.addEventListener("click", () => {
