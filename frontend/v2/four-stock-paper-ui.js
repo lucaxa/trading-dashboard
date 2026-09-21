@@ -55,6 +55,17 @@
     }
   }
 
+  function isTodaySession(snapshot) {
+    const todayIST = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(new Date());
+
+    return Boolean(snapshot && snapshot.sessionDate === todayIST);
+  }
+
   function validUniverse(snapshot) {
     const instruments = snapshot?.sessionUniverse?.instruments;
     if (!Array.isArray(instruments) || instruments.length !== 4) return false;
@@ -83,19 +94,23 @@
         (index === 0 ? "NIFTY 50" : "Awaiting PMSE");
     });
 
+    const todaySession = isTodaySession(snapshot);
+    const todayValidUniverse = todaySession && validUniverse(snapshot);
+
     if (!snapshot) {
       el.status.textContent = "NOT STARTED";
       el.evidence.hidden = true;
     } else {
-      el.status.textContent = paused ? "PAUSED" :
+      el.status.textContent = !todaySession ? "STALE — PREPARE NEW SESSION" :
+        paused ? "PAUSED" :
         validUniverse(snapshot) ? "PREPARED" : "NOT READY";
       el.evidence.textContent = JSON.stringify(snapshot, null, 2);
       el.evidence.hidden = false;
     }
 
-    el.prepare.disabled = busy || hasSavedSession;
-    el.resume.disabled = busy || !hasSavedSession || !validUniverse(snapshot) || !paused;
-    el.step.disabled = busy || paused || !validUniverse(snapshot);
+    el.prepare.disabled = busy || todaySession;
+    el.resume.disabled = busy || !todayValidUniverse || !paused;
+    el.step.disabled = busy || paused || !todayValidUniverse;
     el.stop.disabled = busy || paused || !hasSavedSession;
   }
 
@@ -121,7 +136,7 @@
     }
 
     el.prepare.addEventListener("click", async () => {
-      if (busy || controller.getSessionSnapshot()) return;
+      if (busy || isTodaySession(controller.getSessionSnapshot())) return;
 
       setBusy(true);
       setMessage("Preparing and validating a new four-stock universe…");
@@ -143,11 +158,11 @@
       if (busy) return;
 
       const snapshot = controller.getSessionSnapshot();
-      if (!validUniverse(snapshot)) {
+      if (!isTodaySession(snapshot) || !validUniverse(snapshot)) {
         paused = true;
         savePauseState();
         refresh();
-        setMessage("Resume blocked: saved session does not contain four unique instruments including NIFTY 50.");
+        setMessage("Resume blocked: session is stale or does not contain four unique instruments including NIFTY 50. Prepare a new session.");
         return;
       }
 
@@ -161,11 +176,11 @@
       if (busy || paused) return;
 
       const snapshot = controller.getSessionSnapshot();
-      if (!validUniverse(snapshot)) {
+      if (!isTodaySession(snapshot) || !validUniverse(snapshot)) {
         paused = true;
         savePauseState();
         refresh();
-        setMessage("Paper step blocked: saved four-stock universe validation failed.");
+        setMessage("Paper step blocked: session is stale or the four-stock universe is invalid. Prepare a new session.");
         return;
       }
 

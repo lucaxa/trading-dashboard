@@ -540,6 +540,24 @@ async function startSession() {
         bootstrap.sessionUniverse
     );
 
+    // Archive the prior session only after the new bootstrap
+    // has succeeded and its universe has been validated.
+    const previous = loadSession();
+    if (
+        previous &&
+        previous.sessionDate !== session.sessionDate
+    ) {
+        const archiveKey =
+            `${STORAGE_KEY}_archive_${previous.sessionDate || "unknown"}`;
+
+        if (!localStorage.getItem(archiveKey)) {
+            localStorage.setItem(
+                archiveKey,
+                JSON.stringify(previous)
+            );
+        }
+    }
+
     session.sessionUniverse =
         bootstrap.sessionUniverse;
 
@@ -566,6 +584,12 @@ async function pollSession() {
 
         throw new Error(
             "Multi-stock session has not been bootstrapped"
+        );
+    }
+
+    if (session.sessionDate !== getTodayIST()) {
+        throw new Error(
+            `Stale session blocked: saved date ${session.sessionDate}; today IST is ${getTodayIST()}. Prepare a new session first.`
         );
     }
 

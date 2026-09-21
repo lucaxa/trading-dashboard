@@ -17,9 +17,9 @@ test("adapter requires explicit Resume for a saved session", () => {
 test("Prepare cannot silently reuse an existing session", () => {
   assert.match(
     source,
-    /if \(busy \|\| controller\.getSessionSnapshot\(\)\) return;/
+    /if \(busy \|\| isTodaySession\(controller\.getSessionSnapshot\(\)\)\) return;/
   );
-  assert.match(source, /el\.prepare\.disabled = busy \|\| hasSavedSession/);
+  assert.match(source, /el\.prepare\.disabled = busy \|\| todaySession/);
 });
 
 test("Resume and paper steps require a valid four-instrument universe", () => {
@@ -27,7 +27,7 @@ test("Resume and paper steps require a valid four-instrument universe", () => {
   assert.match(source, /instruments\.length !== 4/);
   assert.match(source, /new Set\(symbols\)\.size === 4/);
   assert.match(source, /symbols\.includes\("NIFTY 50"\)/);
-  assert.match(source, /if \(!validUniverse\(snapshot\)\)/);
+  assert.match(source, /if \(!isTodaySession\(snapshot\) \|\| !validUniverse\(snapshot\)\)/);
 });
 
 test("Stop pauses UI polling and preserves controller evidence", () => {
