@@ -12,6 +12,7 @@
 
   const IDS = {
     status: "four-stock-paper-status",
+    telemetry: "four-stock-paper-telemetry",
     universe: "four-stock-paper-universe",
     prepare: "four-stock-paper-prepare",
     resume: "four-stock-paper-resume",
@@ -80,7 +81,128 @@
       symbols.includes("NIFTY 50");
   }
 
-  function render(snapshot) {
+
+function renderTelemetry(snapshot) {
+  const container = el.telemetry;
+  if (!container) return;
+
+  container.replaceChildren();
+
+  const stocks = snapshot?.state?.stocks || {};
+  const instruments = snapshot?.sessionUniverse?.instruments;
+  const symbols = Array.isArray(instruments)
+    ? instruments.map(item =>
+        typeof item === "string" ? item : item?.symbol
+      ).filter(Boolean)
+    : Object.keys(stocks);
+
+  const forward =
+    snapshot?.lastStep?.forward ||
+    snapshot?.lastStep?.session?.forward ||
+    null;
+
+  const forwardResults = Array.isArray(forward?.results)
+    ? forward.results
+    : [];
+
+  const latestBySymbol = new Map();
+
+  for (const item of forwardResults) {
+    const runner = item?.runner;
+    const results = Array.isArray(runner?.results)
+      ? runner.results
+      : [];
+
+    for (const result of results) {
+      if (result?.symbol) {
+        latestBySymbol.set(result.symbol, result);
+      }
+    }
+  }
+
+  function addCard(title, value) {
+    const article = document.createElement("article");
+    const label = document.createElement("span");
+    const body = document.createElement("b");
+
+    label.textContent = title;
+    body.textContent = String(value);
+
+    article.append(label, body);
+    container.append(article);
+  }
+
+  addCard("Mode", "PAPER ONLY");
+  addCard(
+    "Last Poll",
+    snapshot?.lastStep ? "Recorded" : "Not recorded"
+  );
+
+  for (const symbol of symbols) {
+    const stock = stocks[symbol] || {};
+    const opportunity = stock.opportunity || {};
+    const position = stock.position || {};
+    const latest = latestBySymbol.get(symbol);
+
+    const signal =
+      latest?.signal ?? opportunity.signal ?? "Not recorded";
+
+    const entry =
+      latest?.entry?.status ?? "Not recorded";
+
+    const outcome =
+      latest?.outcome?.status ??
+      stock.outcome?.status ??
+      "Not recorded";
+
+    const funnel =
+      opportunity.lifecycleState ?? "NOT_REACHED";
+
+    const activePosition = position.active
+      ? `${position.side || "Active"} @ ${position.entry ?? "N/A"}`
+      : "None";
+
+    const heading = document.createElement("h4");
+    heading.textContent = symbol;
+    container.append(heading);
+
+    addCard(`${symbol} — Signal`, signal);
+    addCard(`${symbol} — Entry`, entry);
+    addCard(`${symbol} — Outcome`, outcome);
+    addCard(`${symbol} — Funnel`, funnel);
+    addCard(`${symbol} — Active Position`, activePosition);
+
+    addCard(
+      `${symbol} — Paper Entries`,
+      "Historical count unavailable"
+    );
+
+    addCard(
+      `${symbol} — Completed`,
+      "Count unavailable"
+    );
+
+    addCard(
+      `${symbol} — Executable`,
+      !latest
+        ? "Not recorded"
+        : entry === "ENTRY_ACCEPTED"
+          ? "Accepted"
+          : entry === "NO_ENTRY"
+            ? "No entry"
+            : entry
+    );
+
+    addCard(`${symbol} — Lifecycle`, funnel);
+  }
+
+  if (!symbols.length) {
+    addCard("Telemetry", "Awaiting saved session evidence");
+  }
+}
+
+function render(snapshot) {
+  renderTelemetry(snapshot);
     hasSavedSession = Boolean(snapshot);
 
     const instruments = snapshot?.sessionUniverse?.instruments;
