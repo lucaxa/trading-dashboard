@@ -40,6 +40,16 @@ import {
 }
 from "../../premarket/equity-data/indstocks-equity-instrument-provider.js";
 
+import {
+    createMultiStockState
+}
+from "../../research/phase11/multi-stock-paper/multi-stock-state-v1.js";
+
+import {
+    createMultiStockForwardCursor
+}
+from "../../research/phase11/multi-stock-paper/multi-stock-forward-coordinator-v1.js";
+
 
 function createInitialState() {
 
@@ -561,6 +571,19 @@ async function startSession() {
     session.sessionUniverse =
         bootstrap.sessionUniverse;
 
+    // A11 authoritative multi-stock paper state.
+    // Every instrument receives an independent state boundary.
+    session.state =
+        createMultiStockState(
+            session.sessionUniverse.instruments
+        );
+
+    // Independent forward cursor for every instrument.
+    session.cursorState =
+        createMultiStockForwardCursor(
+            session.sessionUniverse.instruments
+        );
+
     session.lastStep =
         bootstrap;
 
@@ -597,6 +620,16 @@ async function pollSession() {
         session.sessionUniverse
     );
 
+    // A11 preflight: never send an uninitialized session.
+    if (
+        !session.state ||
+        !session.cursorState
+    ) {
+        throw new Error(
+            "Invalid multi-stock session state. Prepare a new session before polling."
+        );
+    }
+
     const result =
         await postJSON(
             API_ENDPOINT,
@@ -618,32 +651,14 @@ async function pollSession() {
     const forward =
         result.session?.forward;
 
+    // Preserve the complete authoritative A11 multi-stock state.
+    // Do not reduce it into a symbol -> runner.state object.
     session.state =
-        forward
-            ?.results
-            ?.reduce(
-                (
-                    state,
-                    item
-                ) => {
-
-                    if (
-                        item?.runner?.state
-                    ) {
-
-                        state[
-                            item.symbol
-                        ] =
-                            item.runner.state;
-                    }
-
-                    return state;
-                },
-                {}
-            ) ||
+        result.state ||
         session.state;
 
     session.cursorState =
+        result.cursorState ||
         forward
             ?.cursorState ||
         session.cursorState;
