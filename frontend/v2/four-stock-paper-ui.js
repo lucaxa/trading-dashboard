@@ -105,6 +105,15 @@ function renderTelemetry(snapshot) {
     ? forward.results
     : [];
 
+  // Direct per-instrument coordinator results (poll status).
+  const forwardStatusBySymbol = new Map();
+
+  for (const result of forwardResults) {
+    if (result?.symbol && result?.status) {
+      forwardStatusBySymbol.set(result.symbol, result.status);
+    }
+  }
+
   const latestBySymbol = new Map();
 
   for (const item of forwardResults) {
@@ -165,6 +174,11 @@ function renderTelemetry(snapshot) {
     const heading = document.createElement("h4");
     heading.textContent = symbol;
     container.append(heading);
+
+    addCard(
+      `${symbol} — Forward Status`,
+      forwardStatusBySymbol.get(symbol) || "Not recorded"
+    );
 
     addCard(`${symbol} — Signal`, signal);
     addCard(`${symbol} — Entry`, entry);
