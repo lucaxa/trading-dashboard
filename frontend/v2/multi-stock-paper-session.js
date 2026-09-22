@@ -676,10 +676,12 @@ async function pollSession() {
     // Do not reduce it into a symbol -> runner.state object.
     session.state =
         result.state ||
+        result.session?.state ||
         session.state;
 
     session.cursorState =
         result.cursorState ||
+        result.session?.cursorState ||
         forward
             ?.cursorState ||
         session.cursorState;
