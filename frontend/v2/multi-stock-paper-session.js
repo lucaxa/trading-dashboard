@@ -45,11 +45,32 @@ import {
 }
 from "../../research/phase11/multi-stock-paper/multi-stock-state-v1.js";
 
-import {
-    createMultiStockForwardCursor
-}
-from "../../research/phase11/multi-stock-paper/multi-stock-forward-coordinator-v1.js";
 
+
+function createBrowserForwardCursor(instruments = []) {
+    if (!Array.isArray(instruments)) {
+        throw new Error("instruments must be an array");
+    }
+
+    const cursors = {};
+
+    for (const instrument of instruments) {
+        const symbol = instrument?.symbol?.trim().toUpperCase();
+
+        if (!symbol || cursors[symbol]) {
+            throw new Error("Invalid or duplicate cursor symbol");
+        }
+
+        cursors[symbol] = {
+            lastProcessedCandleTs: null
+        };
+    }
+
+    return {
+        version: "A11-MULTI-STOCK-FORWARD-COORDINATOR-V1",
+        cursors
+    };
+}
 
 function createInitialState() {
 
@@ -580,7 +601,7 @@ async function startSession() {
 
     // Independent forward cursor for every instrument.
     session.cursorState =
-        createMultiStockForwardCursor(
+        createBrowserForwardCursor(
             session.sessionUniverse.instruments
         );
 
