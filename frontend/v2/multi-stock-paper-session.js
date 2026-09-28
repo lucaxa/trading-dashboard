@@ -703,6 +703,215 @@ function getSessionSnapshot() {
 }
 
 
+/*
+ * ============================================================
+ * Automatic PMSE Multi-Stock Paper Runner
+ *
+ * Purpose:
+ * - Start/resume the pinned PMSE session automatically.
+ * - Poll the stateless session API every 5 minutes.
+ * - Prevent overlapping polls.
+ * - Recover after temporary API/network failures.
+ * - Resume promptly when the browser tab becomes visible again.
+ *
+ * Safety:
+ * - PAPER ONLY.
+ * - No broker orders.
+ * - No learning.
+ * - No optimization.
+ * - No strategy mutation.
+ * - No promotion.
+ * ============================================================
+ */
+
+const AUTO_POLL_INTERVAL_MS = 5 * 60 * 1000;
+
+let autoPollTimer = null;
+let autoPollRunning = false;
+let autoPollInFlight = false;
+let autoPollLastRunMs = 0;
+
+async function runAutomaticPoll() {
+
+    if (autoPollInFlight) {
+        console.log(
+            "[A11-MULTI] Automatic poll skipped: previous poll still running"
+        );
+        return null;
+    }
+
+    autoPollInFlight = true;
+
+    try {
+
+        /*
+         * startSession() is deliberately called before every automatic
+         * cycle. For the current IST date it simply returns the pinned
+         * persisted session. After an IST date rollover it creates the
+         * new PMSE-selected universe.
+         */
+        await startSession();
+
+        const result =
+            await pollSession();
+
+        autoPollLastRunMs = Date.now();
+
+        console.log(
+            "[A11-MULTI] Automatic paper poll completed",
+            {
+                timestamp: new Date().toISOString(),
+                result
+            }
+        );
+
+        return result;
+
+    } catch (error) {
+
+        /*
+         * Do not destroy or clear the persisted session on transient
+         * failures. The next scheduled cycle will retry.
+         */
+        console.error(
+            "[A11-MULTI] Automatic paper poll failed; session retained",
+            error
+        );
+
+        return null;
+
+    } finally {
+
+        autoPollInFlight = false;
+    }
+}
+
+
+function stopAutomaticPolling() {
+
+    if (autoPollTimer !== null) {
+
+        clearInterval(
+            autoPollTimer
+        );
+
+        autoPollTimer = null;
+    }
+
+    autoPollRunning = false;
+
+    console.log(
+        "[A11-MULTI] Automatic polling stopped"
+    );
+}
+
+
+async function startAutomaticPolling(
+    options = {}
+) {
+
+    if (autoPollRunning) {
+
+        console.log(
+            "[A11-MULTI] Automatic polling already running"
+        );
+
+        return getSessionSnapshot();
+    }
+
+    const intervalMs =
+        Number.isFinite(options.intervalMs) &&
+        options.intervalMs >= 60 * 1000
+            ? options.intervalMs
+            : AUTO_POLL_INTERVAL_MS;
+
+    autoPollRunning = true;
+
+    console.log(
+        "[A11-MULTI] Automatic paper runner starting",
+        {
+            intervalMs
+        }
+    );
+
+    /*
+     * First cycle runs immediately rather than waiting five minutes.
+     */
+    await runAutomaticPoll();
+
+    if (!autoPollRunning) {
+        return getSessionSnapshot();
+    }
+
+    autoPollTimer =
+        setInterval(
+            () => {
+                runAutomaticPoll();
+            },
+            intervalMs
+        );
+
+    return getSessionSnapshot();
+}
+
+
+async function resumeAutomaticPollingIfNeeded() {
+
+    if (!autoPollRunning) {
+        return;
+    }
+
+    const nowMs =
+        Date.now();
+
+    /*
+     * Avoid generating an unnecessary duplicate request when the
+     * visibility event fires immediately after a scheduled poll.
+     */
+    if (
+        autoPollLastRunMs > 0 &&
+        nowMs - autoPollLastRunMs < 60 * 1000
+    ) {
+        return;
+    }
+
+    await runAutomaticPoll();
+}
+
+
+/*
+ * Browser lifecycle hooks are installed only when this module is
+ * running inside an actual browser. Node-based controller tests do
+ * not provide document/window and must still be able to import the
+ * controller normally.
+ */
+if (
+    typeof document !== "undefined" &&
+    typeof window !== "undefined"
+) {
+
+    document.addEventListener(
+        "visibilitychange",
+        () => {
+
+            if (
+                document.visibilityState === "visible"
+            ) {
+                resumeAutomaticPollingIfNeeded();
+            }
+        }
+    );
+
+
+    window.addEventListener(
+        "pageshow",
+        () => {
+            resumeAutomaticPollingIfNeeded();
+        }
+    );
+}
+
+
 window.TradeMindMultiStockPaper =
     {
         version:
@@ -711,6 +920,10 @@ window.TradeMindMultiStockPaper =
         startSession,
 
         pollSession,
+
+        startAutomaticPolling,
+
+        stopAutomaticPolling,
 
         getSessionSnapshot,
 

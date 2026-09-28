@@ -7,11 +7,14 @@ const source = readFileSync(
   "utf8"
 );
 
-test("adapter requires explicit Resume for a saved session", () => {
+test("adapter exposes automatic paper-session lifecycle controls", () => {
   assert.match(source, /resume:\s*"four-stock-paper-resume"/);
-  assert.match(source, /paused = true;\s*savePauseState\(\);\s*render\(saved\)/);
   assert.match(source, /el\.resume\.addEventListener\("click"/);
+  assert.match(source, /el\.stop\.addEventListener\("click"/);
+  assert.match(source, /startAutomaticPolling/);
+  assert.match(source, /stopAutomaticPolling/);
   assert.match(source, /paused = false;\s*saveActiveState\(\)/);
+  assert.match(source, /paused = true;\s*savePauseState\(\)/);
 });
 
 test("Prepare cannot silently reuse an existing session", () => {
@@ -36,9 +39,11 @@ test("Stop pauses UI polling and preserves controller evidence", () => {
   assert.doesNotMatch(source, /controller\.clearSession\(\)/);
 });
 
-test("Adapter initialization does not automatically start or poll a session", () => {
-  assert.match(source, /Adapter initialized; no session was started/);
-  assert.doesNotMatch(source, /await controller\.startSession\(\);\s*await controller\.pollSession\(\)/);
+test("Adapter wires automatic polling through the controller", () => {
+  assert.match(source, /typeof controller\.startAutomaticPolling !== "function"/);
+  assert.match(source, /typeof controller\.stopAutomaticPolling !== "function"/);
+  assert.match(source, /await controller\.startAutomaticPolling\(\)/);
+  assert.match(source, /controller\.stopAutomaticPolling\(\)/);
   assert.doesNotMatch(source, /setInterval\s*\(/);
   assert.doesNotMatch(source, /setTimeout\s*\(/);
 });

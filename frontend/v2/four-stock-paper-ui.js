@@ -269,6 +269,8 @@ function render(snapshot) {
     if (
       typeof controller.startSession !== "function" ||
       typeof controller.pollSession !== "function" ||
+      typeof controller.startAutomaticPolling !== "function" ||
+      typeof controller.stopAutomaticPolling !== "function" ||
       typeof controller.getSessionSnapshot !== "function"
     ) {
       throw new Error("Multi-stock controller API is incomplete.");
@@ -282,10 +284,22 @@ function render(snapshot) {
 
       try {
         await controller.startSession();
-        paused = true;
-        savePauseState();
+
+        paused = false;
+        saveActiveState();
         refresh();
-        setMessage("New universe prepared and paused. Press Resume Saved Session when ready.");
+
+        setMessage(
+          "Four-stock universe prepared. Automatic paper polling started."
+        );
+
+        await controller.startAutomaticPolling();
+
+        refresh();
+
+        setMessage(
+          "Automatic paper session running. Polling every 5 minutes."
+        );
       } catch (error) {
         setMessage(`Prepare failed: ${error.message}`);
       } finally {
@@ -293,22 +307,57 @@ function render(snapshot) {
       }
     });
 
-    el.resume.addEventListener("click", () => {
+    el.resume.addEventListener("click", async () => {
       if (busy) return;
 
       const snapshot = controller.getSessionSnapshot();
+
       if (!isTodaySession(snapshot) || !validUniverse(snapshot)) {
         paused = true;
         savePauseState();
         refresh();
-        setMessage("Resume blocked: session is stale or does not contain four unique instruments including NIFTY 50. Prepare a new session.");
+
+        setMessage(
+          "Resume blocked: session is stale or does not contain four unique instruments including NIFTY 50. Prepare a new session."
+        );
+
         return;
       }
 
-      paused = false;
-      saveActiveState();
-      refresh();
-      setMessage("UI resumed. Run one paper step when ready.");
+      setBusy(true);
+
+      try {
+
+        paused = false;
+        saveActiveState();
+        refresh();
+
+        setMessage(
+          "Resuming automatic paper session…"
+        );
+
+        await controller.startAutomaticPolling();
+
+        refresh();
+
+        setMessage(
+          "Automatic paper session running. Polling every 5 minutes."
+        );
+
+      } catch (error) {
+
+        paused = true;
+        savePauseState();
+        refresh();
+
+        setMessage(
+          `Resume failed: ${error.message}`
+        );
+
+      } finally {
+
+        setBusy(false);
+      }
     });
 
     el.step.addEventListener("click", async () => {
@@ -329,7 +378,9 @@ function render(snapshot) {
       try {
         await controller.pollSession();
         refresh();
-        setMessage("Paper step returned. Review saved evidence before continuing.");
+        setMessage(
+          "Manual paper step returned. Automatic runner remains available."
+        );
       } catch (error) {
         setMessage(`Paper step failed: ${error.message}`);
       } finally {
@@ -370,23 +421,106 @@ function render(snapshot) {
     });
 
     el.stop.addEventListener("click", () => {
+
+      controller.stopAutomaticPolling();
+
       paused = true;
       savePauseState();
       refresh();
-      setMessage("UI paused. Saved session and evidence are retained. Any in-flight request may still finish.");
+
+      setMessage(
+        "Automatic paper polling stopped. Saved session and evidence are retained. Any in-flight request may still finish."
+      );
     });
 
-    // Reloads always require an explicit Resume click.
+    /*
+     * Restore the UI lifecycle state.
+     *
+     * Important:
+     * - An explicitly stopped session remains stopped after reload.
+     * - A previously active session automatically resumes.
+     * - A stale/missing/invalid session never starts automatically.
+     */
     const saved = controller.getSessionSnapshot();
-    paused = true;
-    savePauseState();
+
+    let persistedUIState = null;
+
+    try {
+      persistedUIState =
+        JSON.parse(
+          localStorage.getItem(UI_KEY) || "null"
+        );
+    } catch (error) {
+      console.warn(
+        "[FourStockUI] Could not read persisted UI state:",
+        error
+      );
+    }
+
+    const shouldAutoResume =
+      Boolean(
+        persistedUIState &&
+        persistedUIState.paused === false &&
+        isTodaySession(saved) &&
+        validUniverse(saved)
+      );
+
+    paused = !shouldAutoResume;
+
+    if (paused) {
+      savePauseState();
+    } else {
+      saveActiveState();
+    }
+
     render(saved);
 
-    setMessage(saved
-      ? "Saved session restored in paused mode. Press Resume Saved Session to continue."
-      : "No four-stock session prepared.");
+    if (shouldAutoResume) {
 
-    console.info("[FourStockUI] Adapter initialized; no session was started.");
+      setMessage(
+        "Restoring automatic paper session…"
+      );
+
+      controller
+        .startAutomaticPolling()
+        .then(() => {
+          refresh();
+
+          setMessage(
+            "Automatic paper session restored. Polling every 5 minutes."
+          );
+        })
+        .catch(error => {
+          paused = true;
+          savePauseState();
+          refresh();
+
+          setMessage(
+            `Automatic resume failed: ${error.message}`
+          );
+
+          console.error(
+            "[FourStockUI] Automatic resume failed:",
+            error
+          );
+        });
+
+    } else {
+
+      setMessage(
+        saved
+          ? "Saved session restored in paused mode. Press Resume Saved Session to continue."
+          : "No four-stock session prepared."
+      );
+    }
+
+    console.info(
+      "[FourStockUI] Adapter initialized",
+      {
+        savedSession: Boolean(saved),
+        automaticResume: shouldAutoResume
+      }
+    );
   } catch (error) {
     el.prepare.disabled = true;
     el.resume.disabled = true;
